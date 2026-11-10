@@ -1,283 +1,401 @@
-import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'dart:convert';
+import 'dart:math';
 
-import '../core/focus_navigation.dart';
-import '../core/localization/app_localizations.dart';
-import '../core/theme/app_theme.dart';
-import '../providers/theme_provider.dart';
-import '../widgets/playlist_source_navigation.dart';
-import 'continue_watching_screen.dart';
-import 'live_tv_screen.dart';
-import 'master_search_screen.dart';
-import 'paywall_screen.dart';
-import 'series_screen.dart';
-import 'settings_screen.dart';
-import 'vod_screen.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+import '../config/supabase_config.dart';
+import '../core/storage/prefs_service.dart';
 
-  @override
-  State<DashboardScreen> createState() => _DashboardScreenState();
-}
+class AuthProvider extends ChangeNotifier {
+  static const MethodChannel _deviceChannel =
+      MethodChannel('com.streamia/device_identity');
 
-class _DashboardScreenState extends State<DashboardScreen> {
-  int _sourceNavigationRevision = 0;
+  static const String _installKey =
+      'streamia_installation_id';
 
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  final PrefsService _prefs;
 
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildTopBar(context, isDark, l10n),
-            PlaylistSourceNavigation(
-              key: ValueKey(_sourceNavigationRevision),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final compact = constraints.maxWidth < 600;
-                  final columns = constraints.maxWidth >= 1000
-                      ? 3
-                      : (compact ? 1 : 2);
+  String? _installationId;
+  String? _deviceId;
+  String? _deviceStatus;
 
-                  return Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: compact ? 16 : 48,
-                    ),
-                    child: FocusTraversalGroup(
-                      child: GridView.count(
-                        crossAxisCount: columns,
-                        mainAxisSpacing: compact ? 12 : 24,
-                        crossAxisSpacing: compact ? 12 : 24,
-                        childAspectRatio: compact ? 2.7 : 1.6,
-                        children: [
-                          _DashboardTile(
-                            autofocus: true,
-                            icon: Icons.live_tv,
-                            label: l10n.t('nav_live'),
-                            onTap: () => pushWithFocusRestore(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const LiveTvScreen(),
-                              ),
-                            ),
-                          ),
-                          _DashboardTile(
-                            icon: Icons.movie,
-                            label: l10n.t('nav_vod'),
-                            onTap: () => pushWithFocusRestore(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const VodScreen(),
-                              ),
-                            ),
-                          ),
-                          _DashboardTile(
-                            icon: Icons.video_library,
-                            label: l10n.t('nav_series'),
-                            onTap: () => pushWithFocusRestore(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const SeriesScreen(),
-                              ),
-                            ),
-                          ),
-                          _DashboardTile(
-                            icon: Icons.grid_view,
-                            label: l10n.t('nav_multi'),
-                            onTap: () {},
-                          ),
-                          _DashboardTile(
-                            icon: Icons.replay,
-                            label: l10n.t('nav_catchup'),
-                            onTap: () {},
-                          ),
-                          _DashboardTile(
-                            icon: Icons.search,
-                            label: l10n.t('nav_search'),
-                            onTap: () => pushWithFocusRestore(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const MasterSearchScreen(),
-                              ),
-                            ),
-                          ),
-                          _DashboardTile(
-                            icon: Icons.play_circle_outline,
-                            label: l10n.t('nav_continue_watching'),
-                            onTap: () => pushWithFocusRestore(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => const ContinueWatchingScreen(),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  Map<String, dynamic>? _access;
+
+  bool _busy = false;
+  bool _accessChecked = false;
+  String? _error;
+
+  AuthProvider(this._prefs) {
+    _installationId = _prefs.getString(_installKey);
+
+    if (SupabaseConfig.isConfigured) {
+      Supabase.instance.client.auth.onAuthStateChange
+          .listen((event) {
+        if (event.event == AuthChangeEvent.signedOut) {
+          _clearAccess();
+        }
+        notifyListeners();
+      });
+
+      Future<void>.microtask(() async {
+        if (isLoggedIn) {
+          await refreshDeviceAndAccess();
+        }
+      });
+    }
   }
 
-  Widget _buildTopBar(
-    BuildContext context,
-    bool isDark,
-    AppLocalizations l10n,
+  SupabaseClient? get _client =>
+      SupabaseConfig.isConfigured
+          ? Supabase.instance.client
+          : null;
+
+  User? get user => _client?.auth.currentUser;
+
+  bool get isLoggedIn => user != null;
+
+  bool get isBusy => _busy;
+
+  bool get accessChecked => _accessChecked;
+
+  String? get error => _error;
+
+  String? get deviceId => _deviceId;
+
+  String? get deviceStatus => _deviceStatus;
+
+  Map<String, dynamic>? get access => _access;
+
+  String get macAddress =>
+      _installationId ?? 'Noch nicht registriert';
+
+  bool get hasAccountAccess =>
+      _access?['has_access'] == true;
+
+  // Supabase uses "active" for approved devices.
+  bool get deviceApproved =>
+      _deviceStatus == 'active' ||
+      _deviceStatus == 'approved';
+
+  bool get devicePending =>
+      _deviceStatus == 'pending';
+
+  bool get deviceBlocked =>
+      _deviceStatus == 'blocked' ||
+      _deviceStatus == 'rejected' ||
+      _deviceStatus == 'revoked';
+
+  bool get hasAccess =>
+      _accessChecked &&
+      _error == null &&
+      hasAccountAccess &&
+      deviceApproved;
+
+  bool get requiresPayment =>
+      _accessChecked &&
+      _error == null &&
+      _access != null &&
+      !hasAccountAccess;
+
+  String? get accessReason =>
+      _access?['access_reason']?.toString();
+
+  int get maxDevices {
+    final value = _access?['max_devices'];
+
+    if (value is int) {
+      return value;
+    }
+
+    return int.tryParse(
+          value?.toString() ?? '',
+        ) ??
+        0;
+  }
+
+  bool get isAdminGrant =>
+      _access?['manual_override'] == true &&
+      _access?['entitlement_source'] == 'admin_grant';
+
+  void _clearAccess() {
+    _deviceId = null;
+    _deviceStatus = null;
+    _access = null;
+    _accessChecked = false;
+    _error = null;
+  }
+
+  Future<String> _getInstallationId() async {
+    if (_installationId != null &&
+        _installationId!.isNotEmpty) {
+      return _installationId!;
+    }
+
+    final random = Random.secure();
+
+    final bytes = List<int>.generate(
+      32,
+      (_) => random.nextInt(256),
+    );
+
+    _installationId =
+        base64Url.encode(bytes).replaceAll('=', '');
+
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setString(
+      _installKey,
+      _installationId!,
+    );
+
+    return _installationId!;
+  }
+
+  Future<String> _readDeviceName() async {
+    if (!kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final name = await _deviceChannel
+            .invokeMethod<String>('getDeviceName');
+
+        if (name != null && name.isNotEmpty) {
+          return name;
+        }
+      } catch (_) {
+        // Use the platform name.
+      }
+    }
+
+    return kIsWeb
+        ? 'Web-Gerät'
+        : defaultTargetPlatform.name;
+  }
+
+  Future<void> signIn(
+    String email,
+    String password,
+  ) async {
+    await _run(() async {
+      final client = _client;
+
+      if (client == null) {
+        throw Exception(
+          'Supabase ist nicht konfiguriert.',
+        );
+      }
+
+      _clearAccess();
+
+      await client.auth.signInWithPassword(
+        email: email.trim(),
+        password: password,
+      );
+
+      await refreshDeviceAndAccess();
+    });
+  }
+
+  Future<void> signUp(
+    String email,
+    String password,
+  ) async {
+    await _run(() async {
+      final client = _client;
+
+      if (client == null) {
+        throw Exception(
+          'Supabase ist nicht konfiguriert.',
+        );
+      }
+
+      _clearAccess();
+
+      final response = await client.auth.signUp(
+        email: email.trim(),
+        password: password,
+      );
+
+      if (response.session != null) {
+        await refreshDeviceAndAccess();
+      }
+    });
+  }
+
+  Future<void> refreshDeviceAndAccess() async {
+    final client = _client;
+
+    if (client == null ||
+        client.auth.currentUser == null) {
+      _clearAccess();
+      notifyListeners();
+      return;
+    }
+
+    _accessChecked = false;
+    _error = null;
+    _access = null;
+    _deviceStatus = null;
+
+    notifyListeners();
+
+    try {
+      final installationId =
+          await _getInstallationId();
+
+      final deviceName =
+          await _readDeviceName();
+
+      final platform = kIsWeb
+          ? 'web'
+          : switch (defaultTargetPlatform) {
+              TargetPlatform.android => 'android',
+              TargetPlatform.iOS => 'ios',
+              _ => 'unknown',
+            };
+
+      // Register device using the existing Supabase RPC.
+      // The server determines whether the device
+      // can be automatically activated.
+      final registered = await client.rpc(
+        'register_my_device',
+        params: {
+          'p_installation_id': installationId,
+          'p_device_name': deviceName,
+          'p_platform': platform,
+        },
+      );
+
+      final registrationRow =
+          _firstRow(registered);
+
+      if (registrationRow == null) {
+        throw Exception(
+          'Die Geräteregistrierung hat '
+          'keine Daten zurückgegeben.',
+        );
+      }
+
+      _deviceId =
+          registrationRow['device_id']?.toString();
+
+      _deviceStatus =
+          registrationRow['device_status']
+              ?.toString()
+              .toLowerCase();
+
+      // Read the account entitlement from Supabase.
+      final accountResult = await client.rpc(
+        'get_my_access_status',
+      );
+
+      final accountRow =
+          _firstRow(accountResult);
+
+      if (accountRow == null) {
+        throw Exception(
+          'Die Kontoberechtigung konnte '
+          'nicht ermittelt werden.',
+        );
+      }
+
+      _access = accountRow;
+
+      _accessChecked = true;
+      _error = null;
+    } catch (e) {
+      _access = null;
+      _accessChecked = true;
+      _error = _friendlyError(e);
+    }
+
+    notifyListeners();
+  }
+
+  Map<String, dynamic>? _firstRow(
+    dynamic result,
   ) {
-    final compact = MediaQuery.sizeOf(context).width < 600;
+    if (result is Map) {
+      return Map<String, dynamic>.from(result);
+    }
 
-    return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: compact ? 16 : 48,
-        vertical: compact ? 10 : 16,
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: compact ? 40 : 48,
-            height: compact ? 40 : 48,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: AppTheme.accentGradient,
-            ),
-            child: const Center(
-              child: Text(
-                'S',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Flexible(
-            child: Text(
-              l10n.t('app_name'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: compact ? 18 : 24,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          const Spacer(),
-          InkWell(
-            borderRadius: BorderRadius.circular(8),
-            focusColor: AppTheme.electricBlue.withOpacity(0.22),
-            onTap: () => pushWithFocusRestore(
-              context,
-              MaterialPageRoute(builder: (_) => const PaywallScreen()),
-            ),
-            child: Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: compact ? 10 : 20,
-                vertical: 10,
-              ),
-              decoration: BoxDecoration(
-                gradient: AppTheme.accentGradient,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                l10n.t('nav_pro'),
-                style: TextStyle(
-                  fontSize: compact ? 12 : 14,
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          IconButton(
-            tooltip: isDark ? 'Helles Design' : 'Dunkles Design',
-            focusColor: AppTheme.electricBlue.withOpacity(0.22),
-            onPressed: () => context.read<ThemeProvider>().toggleTheme(),
-            icon: Icon(
-              isDark ? Icons.light_mode : Icons.dark_mode,
-              size: compact ? 24 : 28,
-            ),
-          ),
-          IconButton(
-            tooltip: 'Einstellungen',
-            focusColor: AppTheme.electricBlue.withOpacity(0.22),
-            onPressed: () async {
-              await pushWithFocusRestore(
-                context,
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
-              if (mounted) {
-                setState(() => _sourceNavigationRevision++);
-              }
-            },
-            icon: Icon(Icons.settings, size: compact ? 24 : 28),
-          ),
-        ],
-      ),
-    );
+    if (result is List && result.isNotEmpty) {
+      final first = result.first;
+
+      if (first is Map) {
+        return Map<String, dynamic>.from(first);
+      }
+    }
+
+    return null;
   }
-}
 
-class _DashboardTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool autofocus;
+  Future<void> _run(
+    Future<void> Function() action,
+  ) async {
+    _busy = true;
+    _error = null;
 
-  const _DashboardTile({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.autofocus = false,
-  });
+    notifyListeners();
 
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    try {
+      await action();
+    } catch (e) {
+      _error = _friendlyError(e);
+      _accessChecked = true;
+    } finally {
+      _busy = false;
+      notifyListeners();
+    }
+  }
 
-    return InkWell(
-      autofocus: autofocus,
-      focusColor: AppTheme.electricBlue.withOpacity(0.22),
-      onTap: onTap,
-      child: Container(
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: AppTheme.electricBlue.withOpacity(0.15),
-            width: 1,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 48, color: AppTheme.electricBlue),
-            const SizedBox(height: 12),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  String _friendlyError(Object error) {
+    if (error is AuthException) {
+      // Return a stable internal error key for
+      // common authentication failures.
+      final message = error.message.toLowerCase();
+
+      if (message.contains(
+            'invalid login credentials',
+          ) ||
+          message.contains(
+            'invalid credentials',
+          )) {
+        return 'invalid_credentials';
+      }
+
+      if (message.contains(
+        'email not confirmed',
+      )) {
+        return 'email_not_confirmed';
+      }
+
+      if (message.contains(
+        'too many requests',
+      )) {
+        return 'too_many_requests';
+      }
+
+      return error.message;
+    }
+
+    if (error is PostgrestException) {
+      return error.message;
+    }
+
+    return error.toString().replaceFirst(
+          'Exception: ',
+          '',
+        );
+  }
+
+  Future<void> logout() async {
+    await _client?.auth.signOut();
+
+    _clearAccess();
+
+    notifyListeners();
   }
 }
