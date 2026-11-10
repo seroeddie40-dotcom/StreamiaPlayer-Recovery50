@@ -22,18 +22,18 @@ class LanguageSelectionScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localeProvider = context.watch<LocaleProvider>();
+
     final selectedLanguage =
         localeProvider.locale.languageCode;
 
     final screenWidth = MediaQuery.sizeOf(context).width;
-
     final isCompact = screenWidth < 380;
 
     return Scaffold(
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: AppTheme.accentGradient,
         ),
         child: SafeArea(
