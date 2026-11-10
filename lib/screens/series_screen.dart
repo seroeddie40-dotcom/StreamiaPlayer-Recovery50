@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -10,6 +9,8 @@ import '../providers/content_provider.dart';
 import '../providers/locale_provider.dart';
 import '../models/series.dart';
 import '../services/download_service.dart';
+import '../services/playlist_source_store.dart';
+import '../services/xtream_service.dart';
 import '../widgets/favorite_toggle_button.dart';
 import 'player_screen.dart';
 
@@ -171,6 +172,68 @@ class SeriesDetailScreen extends StatefulWidget {
 
 class _SeriesDetailScreenState
     extends State<SeriesDetailScreen> {
+  bool _loadingEpisodes = false;
+  String? _episodeError;
+  bool _detailsRequested = false;
+  String? _openedSourceKey;
+
+  Future<void> _loadEpisodes() async {
+    if (_loadingEpisodes) return;
+    final content = context.read<ContentProvider>();
+    final sourceKey = content.sourceKey;
+    final current = content.series.firstWhere(
+      (item) => item.id == widget.series.id,
+      orElse: () => widget.series,
+    );
+    if (current.seasons.isNotEmpty) return;
+    setState(() {
+      _loadingEpisodes = true;
+      _episodeError = null;
+    });
+    XtreamService? service;
+    try {
+      final config = await PlaylistSourceStore().read(sourceKey);
+      if (config == null || config.type != 'xtream') {
+        if (mounted) setState(() => _episodeError = 'Keine Episoden in dieser Playlist vorhanden.');
+        return;
+      }
+      if (config.serverUrl == null || config.username == null || config.password == null) {
+        throw const FormatException('Xtream-Zugangsdaten sind unvollständig.');
+      }
+      service = XtreamService(
+        baseUrl: config.serverUrl!,
+        username: config.username!,
+        password: config.password!,
+      );
+      final details = await service.getSeriesDetails(current);
+      if (!mounted || content.sourceKey != sourceKey) return;
+      final updated = List<Series>.of(content.series);
+      final index = updated.indexWhere((item) => item.id == current.id);
+      if (index < 0) return;
+      // Avoid replacing data that may have arrived from another request.
+      if (updated[index].seasons.isNotEmpty) return;
+      updated[index] = details;
+      content.replaceLibrary(
+        channels: content.channels,
+        vod: content.vodItems,
+        series: updated,
+        sourceKey: sourceKey,
+        sourceLabel: content.sourceLabel,
+      );
+      if (details.seasons.isEmpty && mounted) {
+        setState(() => _episodeError = 'Der Server hat keine Episoden für diese Serie geliefert.');
+      }
+    } catch (error) {
+      if (mounted && content.sourceKey == sourceKey) {
+        setState(() => _episodeError = error is XtreamConnectionException
+            ? error.message
+            : 'Episoden konnten nicht geladen werden. Bitte erneut versuchen.');
+      }
+    } finally {
+      service?.close();
+      if (mounted) setState(() => _loadingEpisodes = false);
+    }
+  }
   @override
   void initState() {
     super.initState();
@@ -184,12 +247,17 @@ class _SeriesDetailScreenState
                 .locale
                 .languageCode;
 
-        await context
-            .read<ContentProvider>()
-            .enrichSeriesMetadata(
-              widget.series.id,
-              language: language,
-            );
+        final content = context.read<ContentProvider>();
+        _openedSourceKey = content.sourceKey;
+        // Do not delay episode loading for an optional metadata lookup.
+        if (!_detailsRequested) {
+          _detailsRequested = true;
+          _loadEpisodes();
+        }
+        await content.enrichSeriesMetadata(
+          widget.series.id,
+          language: language,
+        );
       },
     );
   }
@@ -204,6 +272,8 @@ class _SeriesDetailScreenState
       ),
     );
 
+    final sourceChanged = _openedSourceKey != null &&
+        context.read<ContentProvider>().sourceKey != _openedSourceKey;
     return Scaffold(
       appBar: AppBar(
         title: Text(series.title),
@@ -314,11 +384,30 @@ class _SeriesDetailScreenState
               ),
             ),
           ),
-          Expanded(
-            child: ListView.builder(
-              itemCount: series.seasons.length,
-              itemBuilder: (context, i) =>
-                  _SeasonSection(
+           Expanded(
+             child: sourceChanged
+                 ? const Center(child: Text('Die aktive Playlist wurde gewechselt. Bitte zurückgehen.'))
+                 : _loadingEpisodes && series.seasons.isEmpty
+                     ? const Center(child: CircularProgressIndicator())
+                     : series.seasons.isEmpty
+                         ? Center(
+                             child: Column(
+                               mainAxisSize: MainAxisSize.min,
+                               children: [
+                                 Text(_episodeError ?? 'Keine Episoden vorhanden.'),
+                                 const SizedBox(height: 12),
+                                 FilledButton.icon(
+                                   onPressed: _loadingEpisodes ? null : _loadEpisodes,
+                                   icon: const Icon(Icons.refresh),
+                                   label: const Text('Erneut laden'),
+                                 ),
+                               ],
+                             ),
+                           )
+                         : ListView.builder(
+               itemCount: series.seasons.length,
+               itemBuilder: (context, i) =>
+                   _SeasonSection(
                 series: series,
                 season: series.seasons[i],
                 autofocusFirstEpisode: i == 0,
