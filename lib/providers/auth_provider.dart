@@ -2,7 +2,6 @@
 import 'dart:convert';
 import 'dart:math';
 
-import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,11 +10,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/supabase_config.dart';
 import '../core/storage/prefs_service.dart';
 
-/// Supabase authentication and server-authoritative access.
-///
-/// Account access and device approval are separate checks.
-/// A network or RPC error must never be treated as an
-/// expired subscription.
 class AuthProvider extends ChangeNotifier {
   static const MethodChannel _deviceChannel =
       MethodChannel('com.streamia/device_identity');
@@ -33,7 +27,6 @@ class AuthProvider extends ChangeNotifier {
 
   bool _busy = false;
   bool _accessChecked = false;
-
   String? _error;
 
   AuthProvider(this._prefs) {
@@ -80,12 +73,12 @@ class AuthProvider extends ChangeNotifier {
   String get macAddress =>
       _installationId ?? 'Noch nicht registriert';
 
-  /// The account has a valid server-side entitlement.
   bool get hasAccountAccess =>
       _access?['has_access'] == true;
 
-  /// The current device has been explicitly approved.
+  // Supabase uses "active" for approved devices.
   bool get deviceApproved =>
+      _deviceStatus == 'active' ||
       _deviceStatus == 'approved';
 
   bool get devicePending =>
@@ -96,16 +89,12 @@ class AuthProvider extends ChangeNotifier {
       _deviceStatus == 'rejected' ||
       _deviceStatus == 'revoked';
 
-  /// Full access requires both account entitlement
-  /// and an approved device.
   bool get hasAccess =>
       _accessChecked &&
       _error == null &&
       hasAccountAccess &&
       deviceApproved;
 
-  /// Only a confirmed missing account entitlement
-  /// may lead to the subscription page.
   bool get requiresPayment =>
       _accessChecked &&
       _error == null &&
@@ -118,9 +107,14 @@ class AuthProvider extends ChangeNotifier {
   int get maxDevices {
     final value = _access?['max_devices'];
 
-    if (value is int) return value;
+    if (value is int) {
+      return value;
+    }
 
-    return int.tryParse(value?.toString() ?? '') ?? 0;
+    return int.tryParse(
+          value?.toString() ?? '',
+        ) ??
+        0;
   }
 
   bool get isAdminGrant =>
@@ -161,29 +155,6 @@ class AuthProvider extends ChangeNotifier {
     return _installationId!;
   }
 
-  Future<String> _physicalFingerprint() async {
-    String? nativeId;
-
-    if (!kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android) {
-      try {
-        nativeId = await _deviceChannel
-            .invokeMethod<String>('getAndroidId');
-      } catch (_) {
-        // Fallback to the installation identifier.
-      }
-    }
-
-    final source =
-        nativeId != null && nativeId.isNotEmpty
-            ? 'android:$nativeId'
-            : 'installation:${await _getInstallationId()}';
-
-    return sha256.convert(
-      utf8.encode(source),
-    ).toString();
-  }
-
   Future<String> _readDeviceName() async {
     if (!kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android) {
@@ -195,7 +166,7 @@ class AuthProvider extends ChangeNotifier {
           return name;
         }
       } catch (_) {
-        // Use the platform fallback.
+        // Use the platform name.
       }
     }
 
@@ -254,12 +225,6 @@ class AuthProvider extends ChangeNotifier {
     });
   }
 
-  /// Refresh account entitlement and device approval.
-  ///
-  /// Existing Supabase RPCs:
-  /// - register_my_device
-  /// - get_my_access_status
-  /// - start_streamia_trial
   Future<void> refreshDeviceAndAccess() async {
     final client = _client;
 
@@ -281,12 +246,6 @@ class AuthProvider extends ChangeNotifier {
       final installationId =
           await _getInstallationId();
 
-      // Retain the existing fingerprint helper for
-      // future server-side device identity migration.
-      // The current register_my_device RPC does not
-      // accept a fingerprint parameter.
-      await _physicalFingerprint();
-
       final deviceName =
           await _readDeviceName();
 
@@ -298,6 +257,9 @@ class AuthProvider extends ChangeNotifier {
               _ => 'unknown',
             };
 
+      // Register device using the existing Supabase RPC.
+      // The server determines whether the device
+      // can be automatically activated.
       final registered = await client.rpc(
         'register_my_device',
         params: {
@@ -312,7 +274,8 @@ class AuthProvider extends ChangeNotifier {
 
       if (registrationRow == null) {
         throw Exception(
-          'Die Geräteregistrierung hat keine Daten zurückgegeben.',
+          'Die Geräteregistrierung hat '
+          'keine Daten zurückgegeben.',
         );
       }
 
@@ -320,46 +283,30 @@ class AuthProvider extends ChangeNotifier {
           registrationRow['device_id']?.toString();
 
       _deviceStatus =
-          registrationRow['device_status']?.toString();
+          registrationRow['device_status']
+              ?.toString()
+              .toLowerCase();
 
-      var accountResult = await client.rpc(
+      // Read the account entitlement from Supabase.
+      final accountResult = await client.rpc(
         'get_my_access_status',
       );
 
-      var accountRow = _firstRow(accountResult);
-
-      // Start an eligible account trial only if
-      // no trial has already been started.
-      //
-      // Never call the trial RPC for admin grants
-      // or existing paid subscriptions.
-      if (accountRow != null &&
-          accountRow['has_access'] != true &&
-          accountRow['access_status'] == 'trial' &&
-          accountRow['entitlement_source'] == 'trial' &&
-          accountRow['trial_ends_at'] == null &&
-          accountRow['manual_override'] != true) {
-        await client.rpc('start_streamia_trial');
-
-        accountResult = await client.rpc(
-          'get_my_access_status',
-        );
-
-        accountRow = _firstRow(accountResult);
-      }
+      final accountRow =
+          _firstRow(accountResult);
 
       if (accountRow == null) {
         throw Exception(
-          'Keine Kontoberechtigung gefunden. '
-          'Bitte die Supabase-Berechtigungen prüfen.',
+          'Die Kontoberechtigung konnte '
+          'nicht ermittelt werden.',
         );
       }
 
       _access = accountRow;
+
       _accessChecked = true;
       _error = null;
     } catch (e) {
-      // A failed verification is not an expired trial.
       _access = null;
       _accessChecked = true;
       _error = _friendlyError(e);
@@ -407,6 +354,31 @@ class AuthProvider extends ChangeNotifier {
 
   String _friendlyError(Object error) {
     if (error is AuthException) {
+      // Return a stable internal error key for
+      // common authentication failures.
+      final message = error.message.toLowerCase();
+
+      if (message.contains(
+            'invalid login credentials',
+          ) ||
+          message.contains(
+            'invalid credentials',
+          )) {
+        return 'invalid_credentials';
+      }
+
+      if (message.contains(
+        'email not confirmed',
+      )) {
+        return 'email_not_confirmed';
+      }
+
+      if (message.contains(
+        'too many requests',
+      )) {
+        return 'too_many_requests';
+      }
+
       return error.message;
     }
 
