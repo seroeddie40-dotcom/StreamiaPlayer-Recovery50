@@ -8,10 +8,13 @@ import 'package:provider/provider.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/localization/app_localizations.dart';
+import 'core/storage/prefs_service.dart';
+
 import 'providers/theme_provider.dart';
 import 'providers/locale_provider.dart';
 import 'providers/content_provider.dart';
 import 'providers/auth_provider.dart';
+
 import 'screens/login_screen.dart';
 import 'screens/language_selection_screen.dart';
 import 'screens/setup_screen.dart';
@@ -19,7 +22,6 @@ import 'screens/dashboard_screen.dart';
 import 'screens/paywall_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/legal_disclaimer_screen.dart';
-import 'core/storage/prefs_service.dart';
 
 class StreamiaApp extends StatelessWidget {
   final PrefsService prefsService;
@@ -43,21 +45,17 @@ class StreamiaApp extends StatelessWidget {
     return MaterialApp(
       title: 'Streamia Player',
       debugShowCheckedModeBanner: false,
-
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: themeProvider.themeMode,
-
       locale: localeProvider.locale,
       supportedLocales: AppLocalizations.supportedLocales,
-
       localizationsDelegates: const [
         AppLocalizationsDelegate(),
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-
       builder: (context, child) {
         return FocusTraversalGroup(
           policy: ReadingOrderTraversalPolicy(),
@@ -65,14 +63,12 @@ class StreamiaApp extends StatelessWidget {
             fit: StackFit.expand,
             children: [
               child ?? const SizedBox.shrink(),
-
               if (showThemeButton)
                 const _GlobalThemeToggle(),
             ],
           ),
         );
       },
-
       home: StartupGate(
         prefsService: prefsService,
         localeProvider: localeProvider,
@@ -106,8 +102,34 @@ class StreamiaApp extends StatelessWidget {
       );
     }
 
-    if (!auth.hasAccess) {
+    if (auth.error != null) {
+      return const _AccessStatusScreen(
+        mode: _AccessStatusMode.error,
+      );
+    }
+
+    // Device approval is checked separately from
+    // the account entitlement.
+    if (auth.deviceBlocked) {
+      return const _AccessStatusScreen(
+        mode: _AccessStatusMode.blocked,
+      );
+    }
+
+    if (auth.devicePending || !auth.deviceApproved) {
+      return const _AccessStatusScreen(
+        mode: _AccessStatusMode.pending,
+      );
+    }
+
+    if (auth.requiresPayment) {
       return const PaywallScreen();
+    }
+
+    if (!auth.hasAccess) {
+      return const _AccessStatusScreen(
+        mode: _AccessStatusMode.error,
+      );
     }
 
     if (!content.isLoaded) {
@@ -123,33 +145,174 @@ class StreamiaApp extends StatelessWidget {
   }
 }
 
-/// Globaler Theme-Button.
-///
-/// Der Button wird oberhalb der Navigator-Oberflaeche
-/// dargestellt und bleibt damit auch beim Wechsel
-/// zwischen normalen App-Routen erreichbar.
-///
-/// Fuer einen Vollbild-Videoplayer ist spaeter eine
-/// separate Sichtbarkeitssteuerung erforderlich.
+enum _AccessStatusMode {
+  pending,
+  blocked,
+  error,
+}
+
+class _AccessStatusScreen extends StatelessWidget {
+  final _AccessStatusMode mode;
+
+  const _AccessStatusScreen({
+    required this.mode,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+
+    final language =
+        context.watch<LocaleProvider>().locale.languageCode;
+
+    final isTurkish = language == 'tr';
+    final isGerman = language == 'de';
+
+    String title;
+    String description;
+    IconData symbol;
+
+    switch (mode) {
+      case _AccessStatusMode.pending:
+        title = isTurkish
+            ? 'Cihaz onayı bekleniyor'
+            : isGerman
+                ? 'Gerätefreigabe ausstehend'
+                : 'Device approval pending';
+
+        description = isTurkish
+            ? 'Bu cihaz kaydedildi ancak henüz onaylanmadı. Onaylandıktan sonra yeniden kontrol edin.'
+            : isGerman
+                ? 'Dieses Gerät wurde registriert, ist aber noch nicht freigegeben. Nach der Freigabe kannst du den Status erneut prüfen.'
+                : 'This device is registered but not yet approved. Check again after approval.';
+
+        symbol = Icons.hourglass_top_rounded;
+        break;
+
+      case _AccessStatusMode.blocked:
+        title = isTurkish
+            ? 'Cihaz erişimi engellendi'
+            : isGerman
+                ? 'Gerät nicht freigegeben'
+                : 'Device access blocked';
+
+        description = isTurkish
+            ? 'Bu cihaz için erişim engellendi. Lütfen yöneticiyle iletişime geçin.'
+            : isGerman
+                ? 'Dieses Gerät wurde gesperrt oder abgelehnt. Bitte kontaktiere den Administrator.'
+                : 'This device has been blocked or rejected. Please contact the administrator.';
+
+        symbol = Icons.block_rounded;
+        break;
+
+      case _AccessStatusMode.error:
+        title = isTurkish
+            ? 'Erişim kontrolü başarısız'
+            : isGerman
+                ? 'Zugangsprüfung fehlgeschlagen'
+                : 'Access verification failed';
+
+        description = auth.error ??
+            (isTurkish
+                ? 'Lütfen bağlantınızı kontrol edip tekrar deneyin.'
+                : isGerman
+                    ? 'Bitte überprüfe die Verbindung und versuche es erneut.'
+                    : 'Please check your connection and try again.');
+
+        symbol = Icons.wifi_off_rounded;
+        break;
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Streamia Player'),
+        actions: const [
+          SizedBox(width: 56),
+        ],
+      ),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: 480,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    symbol,
+                    size: 64,
+                    color: AppTheme.electricBlue,
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    description,
+                    textAlign: TextAlign.center,
+                  ),
+                  if (auth.deviceId != null) ...[
+                    const SizedBox(height: 16),
+                    SelectableText(
+                      'Device ID: ${auth.deviceId}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                    onPressed: auth.isBusy
+                        ? null
+                        : () => auth.refreshDeviceAndAccess(),
+                    icon: const Icon(Icons.refresh),
+                    label: Text(
+                      isTurkish
+                          ? 'Tekrar kontrol et'
+                          : isGerman
+                              ? 'Erneut prüfen'
+                              : 'Check again',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: auth.isBusy
+                        ? null
+                        : () => auth.logout(),
+                    child: Text(
+                      isTurkish
+                          ? 'Çıkış yap'
+                          : isGerman
+                              ? 'Abmelden'
+                              : 'Log out',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _GlobalThemeToggle extends StatelessWidget {
   const _GlobalThemeToggle();
 
   @override
   Widget build(BuildContext context) {
     final themeProvider = context.watch<ThemeProvider>();
-
     final isDark =
         themeProvider.themeMode == ThemeMode.dark;
-
-    final languageCode =
-        context.watch<LocaleProvider>()
-            .locale
-            .languageCode;
-
-    final tooltip = _tooltip(
-      languageCode,
-      isDark,
-    );
 
     return Positioned(
       top: 0,
@@ -167,26 +330,18 @@ class _GlobalThemeToggle extends StatelessWidget {
                 ? const Color(0xFF1A2942)
                 : Colors.white,
             elevation: 5,
-            shadowColor: Colors.black26,
             borderRadius: BorderRadius.circular(50),
             child: IconButton(
-              tooltip: tooltip,
+              tooltip: isDark
+                  ? 'Light mode'
+                  : 'Dark mode',
               iconSize: 24,
               constraints: const BoxConstraints(
                 minWidth: 48,
                 minHeight: 48,
               ),
-              style: IconButton.styleFrom(
-                shape: const CircleBorder(),
-                side: BorderSide(
-                  color: AppTheme.electricBlue
-                      .withValues(alpha: 0.55),
-                ),
-              ),
               onPressed: () {
-                context
-                    .read<ThemeProvider>()
-                    .toggleTheme();
+                context.read<ThemeProvider>().toggleTheme();
               },
               icon: Icon(
                 isDark
@@ -201,55 +356,6 @@ class _GlobalThemeToggle extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  String _tooltip(String languageCode, bool isDark) {
-    switch (languageCode) {
-      case 'de':
-        return isDark
-            ? 'Zum hellen Modus wechseln'
-            : 'Zum dunklen Modus wechseln';
-
-      case 'tr':
-        return isDark
-            ? 'Açık temaya geç'
-            : 'Koyu temaya geç';
-
-      case 'en':
-        return isDark
-            ? 'Switch to light mode'
-            : 'Switch to dark mode';
-
-      case 'ru':
-        return isDark
-            ? 'Включить светлую тему'
-            : 'Включить тёмную тему';
-
-      case 'ar':
-        return isDark
-            ? 'التبديل إلى الوضع الفاتح'
-            : 'التبديل إلى الوضع الداكن';
-
-      case 'pl':
-        return isDark
-            ? 'Włącz jasny motyw'
-            : 'Włącz ciemny motyw';
-
-      case 'es':
-        return isDark
-            ? 'Cambiar al modo claro'
-            : 'Cambiar al modo oscuro';
-
-      case 'fr':
-        return isDark
-            ? 'Passer au mode clair'
-            : 'Passer au mode sombre';
-
-      default:
-        return isDark
-            ? 'Switch to light mode'
-            : 'Switch to dark mode';
-    }
   }
 }
 
