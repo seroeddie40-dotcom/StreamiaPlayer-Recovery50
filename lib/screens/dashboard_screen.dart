@@ -1,401 +1,311 @@
-import 'dart:convert';
-import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../core/focus_navigation.dart';
+import '../core/localization/app_localizations.dart';
+import '../core/theme/app_theme.dart';
+import '../providers/auth_provider.dart';
+import '../providers/theme_provider.dart';
+import '../widgets/playlist_source_navigation.dart';
+import 'continue_watching_screen.dart';
+import 'live_tv_screen.dart';
+import 'master_search_screen.dart';
+import 'paywall_screen.dart';
+import 'series_screen.dart';
+import 'settings_screen.dart';
+import 'vod_screen.dart';
 
-import '../config/supabase_config.dart';
-import '../core/storage/prefs_service.dart';
+class DashboardScreen extends StatefulWidget {
+  const DashboardScreen({super.key});
 
-class AuthProvider extends ChangeNotifier {
-  static const MethodChannel _deviceChannel =
-      MethodChannel('com.streamia/device_identity');
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
 
-  static const String _installKey =
-      'streamia_installation_id';
+class _DashboardScreenState extends State<DashboardScreen> {
+  int _sourceNavigationRevision = 0;
 
-  final PrefsService _prefs;
-
-  String? _installationId;
-  String? _deviceId;
-  String? _deviceStatus;
-
-  Map<String, dynamic>? _access;
-
-  bool _busy = false;
-  bool _accessChecked = false;
-  String? _error;
-
-  AuthProvider(this._prefs) {
-    _installationId = _prefs.getString(_installKey);
-
-    if (SupabaseConfig.isConfigured) {
-      Supabase.instance.client.auth.onAuthStateChange
-          .listen((event) {
-        if (event.event == AuthChangeEvent.signedOut) {
-          _clearAccess();
-        }
-        notifyListeners();
-      });
-
-      Future<void>.microtask(() async {
-        if (isLoggedIn) {
-          await refreshDeviceAndAccess();
-        }
-      });
-    }
+  String _label(BuildContext context, String de, String tr, String en) {
+    final language = Localizations.localeOf(context).languageCode;
+    if (language == 'tr') return tr;
+    if (language == 'de') return de;
+    return en;
   }
 
-  SupabaseClient? get _client =>
-      SupabaseConfig.isConfigured
-          ? Supabase.instance.client
-          : null;
-
-  User? get user => _client?.auth.currentUser;
-
-  bool get isLoggedIn => user != null;
-
-  bool get isBusy => _busy;
-
-  bool get accessChecked => _accessChecked;
-
-  String? get error => _error;
-
-  String? get deviceId => _deviceId;
-
-  String? get deviceStatus => _deviceStatus;
-
-  Map<String, dynamic>? get access => _access;
-
-  String get macAddress =>
-      _installationId ?? 'Noch nicht registriert';
-
-  bool get hasAccountAccess =>
-      _access?['has_access'] == true;
-
-  // Supabase uses "active" for approved devices.
-  bool get deviceApproved =>
-      _deviceStatus == 'active' ||
-      _deviceStatus == 'approved';
-
-  bool get devicePending =>
-      _deviceStatus == 'pending';
-
-  bool get deviceBlocked =>
-      _deviceStatus == 'blocked' ||
-      _deviceStatus == 'rejected' ||
-      _deviceStatus == 'revoked';
-
-  bool get hasAccess =>
-      _accessChecked &&
-      _error == null &&
-      hasAccountAccess &&
-      deviceApproved;
-
-  bool get requiresPayment =>
-      _accessChecked &&
-      _error == null &&
-      _access != null &&
-      !hasAccountAccess;
-
-  String? get accessReason =>
-      _access?['access_reason']?.toString();
-
-  int get maxDevices {
-    final value = _access?['max_devices'];
-
-    if (value is int) {
-      return value;
-    }
-
-    return int.tryParse(
-          value?.toString() ?? '',
-        ) ??
-        0;
-  }
-
-  bool get isAdminGrant =>
-      _access?['manual_override'] == true &&
-      _access?['entitlement_source'] == 'admin_grant';
-
-  void _clearAccess() {
-    _deviceId = null;
-    _deviceStatus = null;
-    _access = null;
-    _accessChecked = false;
-    _error = null;
-  }
-
-  Future<String> _getInstallationId() async {
-    if (_installationId != null &&
-        _installationId!.isNotEmpty) {
-      return _installationId!;
-    }
-
-    final random = Random.secure();
-
-    final bytes = List<int>.generate(
-      32,
-      (_) => random.nextInt(256),
+  void _open(Widget screen) {
+    pushWithFocusRestore(
+      context,
+      MaterialPageRoute<void>(builder: (_) => screen),
     );
+  }
 
-    _installationId =
-        base64Url.encode(bytes).replaceAll('=', '');
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final auth = context.watch<AuthProvider>();
+    final compact = MediaQuery.sizeOf(context).width < 600;
+    final showPurchase = auth.isLoggedIn &&
+        auth.accessChecked &&
+        !auth.hasAccess &&
+        auth.requiresPayment &&
+        !auth.deviceBlocked &&
+        !auth.devicePending;
 
-    final prefs = await SharedPreferences.getInstance();
+    final entries = <_HomeEntry>[
+      _HomeEntry(Icons.live_tv_rounded, l10n.t('nav_live'),
+          () => _open(const LiveTvScreen())),
+      _HomeEntry(Icons.movie_creation_outlined, l10n.t('nav_vod'),
+          () => _open(const VodScreen())),
+      _HomeEntry(Icons.video_library_outlined, l10n.t('nav_series'),
+          () => _open(const SeriesScreen())),
+      _HomeEntry(Icons.play_circle_outline_rounded,
+          l10n.t('nav_continue_watching'),
+          () => _open(const ContinueWatchingScreen())),
+      _HomeEntry(Icons.search_rounded, l10n.t('nav_search'),
+          () => _open(const MasterSearchScreen())),
+    ];
 
-    await prefs.setString(
-      _installKey,
-      _installationId!,
+    return Scaffold(
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  compact ? 16 : 36, 12, compact ? 16 : 36, 8),
+              child: Row(
+                children: [
+                  Container(
+                    width: compact ? 42 : 52,
+                    height: compact ? 42 : 52,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: AppTheme.accentGradient,
+                    ),
+                    alignment: Alignment.center,
+                    child: const Text('S', style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 27,
+                      fontWeight: FontWeight.w900,
+                    )),
+                  ),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      l10n.t('app_name'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: compact ? 17 : 24,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  if (showPurchase) ...[
+                    _ProButton(
+                      label: l10n.t('nav_pro'),
+                      onTap: () => _open(const PaywallScreen()),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  IconButton(
+                    tooltip: _label(context, 'Suche', 'Ara', 'Search'),
+                    onPressed: () => _open(const MasterSearchScreen()),
+                    icon: const Icon(Icons.search_rounded),
+                  ),
+                  IconButton(
+                    tooltip: _label(context, 'Design wechseln',
+                        'Temayı değiştir', 'Change theme'),
+                    onPressed: () =>
+                        context.read<ThemeProvider>().toggleTheme(),
+                    icon: Icon(isDark ? Icons.light_mode_outlined
+                        : Icons.dark_mode_outlined),
+                  ),
+                  IconButton(
+                    tooltip: _label(context, 'Einstellungen',
+                        'Ayarlar', 'Settings'),
+                    onPressed: () async {
+                      await pushWithFocusRestore(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => const SettingsScreen(),
+                        ),
+                      );
+                      if (mounted) {
+                        setState(() => _sourceNavigationRevision++);
+                      }
+                    },
+                    icon: const Icon(Icons.settings_outlined),
+                  ),
+                ],
+              ),
+            ),
+            PlaylistSourceNavigation(
+              key: ValueKey(_sourceNavigationRevision),
+            ),
+            Expanded(
+              child: LayoutBuilder(builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                final horizontal = width < 600 ? 16.0 : 36.0;
+                final columns = width >= 1050 ? 4 : width >= 680 ? 3 : 2;
+                return FocusTraversalGroup(
+                  child: CustomScrollView(
+                    slivers: [
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                            horizontal, 18, horizontal, 12),
+                        sliver: SliverToBoxAdapter(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _label(context, 'Deine Mediathek',
+                                    'Medya kütüphanen', 'Your library'),
+                                style: TextStyle(
+                                  fontSize: compact ? 23 : 30,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 5),
+                              Text(
+                                _label(context,
+                                    'Live-TV, Filme und Serien an einem Ort',
+                                    'Canlı TV, filmler ve diziler tek yerde',
+                                    'Live TV, movies and series in one place'),
+                                style: TextStyle(
+                                  color: Theme.of(context)
+                                      .colorScheme.onSurface.withOpacity(0.65),
+                                  fontSize: compact ? 13 : 15,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      SliverPadding(
+                        padding: EdgeInsets.fromLTRB(
+                            horizontal, 8, horizontal, 28),
+                        sliver: SliverGrid(
+                          delegate: SliverChildBuilderDelegate(
+                            (context, index) => _PremiumTile(
+                              entry: entries[index],
+                              autofocus: index == 0,
+                            ),
+                            childCount: entries.length,
+                          ),
+                          gridDelegate:
+                              SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: columns,
+                            mainAxisSpacing: 14,
+                            crossAxisSpacing: 14,
+                            childAspectRatio: compact ? 1.35 : 1.8,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ),
+          ],
+        ),
+      ),
     );
-
-    return _installationId!;
   }
+}
 
-  Future<String> _readDeviceName() async {
-    if (!kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android) {
-      try {
-        final name = await _deviceChannel
-            .invokeMethod<String>('getDeviceName');
+class _HomeEntry {
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+  const _HomeEntry(this.icon, this.title, this.onTap);
+}
 
-        if (name != null && name.isNotEmpty) {
-          return name;
-        }
-      } catch (_) {
-        // Use the platform name.
-      }
-    }
+class _ProButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+  const _ProButton({required this.label, required this.onTap});
 
-    return kIsWeb
-        ? 'Web-Gerät'
-        : defaultTargetPlatform.name;
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        focusColor: AppTheme.electricBlue.withOpacity(0.25),
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: AppTheme.accentGradient,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+          child: Text(label,
+              style: const TextStyle(
+                  color: Colors.white, fontWeight: FontWeight.bold)),
+        ),
+      ),
+    );
   }
+}
 
-  Future<void> signIn(
-    String email,
-    String password,
-  ) async {
-    await _run(() async {
-      final client = _client;
+class _PremiumTile extends StatelessWidget {
+  final _HomeEntry entry;
+  final bool autofocus;
+  const _PremiumTile({required this.entry, this.autofocus = false});
 
-      if (client == null) {
-        throw Exception(
-          'Supabase ist nicht konfiguriert.',
-        );
-      }
-
-      _clearAccess();
-
-      await client.auth.signInWithPassword(
-        email: email.trim(),
-        password: password,
-      );
-
-      await refreshDeviceAndAccess();
-    });
-  }
-
-  Future<void> signUp(
-    String email,
-    String password,
-  ) async {
-    await _run(() async {
-      final client = _client;
-
-      if (client == null) {
-        throw Exception(
-          'Supabase ist nicht konfiguriert.',
-        );
-      }
-
-      _clearAccess();
-
-      final response = await client.auth.signUp(
-        email: email.trim(),
-        password: password,
-      );
-
-      if (response.session != null) {
-        await refreshDeviceAndAccess();
-      }
-    });
-  }
-
-  Future<void> refreshDeviceAndAccess() async {
-    final client = _client;
-
-    if (client == null ||
-        client.auth.currentUser == null) {
-      _clearAccess();
-      notifyListeners();
-      return;
-    }
-
-    _accessChecked = false;
-    _error = null;
-    _access = null;
-    _deviceStatus = null;
-
-    notifyListeners();
-
-    try {
-      final installationId =
-          await _getInstallationId();
-
-      final deviceName =
-          await _readDeviceName();
-
-      final platform = kIsWeb
-          ? 'web'
-          : switch (defaultTargetPlatform) {
-              TargetPlatform.android => 'android',
-              TargetPlatform.iOS => 'ios',
-              _ => 'unknown',
-            };
-
-      // Register device using the existing Supabase RPC.
-      // The server determines whether the device
-      // can be automatically activated.
-      final registered = await client.rpc(
-        'register_my_device',
-        params: {
-          'p_installation_id': installationId,
-          'p_device_name': deviceName,
-          'p_platform': platform,
-        },
-      );
-
-      final registrationRow =
-          _firstRow(registered);
-
-      if (registrationRow == null) {
-        throw Exception(
-          'Die Geräteregistrierung hat '
-          'keine Daten zurückgegeben.',
-        );
-      }
-
-      _deviceId =
-          registrationRow['device_id']?.toString();
-
-      _deviceStatus =
-          registrationRow['device_status']
-              ?.toString()
-              .toLowerCase();
-
-      // Read the account entitlement from Supabase.
-      final accountResult = await client.rpc(
-        'get_my_access_status',
-      );
-
-      final accountRow =
-          _firstRow(accountResult);
-
-      if (accountRow == null) {
-        throw Exception(
-          'Die Kontoberechtigung konnte '
-          'nicht ermittelt werden.',
-        );
-      }
-
-      _access = accountRow;
-
-      _accessChecked = true;
-      _error = null;
-    } catch (e) {
-      _access = null;
-      _accessChecked = true;
-      _error = _friendlyError(e);
-    }
-
-    notifyListeners();
-  }
-
-  Map<String, dynamic>? _firstRow(
-    dynamic result,
-  ) {
-    if (result is Map) {
-      return Map<String, dynamic>.from(result);
-    }
-
-    if (result is List && result.isNotEmpty) {
-      final first = result.first;
-
-      if (first is Map) {
-        return Map<String, dynamic>.from(first);
-      }
-    }
-
-    return null;
-  }
-
-  Future<void> _run(
-    Future<void> Function() action,
-  ) async {
-    _busy = true;
-    _error = null;
-
-    notifyListeners();
-
-    try {
-      await action();
-    } catch (e) {
-      _error = _friendlyError(e);
-      _accessChecked = true;
-    } finally {
-      _busy = false;
-      notifyListeners();
-    }
-  }
-
-  String _friendlyError(Object error) {
-    if (error is AuthException) {
-      // Return a stable internal error key for
-      // common authentication failures.
-      final message = error.message.toLowerCase();
-
-      if (message.contains(
-            'invalid login credentials',
-          ) ||
-          message.contains(
-            'invalid credentials',
-          )) {
-        return 'invalid_credentials';
-      }
-
-      if (message.contains(
-        'email not confirmed',
-      )) {
-        return 'email_not_confirmed';
-      }
-
-      if (message.contains(
-        'too many requests',
-      )) {
-        return 'too_many_requests';
-      }
-
-      return error.message;
-    }
-
-    if (error is PostgrestException) {
-      return error.message;
-    }
-
-    return error.toString().replaceFirst(
-          'Exception: ',
-          '',
-        );
-  }
-
-  Future<void> logout() async {
-    await _client?.auth.signOut();
-
-    _clearAccess();
-
-    notifyListeners();
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        autofocus: autofocus,
+        onTap: entry.onTap,
+        focusColor: AppTheme.electricBlue.withOpacity(0.28),
+        borderRadius: BorderRadius.circular(20),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: dark ? AppTheme.darkSurface : AppTheme.lightSurface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: AppTheme.electricBlue.withOpacity(0.25),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.electricBlue.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(entry.icon,
+                      size: 28, color: AppTheme.electricBlue),
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(entry.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 17, fontWeight: FontWeight.w700)),
+                    ),
+                    const Icon(Icons.arrow_forward_ios_rounded, size: 14),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
