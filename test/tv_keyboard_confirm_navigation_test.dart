@@ -12,7 +12,6 @@ void main() {
   ) async {
     await tester.pumpWidget(
       MaterialApp(
-        // Ensure a fresh Navigator and widget tree for every test.
         key: UniqueKey(),
         locale: const Locale('de'),
         localizationsDelegates:
@@ -37,13 +36,64 @@ void main() {
 
     await tester.pumpAndSettle();
 
+    final openButton = find.text('Open');
+
+    if (openButton.evaluate().isEmpty) {
+      debugPrint(
+        '========== STREAMIA TV DIAGNOSTIC START ==========',
+      );
+
+      debugPrint(
+        'Open button missing after pumpAndSettle.',
+      );
+
+      debugPrint(
+        'MaterialApp count: '
+        '${find.byType(MaterialApp).evaluate().length}',
+      );
+
+      debugPrint(
+        'Scaffold count: '
+        '${find.byType(Scaffold).evaluate().length}',
+      );
+
+      debugPrint(
+        'ElevatedButton count: '
+        '${find.byType(ElevatedButton).evaluate().length}',
+      );
+
+      debugPrint(
+        'AlertDialog count: '
+        '${find.byType(AlertDialog).evaluate().length}',
+      );
+
+      debugPrint('Widget tree:');
+      debugDumpApp();
+
+      final exception = tester.takeException();
+
+      if (exception != null) {
+        debugPrint(
+          'Flutter exception: $exception',
+        );
+      } else {
+        debugPrint(
+          'No pending Flutter exception.',
+        );
+      }
+
+      debugPrint(
+        '========== STREAMIA TV DIAGNOSTIC END ==========',
+      );
+    }
+
     expect(
-      find.text('Open'),
+      openButton,
       findsOneWidget,
-      reason: 'The keyboard launch button must be visible.',
+      reason: 'Keyboard launch button must be visible.',
     );
 
-    await tester.tap(find.text('Open'));
+    await tester.tap(openButton);
     await tester.pumpAndSettle();
 
     expect(find.byType(AlertDialog), findsOneWidget);
