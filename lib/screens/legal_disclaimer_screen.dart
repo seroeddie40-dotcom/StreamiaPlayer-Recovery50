@@ -17,7 +17,7 @@ class _LegalDisclaimerScreenState extends State<LegalDisclaimerScreen> {
   bool _saving = false;
 
   String get _language => widget.languageCode ?? Localizations.localeOf(context).languageCode;
-  Map<String, String> get _copy {
+  List<String> get _copy {
     const data = {
       'de': ['Rechtlicher Hinweis', 'Streamia Player ist ausschließlich eine Media-Player-Software. Wir stellen keine Playlists, Sender, TV-Kanäle, Live-Streams, Filme, Serien, Videos, Zugangsdaten oder Abonnements bereit, verkaufen, hosten oder vermitteln diese auch nicht.', 'Du fügst externe Quellen und Inhalte eigenständig hinzu. Du bist dafür verantwortlich, dass du die erforderlichen Rechte und Genehmigungen besitzt und die Gesetze deines Landes sowie die Nutzungsbedingungen der jeweiligen Anbieter einhältst.', 'Streamia Player ist nicht mit IPTV-Anbietern, Sendern, Rechteinhabern oder Streaming-Plattformen verbunden, sofern dies nicht ausdrücklich angegeben wird. Die App garantiert weder Verfügbarkeit noch Qualität oder Rechtmäßigkeit externer Inhalte.', 'Bei Fragen zu einer Playlist oder einem Stream wende dich an den jeweiligen Anbieter. Streamia Player kann keine Zugangsdaten bereitstellen oder Beschränkungen fremder Dienste umgehen.', 'Ich bestätige, dass ich diesen Hinweis gelesen habe und nur Quellen und Inhalte nutze, zu deren Nutzung ich berechtigt bin.', 'Ich habe den rechtlichen Hinweis gelesen und stimme zu', 'Bestätigen und fortfahren'],
       'en': ['Legal notice', 'Streamia Player is media-player software only. We do not provide, sell, host, or broker playlists, channels, TV stations, live streams, films, series, videos, credentials, or subscriptions.', 'You add external sources and content yourself. You are responsible for ensuring that you hold all necessary rights and permissions and comply with the laws in your country and the terms of the relevant providers.', 'Unless expressly stated, Streamia Player is not affiliated with IPTV providers, broadcasters, rights holders, or streaming platforms. The app does not guarantee the availability, quality, or legality of external content.', 'For playlist or stream issues, contact the relevant provider. Streamia Player cannot supply credentials or bypass restrictions imposed by third-party services.', 'I confirm that I have read this notice and will only use sources and content that I am authorized to access.', 'I have read and agree to the legal notice', 'Confirm and continue'],
@@ -47,7 +47,7 @@ class _LegalDisclaimerScreenState extends State<LegalDisclaimerScreen> {
           const Divider(height: 28),
           CheckboxListTile(value: _confirmed, onChanged: (v) => setState(() => _confirmed = v ?? false),
             autofocus: true,
-            focusColor: AppTheme.electricBlue.withOpacity(0.24),
+            focusColor: AppTheme.electricBlue.withValues(alpha: 0.24),
             controlAffinity: ListTileControlAffinity.leading, contentPadding: EdgeInsets.zero,
             title: Text(t[5], style: const TextStyle(fontWeight: FontWeight.w600))),
           const SizedBox(height: 12),
@@ -55,7 +55,7 @@ class _LegalDisclaimerScreenState extends State<LegalDisclaimerScreen> {
             setState(() => _saving = true);
             await widget.prefs?.setLegalDisclaimerAccepted(_language);
             if (mounted) Navigator.of(context).pop(true);
-          }, style: FilledButton.styleFrom(focusColor: Colors.white24), child: Text(t[6])),
+          }, style: FilledButton.styleFrom(overlayColor: Colors.white24), child: Text(t[6])),
         ],
       ]))),
     );
