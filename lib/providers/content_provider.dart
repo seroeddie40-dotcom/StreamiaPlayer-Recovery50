@@ -6,6 +6,7 @@ import '../models/channel.dart';
 import '../models/vod_item.dart';
 import '../models/series.dart';
 import '../services/metadata/metadata_enrichment_service.dart';
+import '../services/iptv_library_database.dart';
 
 enum RecentPlaybackType { live, vod, series }
 
@@ -44,6 +45,27 @@ class ContentProvider extends ChangeNotifier {
   static const int _maxInactiveCachedLibraries = 2;
   final Map<String, _ContentLibrarySnapshot> _libraryCache = {};
   int _activationGeneration = 0;
+  Future<void> _catalogWriteQueue = Future<void>.value();
+  Object? _lastCatalogSaveError;
+  Object? get lastCatalogSaveError => _lastCatalogSaveError;
+
+  /// Restore an encrypted catalog. Returns false if no saved catalog exists.
+  /// Errors are deliberately propagated so the UI can offer a retry.
+  Future<bool> restoreStoredLibrary(String key, {String? sourceLabel}) async {
+    final generation = beginLibraryActivation();
+    if (activateCachedLibrary(key, activationGeneration: generation)) return true;
+    final stored = await IptvLibraryDatabase.instance.load(key);
+    if (stored == null || !isLibraryActivationCurrent(generation)) return false;
+    return replaceLibrary(
+      channels: stored.channels, vod: stored.vod, series: stored.series,
+      sourceKey: key, sourceLabel: sourceLabel,
+      activationGeneration: generation, persist: false,
+    );
+  }
+
+  /// Wait for queued writes, useful before switching accounts or testing.
+  Future<void> waitForCatalogWrites() => _catalogWriteQueue;
+
 
   /// A newer activation invalidates any outstanding asynchronous load.
   int beginLibraryActivation() => ++_activationGeneration;
@@ -232,6 +254,7 @@ class ContentProvider extends ChangeNotifier {
     String? sourceKey,
     String? sourceLabel,
     int? activationGeneration,
+    bool persist = true,
   }) {
     if (activationGeneration != null && !isLibraryActivationCurrent(activationGeneration)) return false;
     if (_sourceKey != sourceKey) _rememberLibrary(_sourceKey);
@@ -242,6 +265,24 @@ class ContentProvider extends ChangeNotifier {
     if (sourceKey != null && sourceKey.isNotEmpty) _sourceKey = sourceKey;
     _sourceLabel = sourceLabel;
     _isLoaded = true;
+    if (persist && sourceKey != null && sourceKey.isNotEmpty) {
+      final saveKey = sourceKey;
+      final savedChannels = List<Channel>.of(_channels);
+      final savedVod = List<VodItem>.of(_vodItems);
+      final savedSeries = List<Series>.of(_series);
+      _catalogWriteQueue = _catalogWriteQueue.catchError((Object _) {}).then((_) async {
+        try {
+          await IptvLibraryDatabase.instance.replace(
+            sourceKey: saveKey, channels: savedChannels,
+            vod: savedVod, series: savedSeries,
+          );
+          _lastCatalogSaveError = null;
+        } catch (error) {
+          _lastCatalogSaveError = error;
+          debugPrint('Streamia catalog persistence failed: ${error.runtimeType}');
+        }
+      });
+    }
     _restoreRecentHistory();
     _detachInactiveHistory();
     _resolveCurrentSourceHistory();
