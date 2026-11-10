@@ -151,63 +151,103 @@ class XtreamService {
     }).toList();
   }
 
+  /// Loads only the series catalog. Fetching every series' episodes here would
+  /// make large IPTV imports require thousands of sequential HTTP requests.
   Future<List<Series>> getSeries({int? categoryId}) async {
     final data = await _request({
       'action': 'get_series',
       if (categoryId != null) 'category_id': '$categoryId',
     });
     if (data is! List) throw const FormatException('Unerwartete Serien-Antwort.');
-    final results = <Series>[];
-    for (final item in data) {
-      final j = item as Map<String, dynamic>;
-      final id = '${j['series_id']}';
-      final details = await _request({'action': 'get_series_info', 'series_id': id});
-      if (details is! Map) continue;
-      final episodesRaw = details['episodes'];
-      final seasons = <Season>[];
-      if (episodesRaw is Map) {
-        final keys = episodesRaw.keys.toList()
-          ..sort((a, b) => (int.tryParse('$a') ?? 0).compareTo(int.tryParse('$b') ?? 0));
-        for (final key in keys) {
-          final rawList = episodesRaw[key];
-          if (rawList is! List) continue;
-          final episodes = <Episode>[];
-          for (var i = 0; i < rawList.length; i++) {
-            final e = rawList[i] as Map;
-            final epId = '${e['id']}';
-            final ext = (e['container_extension'] ?? 'mp4').toString();
-            episodes.add(Episode(
-              id: epId,
-              title: (e['title'] ?? e['name'] ?? 'Folge ${i + 1}').toString(),
-              number: int.tryParse('${e['episode_num'] ?? i + 1}') ?? i + 1,
-              streamUrl: '$baseUrl/series/${Uri.encodeComponent(username)}/${Uri.encodeComponent(password)}/$epId.$ext',
-              plot: _nullable(e['info'] is Map ? (e['info'] as Map)['plot'] : null),
-              stillUrl: _nullable(e['info'] is Map ? (e['info'] as Map)['movie_image'] : null),
-              releaseDate: _nullable(e['info'] is Map ? (e['info'] as Map)['releasedate'] : null),
-              durationSeconds: int.tryParse('${e['info'] is Map ? (e['info'] as Map)['duration_secs'] ?? '' : ''}') ?? _durationFromText(e['info'] is Map ? (e['info'] as Map)['duration'] : null),
-            ));
-          }
-          seasons.add(Season(number: int.tryParse('$key') ?? seasons.length + 1, episodes: episodes));
-        }
-      }
-      results.add(Series(
-        id: id,
+    return data.map<Series>((item) {
+      if (item is! Map) throw const FormatException('Ungültiger Serieneintrag.');
+      final j = Map<String, dynamic>.from(item);
+      return Series(
+        id: '${j['series_id']}',
         title: (j['name'] ?? 'Unbekannte Serie').toString(),
-        plot: _nullable(details['info'] is Map ? (details['info'] as Map)['plot'] : j['plot']),
-        posterUrl: _nullable(details['info'] is Map ? (details['info'] as Map)['cover'] : null) ?? _nullable(j['cover_big']) ?? _nullable(j['cover']),
-        backdropUrl: _firstString(details['info'] is Map ? (details['info'] as Map)['backdrop_path'] : null),
-        genre: _nullable(details['info'] is Map ? (details['info'] as Map)['genre'] : j['genre']),
-        releaseDate: _nullable(details['info'] is Map ? (details['info'] as Map)['releaseDate'] : j['releaseDate']),
-        ageRating: _nullable(details['info'] is Map ? (details['info'] as Map)['rating_age'] : null),
-        cast: _nullable(details['info'] is Map ? (details['info'] as Map)['cast'] : null),
-        director: _nullable(details['info'] is Map ? (details['info'] as Map)['director'] : null),
-        rating: double.tryParse('${details['info'] is Map ? (details['info'] as Map)['rating'] ?? '' : ''}'),
-        externalMetadataId: _nullable(details['info'] is Map ? (details['info'] as Map)['tmdb_id'] : null),
+        plot: _nullable(j['plot']),
+        posterUrl: _nullable(j['cover_big']) ?? _nullable(j['cover']),
+        backdropUrl: _firstString(j['backdrop_path']),
+        genre: _nullable(j['genre']),
+        releaseDate: _nullable(j['releaseDate']) ?? _nullable(j['release_date']),
+        ageRating: _nullable(j['rating_age']),
+        cast: _nullable(j['cast']),
+        director: _nullable(j['director']),
+        rating: double.tryParse('${j['rating'] ?? ''}'),
+        externalMetadataId: _nullable(j['tmdb_id']),
         metadataSource: 'xtream',
-        seasons: seasons,
-      ));
+        seasons: const [],
+      );
+    }).toList(growable: false);
+  }
+
+  /// Call when the user opens a series. The caller must update the content
+  /// provider with the returned series before rendering episode playback.
+  Future<Series> getSeriesDetails(Series catalogSeries) async {
+    final details = await _request({
+      'action': 'get_series_info',
+      'series_id': catalogSeries.id,
+    });
+    if (details is! Map) {
+      throw const FormatException('Unerwartete Serien-Detailantwort.');
     }
-    return results;
+    final info = details['info'] is Map ? details['info'] as Map : const {};
+    final episodesRaw = details['episodes'];
+    final seasons = <Season>[];
+    if (episodesRaw is Map) {
+      final keys = episodesRaw.keys.toList()
+        ..sort((a, b) => (int.tryParse('$a') ?? 0).compareTo(int.tryParse('$b') ?? 0));
+      for (final key in keys) {
+        final rawList = episodesRaw[key];
+        if (rawList is! List) continue;
+        final episodes = <Episode>[];
+        for (var i = 0; i < rawList.length; i++) {
+          final rawEpisode = rawList[i];
+          if (rawEpisode is! Map) continue;
+          final e = rawEpisode;
+          final epId = '${e['id']}';
+          final ext = (e['container_extension'] ?? 'mp4').toString();
+          final epInfo = e['info'] is Map ? e['info'] as Map : const {};
+          episodes.add(Episode(
+            id: epId,
+            title: (e['title'] ?? e['name'] ?? 'Folge ${i + 1}').toString(),
+            number: int.tryParse('${e['episode_num'] ?? i + 1}') ?? i + 1,
+            streamUrl: '$baseUrl/series/${Uri.encodeComponent(username)}/${Uri.encodeComponent(password)}/$epId.$ext',
+            plot: _nullable(epInfo['plot']),
+            stillUrl: _nullable(epInfo['movie_image']),
+            releaseDate: _nullable(epInfo['releasedate']),
+            durationSeconds: int.tryParse('${epInfo['duration_secs'] ?? ''}') ?? _durationFromText(epInfo['duration']),
+          ));
+        }
+        seasons.add(Season(number: int.tryParse('$key') ?? seasons.length + 1, episodes: episodes));
+      }
+    }
+    final enriched = catalogSeries.copyWith(
+      plot: _nullable(info['plot']),
+      posterUrl: _nullable(info['cover']),
+      backdropUrl: _firstString(info['backdrop_path']),
+      genre: _nullable(info['genre']),
+      releaseDate: _nullable(info['releaseDate']),
+      ageRating: _nullable(info['rating_age']),
+      cast: _nullable(info['cast']),
+      director: _nullable(info['director']),
+      rating: double.tryParse('${info['rating'] ?? ''}'),
+      externalMetadataId: _nullable(info['tmdb_id']),
+    );
+    return Series(
+      id: enriched.id, title: enriched.title, plot: enriched.plot,
+      posterUrl: enriched.posterUrl, backdropUrl: enriched.backdropUrl,
+      genre: enriched.genre, releaseDate: enriched.releaseDate,
+      ageRating: enriched.ageRating, cast: enriched.cast,
+      director: enriched.director, rating: enriched.rating,
+      externalMetadataId: enriched.externalMetadataId,
+      metadataSource: enriched.metadataSource,
+      metadataProviderId: enriched.metadataProviderId,
+      metadataAttribution: enriched.metadataAttribution,
+      metadataLicense: enriched.metadataLicense,
+      metadataSourceUrl: enriched.metadataSourceUrl,
+      seasons: seasons,
+    );
   }
 
   static String? _firstString(dynamic value) {
