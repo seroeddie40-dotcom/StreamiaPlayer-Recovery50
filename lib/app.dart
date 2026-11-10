@@ -40,7 +40,8 @@ class StreamiaApp extends StatelessWidget {
 
     final showThemeButton =
         localeProvider.hasSelectedLanguage &&
-        prefsService.hasAcceptedCurrentLegalDisclaimer;
+        prefsService.hasAcceptedCurrentLegalDisclaimer &&
+        !contentProvider.isLoaded;
 
     return MaterialApp(
       title: 'Streamia Player',
@@ -64,7 +65,11 @@ class StreamiaApp extends StatelessWidget {
             children: [
               child ?? const SizedBox.shrink(),
               if (showThemeButton)
-                const _GlobalThemeToggle(),
+                const Positioned(
+                  top: 0,
+                  right: 0,
+                  child: _GlobalThemeToggle(),
+                ),
             ],
           ),
         );
@@ -108,8 +113,6 @@ class StreamiaApp extends StatelessWidget {
       );
     }
 
-    // Device approval is checked separately from
-    // the account entitlement.
     if (auth.deviceBlocked) {
       return const _AccessStatusScreen(
         mode: _AccessStatusMode.blocked,
@@ -314,43 +317,39 @@ class _GlobalThemeToggle extends StatelessWidget {
     final isDark =
         themeProvider.themeMode == ThemeMode.dark;
 
-    return Positioned(
-      top: 0,
-      right: 0,
-      child: SafeArea(
-        bottom: false,
-        left: false,
-        child: Padding(
-          padding: const EdgeInsets.only(
-            top: 8,
-            right: 12,
-          ),
-          child: Material(
-            color: isDark
-                ? const Color(0xFF1A2942)
-                : Colors.white,
-            elevation: 5,
-            borderRadius: BorderRadius.circular(50),
-            child: IconButton(
-              tooltip: isDark
-                  ? 'Light mode'
-                  : 'Dark mode',
-              iconSize: 24,
-              constraints: const BoxConstraints(
-                minWidth: 48,
-                minHeight: 48,
-              ),
-              onPressed: () {
-                context.read<ThemeProvider>().toggleTheme();
-              },
-              icon: Icon(
-                isDark
-                    ? Icons.light_mode_rounded
-                    : Icons.dark_mode_rounded,
-                color: isDark
-                    ? const Color(0xFFFFD166)
-                    : const Color(0xFF253B59),
-              ),
+    return SafeArea(
+      bottom: false,
+      left: false,
+      child: Padding(
+        padding: const EdgeInsets.only(
+          top: 8,
+          right: 12,
+        ),
+        child: Material(
+          color: isDark
+              ? const Color(0xFF1A2942)
+              : Colors.white,
+          elevation: 5,
+          borderRadius: BorderRadius.circular(50),
+          child: IconButton(
+            tooltip: isDark
+                ? 'Light mode'
+                : 'Dark mode',
+            iconSize: 24,
+            constraints: const BoxConstraints(
+              minWidth: 48,
+              minHeight: 48,
+            ),
+            onPressed: () {
+              context.read<ThemeProvider>().toggleTheme();
+            },
+            icon: Icon(
+              isDark
+                  ? Icons.light_mode_rounded
+                  : Icons.dark_mode_rounded,
+              color: isDark
+                  ? const Color(0xFFFFD166)
+                  : const Color(0xFF253B59),
             ),
           ),
         ),
