@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -22,6 +21,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
   static const Map<String, Map<String, String>> _translations = {
     'de': {
+      'invalid_credentials': 'E-Mail-Adresse oder Passwort ist falsch.',
+      'email_not_confirmed': 'Bitte bestätige zuerst deine E-Mail-Adresse.',
+      'too_many_requests': 'Zu viele Versuche. Bitte versuche es später erneut.',
+
       'signIn': 'Anmelden',
       'createAccount': 'Konto erstellen',
       'email': 'E-Mail-Adresse',
@@ -38,6 +41,10 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Passwort verbergen',
     },
     'tr': {
+      'invalid_credentials': 'E-posta adresi veya şifre hatalı.',
+      'email_not_confirmed': 'Lütfen önce e-posta adresinizi doğrulayın.',
+      'too_many_requests': 'Çok fazla deneme yapıldı. Lütfen daha sonra tekrar deneyin.',
+
       'signIn': 'Giriş yap',
       'createAccount': 'Hesap oluştur',
       'email': 'E-posta adresi',
@@ -54,6 +61,10 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Şifreyi gizle',
     },
     'en': {
+      'invalid_credentials': 'Incorrect email address or password.',
+      'email_not_confirmed': 'Please confirm your email address first.',
+      'too_many_requests': 'Too many attempts. Please try again later.',
+
       'signIn': 'Sign in',
       'createAccount': 'Create account',
       'email': 'Email address',
@@ -70,6 +81,10 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Hide password',
     },
     'ru': {
+      'invalid_credentials': 'Неверный адрес электронной почты или пароль.',
+      'email_not_confirmed': 'Сначала подтвердите адрес электронной почты.',
+      'too_many_requests': 'Слишком много попыток. Повторите позже.',
+
       'signIn': 'Войти',
       'createAccount': 'Создать аккаунт',
       'email': 'Электронная почта',
@@ -86,6 +101,10 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Скрыть пароль',
     },
     'ar': {
+      'invalid_credentials': 'البريد الإلكتروني أو كلمة المرور غير صحيحة.',
+      'email_not_confirmed': 'يرجى تأكيد بريدك الإلكتروني أولاً.',
+      'too_many_requests': 'محاولات كثيرة جدًا. حاول مرة أخرى لاحقًا.',
+
       'signIn': 'تسجيل الدخول',
       'createAccount': 'إنشاء حساب',
       'email': 'البريد الإلكتروني',
@@ -102,6 +121,10 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'إخفاء كلمة المرور',
     },
     'pl': {
+      'invalid_credentials': 'Nieprawidłowy adres e-mail lub hasło.',
+      'email_not_confirmed': 'Najpierw potwierdź swój adres e-mail.',
+      'too_many_requests': 'Zbyt wiele prób. Spróbuj ponownie później.',
+
       'signIn': 'Zaloguj się',
       'createAccount': 'Utwórz konto',
       'email': 'Adres e-mail',
@@ -118,6 +141,10 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Ukryj hasło',
     },
     'es': {
+      'invalid_credentials': 'Correo electrónico o contraseña incorrectos.',
+      'email_not_confirmed': 'Confirma primero tu correo electrónico.',
+      'too_many_requests': 'Demasiados intentos. Inténtalo más tarde.',
+
       'signIn': 'Iniciar sesión',
       'createAccount': 'Crear cuenta',
       'email': 'Correo electrónico',
@@ -134,6 +161,10 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Ocultar contraseña',
     },
     'fr': {
+      'invalid_credentials': 'Adresse e-mail ou mot de passe incorrect.',
+      'email_not_confirmed': 'Veuillez d’abord confirmer votre adresse e-mail.',
+      'too_many_requests': 'Trop de tentatives. Réessayez plus tard.',
+
       'signIn': 'Se connecter',
       'createAccount': 'Créer un compte',
       'email': 'Adresse e-mail',
@@ -337,7 +368,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       if (auth.error != null) ...[
                         const SizedBox(height: 12),
                         Text(
-                          auth.error!,
+                          _t(languageCode, auth.error!),
                           style: const TextStyle(
                             color: Colors.redAccent,
                           ),
