@@ -1,24 +1,53 @@
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:streamia_player/core/localization/app_localizations.dart';
 import 'package:streamia_player/widgets/tv_text_keyboard.dart';
 
+class _TestLocalizationsDelegate
+    extends LocalizationsDelegate<AppLocalizations> {
+  final AppLocalizations translations;
+
+  const _TestLocalizationsDelegate(this.translations);
+
+  @override
+  bool isSupported(Locale locale) =>
+      locale.languageCode == translations.locale.languageCode;
+
+  @override
+  Future<AppLocalizations> load(Locale locale) =>
+      SynchronousFuture<AppLocalizations>(translations);
+
+  @override
+  bool shouldReload(_TestLocalizationsDelegate old) =>
+      !identical(translations, old.translations);
+}
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
   Future<void> launch(
     WidgetTester tester,
     TextEditingController controller, {
     bool urlMode = false,
   }) async {
+    final translations = AppLocalizations(const Locale('de'));
+
+    await tester.runAsync(() async {
+      await translations.load();
+    });
+
     await tester.pumpWidget(
       MaterialApp(
         // Fresh widget tree and Navigator for every test.
         key: UniqueKey(),
         locale: const Locale('de'),
-        localizationsDelegates:
-            AppLocalizations.localizationsDelegates
-                .cast<LocalizationsDelegate<dynamic>>(),
+        localizationsDelegates: <LocalizationsDelegate<dynamic>>[
+          _TestLocalizationsDelegate(translations),
+          ...AppLocalizations.localizationsDelegates
+              .skip(1)
+              .cast<LocalizationsDelegate<dynamic>>(),
+        ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: Builder(
           builder: (context) => Scaffold(
