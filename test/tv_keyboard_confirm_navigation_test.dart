@@ -33,8 +33,21 @@ void main() {
       ),
     );
 
+    // Wait for the widget tree and asynchronous localization
+    // delegates to finish building before searching for Open.
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Open'),
+      findsOneWidget,
+      reason: 'The keyboard launch button must be visible.',
+    );
+
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
+
+    // Confirm that the keyboard dialog opened successfully.
+    expect(find.byType(AlertDialog), findsOneWidget);
   }
 
   testWidgets(
