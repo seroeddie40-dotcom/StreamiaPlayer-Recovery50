@@ -1,28 +1,58 @@
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:streamia_player/core/localization/app_localizations.dart';
 import 'package:streamia_player/widgets/tv_text_keyboard.dart';
 
+/// Provides already loaded translations synchronously.
+/// This avoids waiting for asynchronous asset loading
+/// while the test widget tree is being constructed.
+class _TestLocalizationsDelegate
+    extends LocalizationsDelegate<AppLocalizations> {
+  final AppLocalizations translations;
+
+  const _TestLocalizationsDelegate(this.translations);
+
+  @override
+  bool isSupported(Locale locale) {
+    return locale.languageCode == translations.locale.languageCode;
+  }
+
+  @override
+  Future<AppLocalizations> load(Locale locale) {
+    return SynchronousFuture<AppLocalizations>(translations);
+  }
+
+  @override
+  bool shouldReload(_TestLocalizationsDelegate old) {
+    return !identical(translations, old.translations);
+  }
+}
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   Future<void> open(
     WidgetTester tester,
     TextEditingController controller,
     VoidCallback onConfirmed,
   ) async {
-    // Load the language asset before building the localized app.
+    // Load the actual German translations before building the app.
+    final translations = AppLocalizations(const Locale('de'));
+
     await tester.runAsync(() async {
-      await rootBundle.loadString('assets/lang/de.json');
+      await translations.load();
     });
 
     await tester.pumpWidget(
       MaterialApp(
         key: UniqueKey(),
         locale: const Locale('de'),
-        localizationsDelegates:
-            AppLocalizations.localizationsDelegates
-                .cast<LocalizationsDelegate<dynamic>>(),
+        localizationsDelegates: <LocalizationsDelegate<dynamic>>[
+          _TestLocalizationsDelegate(translations),
+          ...AppLocalizations.localizationsDelegates.skip(1),
+        ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
           body: Builder(
@@ -40,13 +70,12 @@ void main() {
       ),
     );
 
-    await tester.pump();
     await tester.pumpAndSettle();
 
     final openButton = find.text('Open');
 
     if (openButton.evaluate().isEmpty) {
-      debugPrint('STREAMIA LOCALIZATION DIAGNOSTIC');
+      debugPrint('STREAMIA TV LOCALIZATION CHECK');
       debugPrint(
         'MaterialApp: ${find.byType(MaterialApp).evaluate().length}',
       );
@@ -54,7 +83,7 @@ void main() {
         'Scaffold: ${find.byType(Scaffold).evaluate().length}',
       );
       debugPrint(
-        'Open button: ${openButton.evaluate().length}',
+        'Open: ${openButton.evaluate().length}',
       );
       debugDumpApp();
     }
@@ -62,7 +91,7 @@ void main() {
     expect(
       openButton,
       findsOneWidget,
-      reason: 'Localized test screen must finish loading.',
+      reason: 'Localized test screen must be visible.',
     );
 
     await tester.tap(openButton);
@@ -79,7 +108,11 @@ void main() {
 
       var calls = 0;
 
-      await open(tester, controller, () => calls++);
+      await open(
+        tester,
+        controller,
+        () => calls++,
+      );
 
       await tester.tap(find.text('a').first);
       await tester.pumpAndSettle();
@@ -103,7 +136,11 @@ void main() {
 
       var calls = 0;
 
-      await open(tester, controller, () => calls++);
+      await open(
+        tester,
+        controller,
+        () => calls++,
+      );
 
       await tester.tap(find.text('a').first);
       await tester.pumpAndSettle();
