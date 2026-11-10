@@ -23,6 +23,126 @@ import 'screens/paywall_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/legal_disclaimer_screen.dart';
 
+/// Diagnostic error display for Flutter widget errors.
+///
+/// This is intended for test builds only.
+/// It does not change Supabase permissions or device approval.
+class _StreamiaDiagnosticError extends StatelessWidget {
+  final FlutterErrorDetails details;
+
+  const _StreamiaDiagnosticError({
+    required this.details,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final message = details.exceptionAsString();
+
+    final diagnostics = StringBuffer()
+      ..writeln('STREAMIA PLAYER - DIAGNOSE')
+      ..writeln()
+      ..writeln('Fehler:')
+      ..writeln(message)
+      ..writeln()
+      ..writeln('Stacktrace:')
+      ..writeln(details.stack?.toString() ?? 'Nicht verfügbar');
+
+    return Material(
+      color: const Color(0xFF101827),
+      child: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: 700,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.bug_report_rounded,
+                    color: Colors.orangeAccent,
+                    size: 56,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'STREAMIA - FEHLERDIAGNOSE',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 21,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Ein Flutter-Fehler wurde erkannt. '
+                    'Bitte kopiere die Fehlermeldung '
+                    'oder mache einen Screenshot.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white70,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF202C40),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: SelectableText(
+                      message,
+                      style: const TextStyle(
+                        color: Colors.orangeAccent,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.icon(
+                    onPressed: () {
+                      Clipboard.setData(
+                        ClipboardData(
+                          text: diagnostics.toString(),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.copy),
+                    label: const Text(
+                      'Fehlermeldung kopieren',
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Installs a diagnostic widget for errors occurring
+/// during Flutter widget building.
+class _StreamiaDiagnostics {
+  static bool _installed = false;
+
+  static void install() {
+    if (_installed) return;
+
+    _installed = true;
+
+    ErrorWidget.builder = (FlutterErrorDetails details) {
+      return _StreamiaDiagnosticError(
+        details: details,
+      );
+    };
+  }
+}
+
 class StreamiaApp extends StatelessWidget {
   final PrefsService prefsService;
 
@@ -33,6 +153,8 @@ class StreamiaApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    _StreamiaDiagnostics.install();
+
     final themeProvider = context.watch<ThemeProvider>();
     final localeProvider = context.watch<LocaleProvider>();
     final contentProvider = context.watch<ContentProvider>();
@@ -184,10 +306,14 @@ class _AccessStatusScreen extends StatelessWidget {
                 : 'Device approval pending';
 
         description = isTurkish
-            ? 'Bu cihaz kaydedildi ancak henüz onaylanmadı. Onaylandıktan sonra yeniden kontrol edin.'
+            ? 'Bu cihaz kaydedildi ancak henüz onaylanmadı. '
+              'Onaylandıktan sonra yeniden kontrol edin.'
             : isGerman
-                ? 'Dieses Gerät wurde registriert, ist aber noch nicht freigegeben. Nach der Freigabe kannst du den Status erneut prüfen.'
-                : 'This device is registered but not yet approved. Check again after approval.';
+                ? 'Dieses Gerät wurde registriert, ist aber '
+                  'noch nicht freigegeben. Nach der Freigabe '
+                  'kannst du den Status erneut prüfen.'
+                : 'This device is registered but not yet '
+                  'approved. Check again after approval.';
 
         symbol = Icons.hourglass_top_rounded;
         break;
@@ -200,10 +326,10 @@ class _AccessStatusScreen extends StatelessWidget {
                 : 'Device access blocked';
 
         description = isTurkish
-            ? 'Bu cihaz için erişim engellendi. Lütfen yöneticiyle iletişime geçin.'
+            ? 'Bu cihaz için erişim engellendi.'
             : isGerman
-                ? 'Dieses Gerät wurde gesperrt oder abgelehnt. Bitte kontaktiere den Administrator.'
-                : 'This device has been blocked or rejected. Please contact the administrator.';
+                ? 'Dieses Gerät wurde gesperrt oder abgelehnt.'
+                : 'This device has been blocked or rejected.';
 
         symbol = Icons.block_rounded;
         break;
@@ -217,12 +343,12 @@ class _AccessStatusScreen extends StatelessWidget {
 
         description = auth.error ??
             (isTurkish
-                ? 'Lütfen bağlantınızı kontrol edip tekrar deneyin.'
+                ? 'Lütfen tekrar deneyin.'
                 : isGerman
-                    ? 'Bitte überprüfe die Verbindung und versuche es erneut.'
-                    : 'Please check your connection and try again.');
+                    ? 'Bitte versuche es erneut.'
+                    : 'Please try again.');
 
-        symbol = Icons.wifi_off_rounded;
+        symbol = Icons.error_outline_rounded;
         break;
     }
 
@@ -259,7 +385,7 @@ class _AccessStatusScreen extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Text(
+                  SelectableText(
                     description,
                     textAlign: TextAlign.center,
                   ),
@@ -314,6 +440,7 @@ class _GlobalThemeToggle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeProvider = context.watch<ThemeProvider>();
+
     final isDark =
         themeProvider.themeMode == ThemeMode.dark;
 
