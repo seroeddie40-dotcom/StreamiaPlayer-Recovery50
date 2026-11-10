@@ -1099,7 +1099,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   Future<PlaybackStartChoice?> _askPlaybackStart({int? savedPosition, bool isSeries = false, bool hasProgress = false}) {
-    final duration = Duration(seconds: savedPosition);
+    final duration = Duration(seconds: savedPosition ?? 0);
     final label = _fmt(duration);
     return showDialog<PlaybackStartChoice>(
       context: context,
