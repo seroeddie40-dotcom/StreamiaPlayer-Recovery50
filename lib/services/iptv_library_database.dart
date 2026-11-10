@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
+import 'package:cryptography/cryptography.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../models/channel.dart';
 import '../models/vod_item.dart';
 import '../models/series.dart';
@@ -11,15 +13,55 @@ class StoredIptvLibrary {
   const StoredIptvLibrary({required this.channels, required this.vod, required this.series});
 }
 
-/// Persistent, per-playlist catalog. Credentials remain in PlaylistSourceStore.
+/// AES-256-GCM encrypted per-playlist catalog. Encryption key lives in secure storage.
+/// Deleting Android app data or losing the secure key makes this cache unreadable.
 class IptvLibraryDatabase {
   IptvLibraryDatabase._();
   static final IptvLibraryDatabase instance = IptvLibraryDatabase._();
   Database? _database;
+  static const _secureStorage = FlutterSecureStorage(
+    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+  );
+  static const _keyName = 'streamia_catalog_aes256_key_v2';
+  final AesGcm _cipher = AesGcm.with256bits();
+  SecretKey? _cachedKey;
+
+  Future<SecretKey> _getKey() async {
+    if (_cachedKey != null) return _cachedKey!;
+    var encoded = await _secureStorage.read(key: _keyName);
+    if (encoded == null) {
+      final fresh = await _cipher.newSecretKey();
+      final bytes = await fresh.extractBytes();
+      encoded = base64Encode(bytes);
+      await _secureStorage.write(key: _keyName, value: encoded);
+    }
+    final bytes = base64Decode(encoded);
+    if (bytes.length != 32) throw StateError('Invalid catalog encryption key');
+    return _cachedKey = SecretKey(bytes);
+  }
+
+  Future<String> _encrypt(Map<String, Object?> payload) async {
+    final box = await _cipher.encrypt(
+      utf8.encode(jsonEncode(payload)), secretKey: await _getKey(),
+    );
+    return base64Encode(<int>[...box.nonce, ...box.cipherText, ...box.mac.bytes]);
+  }
+
+  Future<Map<String, dynamic>> _decrypt(String encoded) async {
+    final bytes = base64Decode(encoded);
+    if (bytes.length < 28) throw const FormatException('Invalid encrypted catalog row');
+    final box = SecretBox(
+      bytes.sublist(12, bytes.length - 16),
+      nonce: bytes.sublist(0, 12),
+      mac: Mac(bytes.sublist(bytes.length - 16)),
+    );
+    final plaintext = await _cipher.decrypt(box, secretKey: await _getKey());
+    return jsonDecode(utf8.decode(plaintext)) as Map<String, dynamic>;
+  }
 
   Future<Database> get _db async {
     if (_database != null) return _database!;
-    final path = '${await getDatabasesPath()}/streamia_library_v1.db';
+    final path = '${await getDatabasesPath()}/streamia_library_secure_v2.db';
     return _database = await openDatabase(path, version: 1, onCreate: (db, _) async {
       await db.execute('CREATE TABLE libraries (source_key TEXT PRIMARY KEY, updated_at TEXT NOT NULL)');
       for (final table in ['channels', 'vod', 'series']) {
@@ -47,6 +89,22 @@ class IptvLibraryDatabase {
   }) async {
     if (sourceKey.trim().isEmpty) throw ArgumentError('sourceKey must not be empty');
     final db = await _db;
+    // Encrypt before opening the transaction. No stream URL is written as plaintext.
+    final encryptedChannels = <Map<String, Object?>>[];
+    final encryptedVod = <Map<String, Object?>>[];
+    final encryptedSeries = <Map<String, Object?>>[];
+    for (final item in channels) {
+      encryptedChannels.add({'source_key': sourceKey, 'item_id': item.id,
+        'payload': await _encrypt(_channelToJson(item))});
+    }
+    for (final item in vod) {
+      encryptedVod.add({'source_key': sourceKey, 'item_id': item.id,
+        'payload': await _encrypt(_vodToJson(item))});
+    }
+    for (final item in series) {
+      encryptedSeries.add({'source_key': sourceKey, 'item_id': item.id,
+        'payload': await _encrypt(_seriesToJson(item))});
+    }
     final total = channels.length + vod.length + series.length;
     var completed = 0;
     await db.transaction((txn) async {
@@ -73,15 +131,9 @@ class IptvLibraryDatabase {
           onProgress?.call(completed, total);
         }
       }
-      await insertRows('channels', channels.map((c) => {
-        'source_key': sourceKey, 'item_id': c.id, 'payload': jsonEncode(_channelToJson(c)),
-      }));
-      await insertRows('vod', vod.map((v) => {
-        'source_key': sourceKey, 'item_id': v.id, 'payload': jsonEncode(_vodToJson(v)),
-      }));
-      await insertRows('series', series.map((s) => {
-        'source_key': sourceKey, 'item_id': s.id, 'payload': jsonEncode(_seriesToJson(s)),
-      }));
+      await insertRows('channels', encryptedChannels);
+      await insertRows('vod', encryptedVod);
+      await insertRows('series', encryptedSeries);
       await txn.insert('libraries', {
         'source_key': sourceKey, 'updated_at': DateTime.now().toUtc().toIso8601String(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -94,7 +146,11 @@ class IptvLibraryDatabase {
     if (!await contains(sourceKey)) return null;
     Future<List<dynamic>> read(String table) async {
       final rows = await db.query(table, columns: ['payload'], where: 'source_key = ?', whereArgs: [sourceKey]);
-      return rows.map((row) => jsonDecode(row['payload'] as String)).toList();
+      final result = <Map<String, dynamic>>[];
+      for (final row in rows) {
+        result.add(await _decrypt(row['payload'] as String));
+      }
+      return result;
     }
     return StoredIptvLibrary(
       channels: (await read('channels')).map((v) => _channelFromJson(v as Map<String, dynamic>)).toList(growable: false),
