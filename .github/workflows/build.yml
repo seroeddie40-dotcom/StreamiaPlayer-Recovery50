@@ -44,8 +44,26 @@ jobs:
       - name: Static analysis
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Run Flutter tests
-        run: flutter test
+      # Diagnose: Testdateien unabhängig voneinander ausführen.
+      # Fehler stoppen diese Diagnoseschritte nicht, damit
+      # wir die Ergebnisse beider Dateien erhalten.
+      - name: Diagnose TV keyboard widget tests
+        id: keyboard_widget
+        continue-on-error: true
+        run: |
+          flutter test test/tv_keyboard_widget_test.dart \
+            --reporter expanded --concurrency=1
+
+      - name: Diagnose TV keyboard navigation tests
+        id: keyboard_navigation
+        continue-on-error: true
+        run: |
+          flutter test test/tv_keyboard_confirm_navigation_test.dart \
+            --reporter expanded --concurrency=1
+
+      # Alle Tests bleiben verpflichtend.
+      - name: Run all Flutter tests
+        run: flutter test --reporter expanded
 
       - name: Build installable debug APK
         run: flutter build apk --debug
