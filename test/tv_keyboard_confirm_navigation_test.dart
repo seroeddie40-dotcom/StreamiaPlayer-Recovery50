@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:streamia_player/core/localization/app_localizations.dart';
 import 'package:streamia_player/widgets/tv_text_keyboard.dart';
@@ -10,6 +11,11 @@ void main() {
     TextEditingController controller,
     VoidCallback onConfirmed,
   ) async {
+    // Load the language asset before building the localized app.
+    await tester.runAsync(() async {
+      await rootBundle.loadString('assets/lang/de.json');
+    });
+
     await tester.pumpWidget(
       MaterialApp(
         key: UniqueKey(),
@@ -34,63 +40,29 @@ void main() {
       ),
     );
 
+    await tester.pump();
     await tester.pumpAndSettle();
 
     final openButton = find.text('Open');
 
     if (openButton.evaluate().isEmpty) {
+      debugPrint('STREAMIA LOCALIZATION DIAGNOSTIC');
       debugPrint(
-        '========== STREAMIA TV DIAGNOSTIC START ==========',
+        'MaterialApp: ${find.byType(MaterialApp).evaluate().length}',
       );
-
       debugPrint(
-        'Open button missing after pumpAndSettle.',
+        'Scaffold: ${find.byType(Scaffold).evaluate().length}',
       );
-
       debugPrint(
-        'MaterialApp count: '
-        '${find.byType(MaterialApp).evaluate().length}',
+        'Open button: ${openButton.evaluate().length}',
       );
-
-      debugPrint(
-        'Scaffold count: '
-        '${find.byType(Scaffold).evaluate().length}',
-      );
-
-      debugPrint(
-        'ElevatedButton count: '
-        '${find.byType(ElevatedButton).evaluate().length}',
-      );
-
-      debugPrint(
-        'AlertDialog count: '
-        '${find.byType(AlertDialog).evaluate().length}',
-      );
-
-      debugPrint('Widget tree:');
       debugDumpApp();
-
-      final exception = tester.takeException();
-
-      if (exception != null) {
-        debugPrint(
-          'Flutter exception: $exception',
-        );
-      } else {
-        debugPrint(
-          'No pending Flutter exception.',
-        );
-      }
-
-      debugPrint(
-        '========== STREAMIA TV DIAGNOSTIC END ==========',
-      );
     }
 
     expect(
       openButton,
       findsOneWidget,
-      reason: 'Keyboard launch button must be visible.',
+      reason: 'Localized test screen must finish loading.',
     );
 
     await tester.tap(openButton);
@@ -107,11 +79,7 @@ void main() {
 
       var calls = 0;
 
-      await open(
-        tester,
-        controller,
-        () => calls++,
-      );
+      await open(tester, controller, () => calls++);
 
       await tester.tap(find.text('a').first);
       await tester.pumpAndSettle();
@@ -135,11 +103,7 @@ void main() {
 
       var calls = 0;
 
-      await open(
-        tester,
-        controller,
-        () => calls++,
-      );
+      await open(tester, controller, () => calls++);
 
       await tester.tap(find.text('a').first);
       await tester.pumpAndSettle();
