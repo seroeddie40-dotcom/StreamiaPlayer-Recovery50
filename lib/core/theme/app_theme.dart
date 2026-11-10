@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -27,11 +28,15 @@ class AppTheme {
           onPrimary: Colors.white,
           onSurface: Colors.white,
         ),
-        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
-        cardTheme: CardTheme(
+        textTheme: GoogleFonts.interTextTheme(
+          ThemeData.dark().textTheme,
+        ),
+        cardTheme: CardThemeData(
           color: darkSurface,
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: darkBg,
@@ -51,18 +56,24 @@ class AppTheme {
           onPrimary: Colors.white,
           onSurface: Color(0xFF1A1D2E),
         ),
-        textTheme: GoogleFonts.interTextTheme(ThemeData.light().textTheme),
-        cardTheme: CardTheme(
+        textTheme: GoogleFonts.interTextTheme(
+          ThemeData.light().textTheme,
+        ),
+        cardTheme: CardThemeData(
           color: lightSurface,
           elevation: 2,
           shadowColor: Colors.black12,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: lightBg,
           elevation: 0,
           centerTitle: false,
-          iconTheme: IconThemeData(color: Color(0xFF1A1D2E)),
+          iconTheme: IconThemeData(
+            color: Color(0xFF1A1D2E),
+          ),
         ),
       );
 }
