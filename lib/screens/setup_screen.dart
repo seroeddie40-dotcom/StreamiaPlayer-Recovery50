@@ -1,5 +1,5 @@
-
 import 'dart:io';
+import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
@@ -36,8 +36,8 @@ class SetupScreen extends StatefulWidget {
 class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   
-  final TextEditingController _m3uNameController = TextEditingController(text: 'Meine M3U-Playlist');
-  final TextEditingController _xtreamNameController = TextEditingController(text: 'Meine Xtream-Playlist');
+  final TextEditingController _m3uNameController = TextEditingController(text: 'M3U Playlist');
+  final TextEditingController _xtreamNameController = TextEditingController(text: 'Xtream Playlist');
   final TextEditingController _m3uController = TextEditingController();
   final TextEditingController _epgController = TextEditingController();
   final TextEditingController _xtreamServerController = TextEditingController();
@@ -49,6 +49,21 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   final FocusNode _xtreamConnectFocus = FocusNode(debugLabel: 'Xtream connect');
 
   bool _isLoading = false;
+  String? _loadingMessage;
+  String? _importError;
+
+  String _tr(String de, String tr, String en) {
+    final code = context.read<LocaleProvider>().locale.languageCode;
+    return code == 'tr' ? tr : code == 'de' ? de : en;
+  }
+
+  void _showError(String message) {
+    if (!mounted) return;
+    setState(() => _importError = message);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), duration: const Duration(seconds: 8)),
+    );
+  }
   String? _ipAddress;
   String? _qrLink;
 
@@ -101,7 +116,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   }
 
   Future<void> _pickFile(bool isM3u) async {
-    setState(() => _isLoading = true);
+    setState(() { _isLoading = true; _importError = null; });
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -132,10 +147,11 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
 
   Future<void> _processPlaylist(String input) async {
     if (input.isEmpty) return;
-    setState(() => _isLoading = true);
+    setState(() { _isLoading = true; _importError = null; });
     try {
       final contentProvider = context.read<ContentProvider>();
-      await PlaylistParser.parseAndLoad(input, contentProvider);
+      await PlaylistParser.parseAndLoad(input, contentProvider)
+          .timeout(const Duration(seconds: 90));
       if (input.trim().startsWith('http://') || input.trim().startsWith('https://')) {
         await PlaylistSourceStore().save(PlaylistSourceConfig(
           sourceKey: contentProvider.sourceKey, type: 'm3u', m3uUrl: input.trim(),
@@ -154,7 +170,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       }
       await PlaylistProfileStore().upsert(PlaylistProfile(
         sourceKey: contentProvider.sourceKey,
-        displayName: _m3uNameController.text.trim().isEmpty ? 'Meine M3U-Playlist' : _m3uNameController.text.trim(),
+        displayName: _m3uNameController.text.trim().isEmpty ? 'M3U Playlist' : _m3uNameController.text.trim(),
         type: 'm3u',
         folderName: '',
         isVisible: true,
@@ -184,6 +200,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   }
 
   Future<void> _connectXtream() async {
+    if (_isLoading) return;
     final server = _xtreamServerController.text.trim();
     final user = _xtreamUserController.text.trim();
     final pass = _xtreamPassController.text;
@@ -197,14 +214,19 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() { _isLoading = true; _importError = null; _loadingMessage = null; });
     XtreamService? service;
     try {
       service = XtreamService(baseUrl: server, username: user, password: pass);
       // Fetch the complete library before replacing the currently displayed data.
-      final live = await service.getLiveStreams();
-      final vod = await service.getVodStreams();
-      final series = await service.getSeries();
+      setState(() => _loadingMessage = _tr('Live-TV wird geladen…', 'Canlı TV yükleniyor…', 'Loading live TV…'));
+      final live = await service.getLiveStreams().timeout(const Duration(seconds: 45));
+      if (!mounted) return;
+      setState(() => _loadingMessage = _tr('Filme werden geladen…', 'Filmler yükleniyor…', 'Loading movies…'));
+      final vod = await service.getVodStreams().timeout(const Duration(seconds: 45));
+      if (!mounted) return;
+      setState(() => _loadingMessage = _tr('Serien werden geladen…', 'Diziler yükleniyor…', 'Loading series…'));
+      final series = await service.getSeries().timeout(const Duration(seconds: 45));
       if (!mounted) return;
       // Stable source identity excludes the password: changing credentials must not
       // silently create a different favorites namespace, and secrets must never
@@ -224,13 +246,14 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       ));
       await PlaylistProfileStore().upsert(PlaylistProfile(
         sourceKey: sourceKey,
-        displayName: _xtreamNameController.text.trim().isEmpty ? 'Meine Xtream-Playlist' : _xtreamNameController.text.trim(),
+        displayName: _xtreamNameController.text.trim().isEmpty ? 'Xtream Playlist' : _xtreamNameController.text.trim(),
         type: 'xtream',
         folderName: '',
         isVisible: true,
         isActive: true,
         createdAt: DateTime.now(),
       ));
+      context.read<ContentProvider>().setLoaded(true);
       if (widget.returnToPreviousOnSuccess) {
         Navigator.of(context).pop(true);
       } else {
@@ -241,7 +264,11 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e is FormatException ? 'Ungültige Antwort vom Xtream-Server.' : 'Xtream-Verbindung fehlgeschlagen. Bitte Server, Zugangsdaten und Netzwerk prüfen.')),
+          SnackBar(content: Text(e is TimeoutException
+              ? _tr('Zeitüberschreitung: Der Server antwortet nicht. Bitte Adresse, Netzwerk und Zugangsdaten prüfen.', 'Zaman aşımı: Sunucu yanıt vermiyor. Adresi, ağı ve giriş bilgilerini kontrol edin.', 'Timeout: Server did not respond. Check address, network and credentials.')
+              : e is FormatException
+                  ? _tr('Ungültige Serverantwort.', 'Sunucudan geçersiz yanıt.', 'Invalid server response.')
+                  : _tr('Xtream-Verbindung fehlgeschlagen. Bitte Zugangsdaten und Netzwerk prüfen.', 'Xtream bağlantısı başarısız. Giriş bilgilerini ve ağı kontrol edin.', 'Xtream connection failed. Check credentials and network.'))),
         );
       }
     } finally {
@@ -291,7 +318,12 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         ),
       ),
       body: _isLoading
-        ? const Center(child: CircularProgressIndicator())
+        ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+            const CircularProgressIndicator(),
+            const SizedBox(height: 18),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(_loadingMessage ?? _tr('Playlist wird geladen…', 'Oynatma listesi yükleniyor…', 'Loading playlist…'), textAlign: TextAlign.center)),
+          ]))
         : FocusTraversalGroup(
             policy: ReadingOrderTraversalPolicy(),
             child: TabBarView(
