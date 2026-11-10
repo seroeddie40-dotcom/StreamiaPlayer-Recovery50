@@ -1,0 +1,6 @@
+-- Admin device management is created in migration 202611080001_per_device_trial_and_access.sql
+-- together with admin_device_limits and admin_list_my_devices().
+-- This file is intentionally a no-op migration placeholder to preserve the
+-- migration sequence from the recovery package. Do not duplicate CREATE OR REPLACE
+-- FUNCTION signatures here: PostgreSQL cannot change a function's TABLE return
+-- type through CREATE OR REPLACE.
