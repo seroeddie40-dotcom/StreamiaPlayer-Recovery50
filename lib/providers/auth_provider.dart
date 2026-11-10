@@ -11,29 +11,47 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/supabase_config.dart';
 import '../core/storage/prefs_service.dart';
 
-/// Supabase authentication + server-authoritative per-device access.
-/// A local identifier is only a fallback; the server owns all entitlement decisions.
+/// Supabase authentication and server-authoritative access.
+///
+/// Account access and device approval are separate checks.
+/// A network or RPC error must never be treated as an
+/// expired subscription.
 class AuthProvider extends ChangeNotifier {
   static const MethodChannel _deviceChannel =
       MethodChannel('com.streamia/device_identity');
-  static const _installKey = 'streamia_installation_id';
+
+  static const String _installKey =
+      'streamia_installation_id';
 
   final PrefsService _prefs;
+
   String? _installationId;
   String? _deviceId;
   String? _deviceStatus;
+
   Map<String, dynamic>? _access;
+
   bool _busy = false;
   bool _accessChecked = false;
+
   String? _error;
 
   AuthProvider(this._prefs) {
     _installationId = _prefs.getString(_installKey);
+
     if (SupabaseConfig.isConfigured) {
       Supabase.instance.client.auth.onAuthStateChange
-          .listen((_) => notifyListeners());
+          .listen((event) {
+        if (event.event == AuthChangeEvent.signedOut) {
+          _clearAccess();
+        }
+        notifyListeners();
+      });
+
       Future<void>.microtask(() async {
-        if (isLoggedIn) await refreshDeviceAndAccess();
+        if (isLoggedIn) {
+          await refreshDeviceAndAccess();
+        }
       });
     }
   }
@@ -44,16 +62,78 @@ class AuthProvider extends ChangeNotifier {
           : null;
 
   User? get user => _client?.auth.currentUser;
+
   bool get isLoggedIn => user != null;
+
   bool get isBusy => _busy;
+
   bool get accessChecked => _accessChecked;
-  bool get hasAccess => _access?['has_access'] == true;
+
   String? get error => _error;
+
   String? get deviceId => _deviceId;
+
   String? get deviceStatus => _deviceStatus;
+
   Map<String, dynamic>? get access => _access;
+
   String get macAddress =>
       _installationId ?? 'Noch nicht registriert';
+
+  /// The account has a valid server-side entitlement.
+  bool get hasAccountAccess =>
+      _access?['has_access'] == true;
+
+  /// The current device has been explicitly approved.
+  bool get deviceApproved =>
+      _deviceStatus == 'approved';
+
+  bool get devicePending =>
+      _deviceStatus == 'pending';
+
+  bool get deviceBlocked =>
+      _deviceStatus == 'blocked' ||
+      _deviceStatus == 'rejected' ||
+      _deviceStatus == 'revoked';
+
+  /// Full access requires both account entitlement
+  /// and an approved device.
+  bool get hasAccess =>
+      _accessChecked &&
+      _error == null &&
+      hasAccountAccess &&
+      deviceApproved;
+
+  /// Only a confirmed missing account entitlement
+  /// may lead to the subscription page.
+  bool get requiresPayment =>
+      _accessChecked &&
+      _error == null &&
+      _access != null &&
+      !hasAccountAccess;
+
+  String? get accessReason =>
+      _access?['access_reason']?.toString();
+
+  int get maxDevices {
+    final value = _access?['max_devices'];
+
+    if (value is int) return value;
+
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  bool get isAdminGrant =>
+      _access?['manual_override'] == true &&
+      _access?['entitlement_source'] == 'admin_grant';
+
+  void _clearAccess() {
+    _deviceId = null;
+    _deviceStatus = null;
+    _access = null;
+    _accessChecked = false;
+    _error = null;
+  }
 
   Future<String> _getInstallationId() async {
     if (_installationId != null &&
@@ -62,14 +142,21 @@ class AuthProvider extends ChangeNotifier {
     }
 
     final random = Random.secure();
-    final bytes =
-        List<int>.generate(32, (_) => random.nextInt(256));
+
+    final bytes = List<int>.generate(
+      32,
+      (_) => random.nextInt(256),
+    );
 
     _installationId =
         base64Url.encode(bytes).replaceAll('=', '');
 
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_installKey, _installationId!);
+
+    await prefs.setString(
+      _installKey,
+      _installationId!,
+    );
 
     return _installationId!;
   }
@@ -82,17 +169,39 @@ class AuthProvider extends ChangeNotifier {
       try {
         nativeId = await _deviceChannel
             .invokeMethod<String>('getAndroidId');
-      } catch (_) {}
+      } catch (_) {
+        // Fallback to the installation identifier.
+      }
     }
 
-    // Never use a MAC address: modern Android does not expose
-    // a reliable hardware MAC.
     final source =
-        (nativeId != null && nativeId.isNotEmpty)
+        nativeId != null && nativeId.isNotEmpty
             ? 'android:$nativeId'
             : 'installation:${await _getInstallationId()}';
 
-    return sha256.convert(utf8.encode(source)).toString();
+    return sha256.convert(
+      utf8.encode(source),
+    ).toString();
+  }
+
+  Future<String> _readDeviceName() async {
+    if (!kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final name = await _deviceChannel
+            .invokeMethod<String>('getDeviceName');
+
+        if (name != null && name.isNotEmpty) {
+          return name;
+        }
+      } catch (_) {
+        // Use the platform fallback.
+      }
+    }
+
+    return kIsWeb
+        ? 'Web-Gerät'
+        : defaultTargetPlatform.name;
   }
 
   Future<void> signIn(
@@ -107,6 +216,8 @@ class AuthProvider extends ChangeNotifier {
           'Supabase ist nicht konfiguriert.',
         );
       }
+
+      _clearAccess();
 
       await client.auth.signInWithPassword(
         email: email.trim(),
@@ -130,6 +241,8 @@ class AuthProvider extends ChangeNotifier {
         );
       }
 
+      _clearAccess();
+
       final response = await client.auth.signUp(
         email: email.trim(),
         password: password,
@@ -141,99 +254,136 @@ class AuthProvider extends ChangeNotifier {
     });
   }
 
+  /// Refresh account entitlement and device approval.
+  ///
+  /// Existing Supabase RPCs:
+  /// - register_my_device
+  /// - get_my_access_status
+  /// - start_streamia_trial
   Future<void> refreshDeviceAndAccess() async {
     final client = _client;
 
     if (client == null ||
         client.auth.currentUser == null) {
+      _clearAccess();
+      notifyListeners();
       return;
     }
 
-    final installationId =
-        await _getInstallationId();
+    _accessChecked = false;
+    _error = null;
+    _access = null;
+    _deviceStatus = null;
 
-    final fingerprint =
-        await _physicalFingerprint();
+    notifyListeners();
 
-    final platform = kIsWeb
-        ? 'web'
-        : switch (defaultTargetPlatform) {
-            TargetPlatform.android => 'android',
-            TargetPlatform.iOS => 'ios',
-            _ => 'unknown',
-          };
+    try {
+      final installationId =
+          await _getInstallationId();
 
-    final deviceName = await _readDeviceName();
+      // Retain the existing fingerprint helper for
+      // future server-side device identity migration.
+      // The current register_my_device RPC does not
+      // accept a fingerprint parameter.
+      await _physicalFingerprint();
 
-    final registered = await client.rpc(
-      'register_my_device_v2',
-      params: {
-        'p_installation_id': installationId,
-        'p_fingerprint_hash': fingerprint,
-        'p_device_name': deviceName,
-        'p_platform': platform,
-        'p_legacy_installation_id': installationId,
-      },
-    );
+      final deviceName =
+          await _readDeviceName();
 
-    final row =
-        registered is List && registered.isNotEmpty
-            ? Map<String, dynamic>.from(
-                registered.first as Map,
-              )
-            : Map<String, dynamic>.from(
-                registered as Map,
-              );
+      final platform = kIsWeb
+          ? 'web'
+          : switch (defaultTargetPlatform) {
+              TargetPlatform.android => 'android',
+              TargetPlatform.iOS => 'ios',
+              _ => 'unknown',
+            };
 
-    _deviceId = row['device_id']?.toString();
-    _deviceStatus =
-        row['device_status']?.toString();
-
-    final accessResult = await client.rpc(
-      'get_my_device_access_status',
-      params: {
-        'p_installation_id':
-            row['canonical_installation_id'] ??
-                installationId,
-      },
-    );
-
-    if (accessResult is List &&
-        accessResult.isNotEmpty) {
-      _access = Map<String, dynamic>.from(
-        accessResult.first as Map,
+      final registered = await client.rpc(
+        'register_my_device',
+        params: {
+          'p_installation_id': installationId,
+          'p_device_name': deviceName,
+          'p_platform': platform,
+        },
       );
-    } else if (accessResult is Map) {
-      _access = Map<String, dynamic>.from(
-        accessResult,
+
+      final registrationRow =
+          _firstRow(registered);
+
+      if (registrationRow == null) {
+        throw Exception(
+          'Die Geräteregistrierung hat keine Daten zurückgegeben.',
+        );
+      }
+
+      _deviceId =
+          registrationRow['device_id']?.toString();
+
+      _deviceStatus =
+          registrationRow['device_status']?.toString();
+
+      var accountResult = await client.rpc(
+        'get_my_access_status',
       );
-    } else {
-      _access = {
-        'has_access': false,
-        'access_reason': 'access_status_missing',
-      };
+
+      var accountRow = _firstRow(accountResult);
+
+      // Start an eligible account trial only if
+      // no trial has already been started.
+      //
+      // Never call the trial RPC for admin grants
+      // or existing paid subscriptions.
+      if (accountRow != null &&
+          accountRow['has_access'] != true &&
+          accountRow['access_status'] == 'trial' &&
+          accountRow['entitlement_source'] == 'trial' &&
+          accountRow['trial_ends_at'] == null &&
+          accountRow['manual_override'] != true) {
+        await client.rpc('start_streamia_trial');
+
+        accountResult = await client.rpc(
+          'get_my_access_status',
+        );
+
+        accountRow = _firstRow(accountResult);
+      }
+
+      if (accountRow == null) {
+        throw Exception(
+          'Keine Kontoberechtigung gefunden. '
+          'Bitte die Supabase-Berechtigungen prüfen.',
+        );
+      }
+
+      _access = accountRow;
+      _accessChecked = true;
+      _error = null;
+    } catch (e) {
+      // A failed verification is not an expired trial.
+      _access = null;
+      _accessChecked = true;
+      _error = _friendlyError(e);
     }
 
-    _accessChecked = true;
     notifyListeners();
   }
 
-  Future<String> _readDeviceName() async {
-    if (!kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android) {
-      try {
-        final name = await _deviceChannel
-            .invokeMethod<String>('getDeviceName');
-
-        if (name != null && name.isNotEmpty) {
-          return name;
-        }
-      } catch (_) {}
+  Map<String, dynamic>? _firstRow(
+    dynamic result,
+  ) {
+    if (result is Map) {
+      return Map<String, dynamic>.from(result);
     }
 
-    return kIsWeb
-        ? 'Web-Gerät'
-        : defaultTargetPlatform.name;
+    if (result is List && result.isNotEmpty) {
+      final first = result.first;
+
+      if (first is Map) {
+        return Map<String, dynamic>.from(first);
+      }
+    }
+
+    return null;
   }
 
   Future<void> _run(
@@ -241,24 +391,18 @@ class AuthProvider extends ChangeNotifier {
   ) async {
     _busy = true;
     _error = null;
+
     notifyListeners();
 
     try {
       await action();
     } catch (e) {
       _error = _friendlyError(e);
-
-      if (isLoggedIn && !_accessChecked) {
-        _access = {
-          'has_access': false,
-          'access_reason': 'verification_failed',
-        };
-        _accessChecked = true;
-      }
+      _accessChecked = true;
+    } finally {
+      _busy = false;
+      notifyListeners();
     }
-
-    _busy = false;
-    notifyListeners();
   }
 
   String _friendlyError(Object error) {
@@ -279,11 +423,7 @@ class AuthProvider extends ChangeNotifier {
   Future<void> logout() async {
     await _client?.auth.signOut();
 
-    _deviceId = null;
-    _deviceStatus = null;
-    _access = null;
-    _accessChecked = false;
-    _error = null;
+    _clearAccess();
 
     notifyListeners();
   }
