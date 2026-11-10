@@ -33,9 +33,7 @@ class _AdminDevicesScreenState
 
     try {
       final client = Supabase.instance.client;
-
-      final admin =
-          await client.rpc('is_streamia_admin');
+      final admin = await client.rpc('is_streamia_admin');
 
       if (admin != true) {
         throw Exception('Adminzugriff erforderlich.');
@@ -246,7 +244,6 @@ class _AdminDevicesScreenState
               isThreeLine: true,
               trailing: PopupMenuButton<String>(
                 tooltip: 'Gerätestatus ändern',
-                autofocus: index == 0,
                 onSelected: (value) =>
                     _setStatus(device, value),
                 itemBuilder: (_) => const [
