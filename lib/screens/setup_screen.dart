@@ -295,315 +295,305 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     super.dispose();
   }
 
+  // Premium setup UI: responsive on phones, tablets and Android TV.
+  static const Color _blue = Color(0xFF238BFF);
+  static const Color _aqua = Color(0xFF28D6CF);
+
+  String _copy(String de, String tr, String en) => _tr(de, tr, en);
+
+  Widget _panel({required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151F30),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: const Color(0xFF2B3C55)),
+        boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 24, offset: Offset(0, 12))],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _fieldTitle(String title, {String? hint}) => Padding(
+    padding: const EdgeInsets.only(bottom: 9),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Colors.white)),
+      if (hint != null) ...[
+        const SizedBox(height: 3),
+        Text(hint, style: const TextStyle(fontSize: 12, color: Color(0xFF9EADC4))),
+      ],
+    ]),
+  );
+
+  InputDecoration _decoration(String hint, IconData icon, {Widget? suffix}) => InputDecoration(
+    hintText: hint,
+    hintStyle: const TextStyle(color: Color(0xFF8393AA)),
+    prefixIcon: Icon(icon, color: _aqua),
+    suffixIcon: suffix,
+    filled: true,
+    fillColor: const Color(0xFF0D1625),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 17),
+    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFF34445C))),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: _aqua, width: 2)),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+  );
+
+  Widget _actionButton({required String text, required IconData icon, required VoidCallback? onPressed, bool primary = true, FocusNode? focusNode}) {
+    final style = ButtonStyle(
+      minimumSize: WidgetStateProperty.all(const Size(0, 56)),
+      padding: WidgetStateProperty.all(const EdgeInsets.symmetric(horizontal: 16, vertical: 13)),
+      shape: WidgetStateProperty.all(RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+      backgroundColor: WidgetStateProperty.all(primary ? _blue : const Color(0xFF202F45)),
+      foregroundColor: WidgetStateProperty.all(Colors.white),
+      side: primary ? null : WidgetStateProperty.all(const BorderSide(color: Color(0xFF405575))),
+    );
+    return ElevatedButton.icon(
+      focusNode: focusNode,
+      style: style,
+      onPressed: onPressed,
+      icon: Icon(icon, size: 20),
+      label: Text(text, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700)),
+    );
+  }
+
+  Widget _pageContent({required IconData icon, required String title, required String description, required Widget form}) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 36),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.all(13),
+                decoration: BoxDecoration(color: _blue.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(16)),
+                child: Icon(icon, color: _aqua, size: 28),
+              ),
+              const SizedBox(width: 14),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(title, style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w800, color: Colors.white)),
+                const SizedBox(height: 4),
+                Text(description, style: const TextStyle(fontSize: 13, color: Color(0xFFA6B5CB), height: 1.4)),
+              ])),
+            ]),
+            const SizedBox(height: 22),
+            _panel(child: form),
+            const SizedBox(height: 18),
+            Row(children: [
+              const Icon(Icons.shield_outlined, size: 16, color: _aqua),
+              const SizedBox(width: 8),
+              Expanded(child: Text(_copy('Deine Zugangsdaten werden geschützt gespeichert.', 'Giriş bilgileriniz güvenli şekilde saklanır.', 'Your credentials are stored securely.'), style: const TextStyle(color: Color(0xFF9EADC4), fontSize: 12))),
+            ]),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _loadingView() {
+    return Center(child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 450),
+      child: _panel(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.cloud_download_outlined, size: 50, color: _aqua),
+        const SizedBox(height: 20),
+        const LinearProgressIndicator(color: _aqua, backgroundColor: Color(0xFF33445C)),
+        const SizedBox(height: 20),
+        Text(_loadingMessage ?? _copy('Playlist wird geladen…', 'Oynatma listesi yükleniyor…', 'Loading playlist…'),
+          textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 10),
+        Text(_copy('Bitte warten. Der Fortschrittsbalken zeigt die laufende Verarbeitung, keine geschätzten Prozentwerte.',
+          'Lütfen bekleyin. İlerleme çubuğu işlemi gösterir, tahmini yüzde vermez.',
+          'Please wait. The bar indicates activity, not an estimated percentage.'),
+          textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFF9EADC4), fontSize: 12)),
+      ])),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final auth = context.watch<AuthProvider>();
-
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(l10n.t('setup_title')),
-        automaticallyImplyLeading: widget.returnToPreviousOnSuccess,
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          indicatorColor: AppTheme.electricBlue,
-          labelColor: AppTheme.electricBlue,
-          unselectedLabelColor: Colors.grey,
-          tabs: [
-            Tab(icon: const Icon(Icons.qr_code), text: l10n.t('tab_qr')),
-            Tab(text: l10n.t('tab_m3u')),
-            Tab(text: l10n.t('tab_xtream')),
-          ],
-        ),
+    return Theme(
+      data: ThemeData.dark(useMaterial3: true).copyWith(
+        colorScheme: const ColorScheme.dark(primary: _blue, secondary: _aqua, surface: Color(0xFF101A2A)),
+        scaffoldBackgroundColor: const Color(0xFF0A1220),
       ),
-      body: _isLoading
-        ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const CircularProgressIndicator(),
-            const SizedBox(height: 18),
-            Padding(padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(_loadingMessage ?? _tr('Playlist wird geladen…', 'Oynatma listesi yükleniyor…', 'Loading playlist…'), textAlign: TextAlign.center)),
-          ]))
-        : FocusTraversalGroup(
-            policy: ReadingOrderTraversalPolicy(),
-            child: TabBarView(
+      child: Scaffold(
+        backgroundColor: const Color(0xFF0A1220),
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF101A2A),
+          automaticallyImplyLeading: widget.returnToPreviousOnSuccess,
+          toolbarHeight: 72,
+          title: Row(children: [
+            Container(width: 36, height: 36, alignment: Alignment.center,
+              decoration: BoxDecoration(gradient: const LinearGradient(colors: [_blue, _aqua]), borderRadius: BorderRadius.circular(11)),
+              child: const Icon(Icons.play_arrow_rounded, color: Colors.white)),
+            const SizedBox(width: 12),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const Text('STREAMIA', style: TextStyle(fontWeight: FontWeight.w900, letterSpacing: 1.8, fontSize: 17)),
+              Text(l10n.t('setup_title'), maxLines: 1, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12, color: Color(0xFF9EADC4))),
+            ])),
+          ]),
+          bottom: TabBar(
             controller: _tabController,
-            children: [
-              _buildQrTab(auth, l10n),
-              _buildM3uTab(l10n),
-              _buildXtreamTab(l10n),
+            indicatorColor: _aqua,
+            indicatorWeight: 3,
+            labelColor: Colors.white,
+            unselectedLabelColor: const Color(0xFF91A0B6),
+            tabs: [
+              Tab(icon: const Icon(Icons.qr_code_2), text: l10n.t('tab_qr')),
+              Tab(icon: const Icon(Icons.playlist_play_rounded), text: l10n.t('tab_m3u')),
+              Tab(icon: const Icon(Icons.dns_outlined), text: l10n.t('tab_xtream')),
             ],
           ),
         ),
+        body: _isLoading ? _loadingView() : FocusTraversalGroup(
+          policy: ReadingOrderTraversalPolicy(),
+          child: TabBarView(controller: _tabController, children: [
+            _buildQrTab(auth, l10n),
+            _buildM3uTab(l10n),
+            _buildXtreamTab(l10n),
+          ]),
+        ),
+      ),
     );
   }
 
   Widget _buildQrTab(AuthProvider auth, AppLocalizations l10n) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        children: [
-          const SizedBox(height: 20),
-          Text(
-            l10n.t('qr_title'),
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            l10n.t('qr_desc'),
-            style: const TextStyle(color: Colors.grey),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 32),
-          
-          if (_qrLink != null)
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: QrImageView(
-                data: _qrLink!,
-                version: QrVersions.auto,
-                size: 250,
-                backgroundColor: Colors.white,
-              ),
-            )
-          else
-            const CircularProgressIndicator(),
-
-          const SizedBox(height: 32),
-          
-          Card(
-            color: AppTheme.darkSurface,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.wifi, color: AppTheme.electricBlue),
-                    title: Text(l10n.t('local_ip')),
-                    subtitle: Text(_ipAddress ?? 'Lade...', style: const TextStyle(fontFamily: 'monospace')),
-                  ),
-                  const Divider(),
-                  ListTile(
-                    leading: const Icon(Icons.devices, color: AppTheme.electricBlue),
-                    title: Text(l10n.t('mac_address')),
-                    subtitle: Text(auth.macAddress, style: const TextStyle(fontFamily: 'monospace')),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          const SizedBox(height: 32),
-          ElevatedButton.icon(
-            autofocus: true,
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.electricBlue, overlayColor: Colors.white24),
-            onPressed: () => _tabController.animateTo(1),
-            icon: const Icon(Icons.edit, color: Colors.white),
-            label: Text(l10n.t('qr_btn_manual'), style: const TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
+    return _pageContent(
+      icon: Icons.qr_code_2,
+      title: l10n.t('qr_title'),
+      description: l10n.t('qr_desc'),
+      form: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Center(child: _qrLink == null
+          ? const Padding(padding: EdgeInsets.all(30), child: Icon(Icons.wifi_off_outlined, color: _aqua, size: 48))
+          : Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18)),
+              child: QrImageView(data: _qrLink!, version: QrVersions.auto, size: 220, backgroundColor: Colors.white))),
+        const SizedBox(height: 18),
+        if (_qrLink == null) Text(_copy('QR-Verbindung derzeit nicht verfügbar. Nutze die manuelle Einrichtung.',
+          'QR bağlantısı şu anda kullanılamıyor. Manuel kurulumu kullanın.',
+          'QR connection unavailable. Use manual setup.'), textAlign: TextAlign.center,
+          style: const TextStyle(color: Color(0xFFB4C1D2))),
+        const SizedBox(height: 16),
+        _infoRow(Icons.wifi_rounded, l10n.t('local_ip'), _ipAddress ?? '—'),
+        const Divider(color: Color(0xFF33445C)),
+        _infoRow(Icons.devices_outlined, l10n.t('mac_address'), auth.macAddress),
+        const SizedBox(height: 22),
+        _actionButton(text: l10n.t('qr_btn_manual'), icon: Icons.edit_outlined,
+          onPressed: () => _tabController.animateTo(1)),
+      ]),
     );
   }
 
+  Widget _infoRow(IconData icon, String title, String value) => Row(children: [
+    Icon(icon, color: _aqua), const SizedBox(width: 12),
+    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(title, style: const TextStyle(color: Color(0xFF9EADC4), fontSize: 12)),
+      const SizedBox(height: 3),
+      SelectableText(value, style: const TextStyle(color: Colors.white, fontSize: 14)),
+    ])),
+  ]);
+
   Widget _buildM3uTab(AppLocalizations l10n) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          TextField(
-            controller: _m3uNameController,
-            textCapitalization: TextCapitalization.none,
-            decoration: InputDecoration(labelText: l10n.t('playlist_display_name'), border: const OutlineInputBorder(), prefixIcon: const Icon(Icons.label_outline)),
-          ),
-          const SizedBox(height: 16),
-          Text(l10n.t('m3u_url'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: 8),
-          VoiceInputField(
-            controller: _m3uController,
-            appLanguageCode: context.watch<LocaleProvider>().locale.languageCode,
-            keyboardType: TextInputType.url,
-            maxLines: 3,
-            decoration: const InputDecoration(
-              hintText: 'http://example.com/playlist.m3u',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.link),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text(l10n.t('epg_url'), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-          const SizedBox(height: 8),
-          VoiceInputField(
-            controller: _epgController,
-            appLanguageCode: context.watch<LocaleProvider>().locale.languageCode,
-            keyboardType: TextInputType.url,
-            decoration: const InputDecoration(
-              hintText: 'http://example.com/epg.xml',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.calendar_today),
-            ),
-          ),
-          const SizedBox(height: 32),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(overlayColor: AppTheme.electricBlue.withValues(alpha: 0.18)),
-                  onPressed: () => _pickFile(true),
-                  icon: const Icon(Icons.folder_open),
-                  label: Text(l10n.t('btn_m3u_phone'), textAlign: TextAlign.center),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(overlayColor: AppTheme.electricBlue.withValues(alpha: 0.18)),
-                  onPressed: () => _pickFile(false),
-                  icon: const Icon(Icons.calendar_today),
-                  label: Text(l10n.t('btn_epg_phone'), textAlign: TextAlign.center),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 32),
-          SizedBox(
-            width: double.infinity,
-            height: 55,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.electricBlue,
-                overlayColor: Colors.white24,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              onPressed: () {
-                if (_m3uController.text.isNotEmpty) {
-                  _processPlaylist(_m3uController.text);
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Bitte M3U Daten eingeben oder hochladen')));
-                }
-              },
-              child: Text(l10n.t('btn_start'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-            ),
-          ),
-        ],
-      ),
+    final language = context.watch<LocaleProvider>().locale.languageCode;
+    return _pageContent(
+      icon: Icons.playlist_play_rounded,
+      title: _copy('M3U-Playlist hinzufügen', 'M3U oynatma listesi ekle', 'Add M3U playlist'),
+      description: _copy('Playlist-Link eingeben oder eine Datei von deinem Gerät auswählen.',
+        'Oynatma listesi bağlantısı girin veya cihazınızdan dosya seçin.',
+        'Enter a playlist link or select a file from your device.'),
+      form: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _fieldTitle(l10n.t('playlist_display_name')),
+        TextField(controller: _m3uNameController, textCapitalization: TextCapitalization.none,
+          decoration: _decoration(_copy('Meine Playlist', 'Oynatma listem', 'My playlist'), Icons.drive_file_rename_outline)),
+        const SizedBox(height: 20),
+        _fieldTitle(l10n.t('m3u_url')),
+        VoiceInputField(controller: _m3uController, appLanguageCode: language,
+          keyboardType: TextInputType.url, maxLines: 3,
+          decoration: _decoration('https://example.com/playlist.m3u', Icons.link_rounded)),
+        const SizedBox(height: 20),
+        _fieldTitle(l10n.t('epg_url'), hint: _copy('Optional – Programmübersicht', 'İsteğe bağlı – yayın rehberi', 'Optional – program guide')),
+        VoiceInputField(controller: _epgController, appLanguageCode: language, keyboardType: TextInputType.url,
+          decoration: _decoration('https://example.com/epg.xml', Icons.calendar_month_outlined)),
+        const SizedBox(height: 22),
+        LayoutBuilder(builder: (context, constraints) {
+          final narrow = constraints.maxWidth < 440;
+          final first = _actionButton(text: l10n.t('btn_m3u_phone'), icon: Icons.folder_open_outlined, primary: false, onPressed: () => _pickFile(true));
+          final second = _actionButton(text: l10n.t('btn_epg_phone'), icon: Icons.event_note_outlined, primary: false, onPressed: () => _pickFile(false));
+          return narrow
+            ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [first, const SizedBox(height: 12), second])
+            : Row(children: [Expanded(child: first), const SizedBox(width: 12), Expanded(child: second)]);
+        }),
+        const SizedBox(height: 24),
+        _actionButton(text: l10n.t('btn_start'), icon: Icons.arrow_forward_rounded, onPressed: () {
+          if (_m3uController.text.trim().isEmpty) {
+            _showError(_copy('Bitte M3U-Link eingeben oder Datei auswählen.', 'M3U bağlantısı girin veya dosya seçin.', 'Enter an M3U link or select a file.'));
+          } else {
+            _processPlaylist(_m3uController.text);
+          }
+        }),
+      ]),
     );
   }
 
   void _applyServerScheme(String scheme) {
     final current = _xtreamServerController.text.trimLeft();
     final withoutScheme = current.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '');
-    _xtreamServerController.value = TextEditingValue(
-      text: '$scheme$withoutScheme',
-      selection: TextSelection.collapsed(offset: ('$scheme$withoutScheme').length),
-    );
+    final value = '$scheme$withoutScheme';
+    _xtreamServerController.value = TextEditingValue(text: value, selection: TextSelection.collapsed(offset: value.length));
     _xtreamServerFocus.requestFocus();
   }
 
   Widget _buildXtreamTab(AppLocalizations l10n) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: FocusTraversalGroup(
-        policy: ReadingOrderTraversalPolicy(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _xtreamNameController,
-              textCapitalization: TextCapitalization.none,
-              decoration: InputDecoration(labelText: l10n.t('playlist_display_name'), border: const OutlineInputBorder(), prefixIcon: const Icon(Icons.label_outline)),
-            ),
-            const SizedBox(height: 16),
-            Text(l10n.t('xtream_server'), style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ActionChip(
-                  label: const Text('http://'),
-                  tooltip: 'http:// einfügen',
-                  onPressed: () => _applyServerScheme('http://'),
-                ),
-                ActionChip(
-                  label: const Text('https://'),
-                  tooltip: 'https:// einfügen',
-                  onPressed: () => _applyServerScheme('https://'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            VoiceInputField(
-              controller: _xtreamServerController,
-              appLanguageCode: context.watch<LocaleProvider>().locale.languageCode,
-              focusNode: _xtreamServerFocus,
-              keyboardType: TextInputType.url,
-              textCapitalization: TextCapitalization.none,
-              textInputAction: TextInputAction.next,
-              onSubmitted: (_) => _xtreamUserFocus.requestFocus(),
-              decoration: InputDecoration(labelText: l10n.t('xtream_server'), hintText: 'http://server.com:8080', border: const OutlineInputBorder(), focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.electricBlue, width: 2))),
-            ),
-            const SizedBox(height: 16),
-            VoiceInputField(
-              controller: _xtreamUserController,
-              appLanguageCode: context.watch<LocaleProvider>().locale.languageCode,
-              focusNode: _xtreamUserFocus,
-              textCapitalization: TextCapitalization.none,
-              textInputAction: TextInputAction.next,
-              onSubmitted: (_) => _xtreamPassFocus.requestFocus(),
-              decoration: InputDecoration(labelText: l10n.t('xtream_user'), border: const OutlineInputBorder(), focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.electricBlue, width: 2))),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _xtreamPassController,
-              focusNode: _xtreamPassFocus,
-              obscureText: true,
-              autocorrect: false,
-              enableSuggestions: false,
-              textCapitalization: TextCapitalization.none,
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _xtreamConnectFocus.requestFocus(),
-              decoration: InputDecoration(
-                labelText: l10n.t('xtream_pass'),
-                border: const OutlineInputBorder(),
-                focusedBorder: const OutlineInputBorder(borderSide: BorderSide(color: AppTheme.electricBlue, width: 2)),
-                suffixIcon: IconButton(
-                  tooltip: 'TV keyboard',
-                  icon: const Icon(Icons.keyboard_alt_outlined),
-                  onPressed: () => TvTextKeyboard.show(
-                    context,
-                    controller: _xtreamPassController,
-                    languageCode: context.read<LocaleProvider>().locale.languageCode,
-                    secret: true,
-                    onConfirmed: () => _xtreamConnectFocus.requestFocus(),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 32),
-            SizedBox(
-              width: double.infinity,
-              height: 55,
-              child: ElevatedButton(
-                focusNode: _xtreamConnectFocus,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.electricBlue,
-                  overlayColor: Colors.white24,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onPressed: _connectXtream,
-                child: Text(l10n.t('btn_start'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-              ),
-            ),
-          ],
-        ),
-      ),
+    final language = context.watch<LocaleProvider>().locale.languageCode;
+    return _pageContent(
+      icon: Icons.dns_outlined,
+      title: _copy('Xtream Codes verbinden', 'Xtream Codes bağlantısı', 'Connect Xtream Codes'),
+      description: _copy('Trage die Zugangsdaten deines Anbieters ein.',
+        'Sağlayıcınızın bağlantı bilgilerini girin.', 'Enter the login details provided by your service.'),
+      form: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        _fieldTitle(l10n.t('playlist_display_name')),
+        TextField(controller: _xtreamNameController, textCapitalization: TextCapitalization.none,
+          decoration: _decoration(_copy('Meine Xtream-Playlist', 'Xtream listem', 'My Xtream playlist'), Icons.drive_file_rename_outline)),
+        const SizedBox(height: 20),
+        _fieldTitle(l10n.t('xtream_server')),
+        Wrap(spacing: 10, runSpacing: 8, children: [
+          ActionChip(label: const Text('http://'), onPressed: () => _applyServerScheme('http://'),
+            backgroundColor: const Color(0xFF22364C), labelStyle: const TextStyle(color: Colors.white)),
+          ActionChip(label: const Text('https://'), onPressed: () => _applyServerScheme('https://'),
+            backgroundColor: const Color(0xFF22364C), labelStyle: const TextStyle(color: Colors.white)),
+        ]),
+        const SizedBox(height: 10),
+        VoiceInputField(controller: _xtreamServerController, appLanguageCode: language,
+          focusNode: _xtreamServerFocus, keyboardType: TextInputType.url,
+          textCapitalization: TextCapitalization.none, textInputAction: TextInputAction.next,
+          onSubmitted: (_) => _xtreamUserFocus.requestFocus(),
+          decoration: _decoration('http://server.com:8080', Icons.language_rounded)),
+        const SizedBox(height: 20),
+        _fieldTitle(l10n.t('xtream_user')),
+        VoiceInputField(controller: _xtreamUserController, appLanguageCode: language,
+          focusNode: _xtreamUserFocus, textCapitalization: TextCapitalization.none,
+          textInputAction: TextInputAction.next, onSubmitted: (_) => _xtreamPassFocus.requestFocus(),
+          decoration: _decoration(_copy('Benutzername', 'Kullanıcı adı', 'Username'), Icons.person_outline)),
+        const SizedBox(height: 20),
+        _fieldTitle(l10n.t('xtream_pass')),
+        TextField(controller: _xtreamPassController, focusNode: _xtreamPassFocus,
+          obscureText: true, autocorrect: false, enableSuggestions: false,
+          textCapitalization: TextCapitalization.none, textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _xtreamConnectFocus.requestFocus(),
+          decoration: _decoration(_copy('Passwort', 'Şifre', 'Password'), Icons.lock_outline,
+            suffix: IconButton(
+              tooltip: _copy('TV-Tastatur', 'TV klavyesi', 'TV keyboard'),
+              icon: const Icon(Icons.keyboard_alt_outlined, color: _aqua),
+              onPressed: () => TvTextKeyboard.show(context, controller: _xtreamPassController,
+                languageCode: context.read<LocaleProvider>().locale.languageCode,
+                secret: true, onConfirmed: () => _xtreamConnectFocus.requestFocus()),
+            ))),
+        const SizedBox(height: 26),
+        _actionButton(text: l10n.t('btn_start'), icon: Icons.arrow_forward_rounded,
+          focusNode: _xtreamConnectFocus, onPressed: _connectXtream),
+      ]),
     );
   }
 }
