@@ -5,9 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:streamia_player/core/localization/app_localizations.dart';
 import 'package:streamia_player/widgets/tv_text_keyboard.dart';
 
-/// Provides already loaded translations synchronously.
-/// This avoids waiting for asynchronous asset loading
-/// while the test widget tree is being constructed.
+/// Supplies already loaded translations synchronously
+/// during Flutter widget tests.
 class _TestLocalizationsDelegate
     extends LocalizationsDelegate<AppLocalizations> {
   final AppLocalizations translations;
@@ -16,7 +15,8 @@ class _TestLocalizationsDelegate
 
   @override
   bool isSupported(Locale locale) {
-    return locale.languageCode == translations.locale.languageCode;
+    return locale.languageCode ==
+        translations.locale.languageCode;
   }
 
   @override
@@ -38,8 +38,8 @@ void main() {
     TextEditingController controller,
     VoidCallback onConfirmed,
   ) async {
-    // Load the actual German translations before building the app.
-    final translations = AppLocalizations(const Locale('de'));
+    final translations =
+        AppLocalizations(const Locale('de'));
 
     await tester.runAsync(() async {
       await translations.load();
@@ -49,9 +49,12 @@ void main() {
       MaterialApp(
         key: UniqueKey(),
         locale: const Locale('de'),
-        localizationsDelegates: <LocalizationsDelegate<dynamic>>[
+        localizationsDelegates:
+            <LocalizationsDelegate<dynamic>>[
           _TestLocalizationsDelegate(translations),
-          ...AppLocalizations.localizationsDelegates.skip(1),
+          ...AppLocalizations.localizationsDelegates
+              .skip(1)
+              .cast<LocalizationsDelegate<dynamic>>(),
         ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
@@ -75,17 +78,35 @@ void main() {
     final openButton = find.text('Open');
 
     if (openButton.evaluate().isEmpty) {
-      debugPrint('STREAMIA TV LOCALIZATION CHECK');
       debugPrint(
-        'MaterialApp: ${find.byType(MaterialApp).evaluate().length}',
+        '========== STREAMIA TV LOCALIZATION CHECK ==========',
       );
+
       debugPrint(
-        'Scaffold: ${find.byType(Scaffold).evaluate().length}',
+        'MaterialApp: '
+        '${find.byType(MaterialApp).evaluate().length}',
       );
+
+      debugPrint(
+        'Scaffold: '
+        '${find.byType(Scaffold).evaluate().length}',
+      );
+
       debugPrint(
         'Open: ${openButton.evaluate().length}',
       );
+
+      final exception = tester.takeException();
+
+      if (exception != null) {
+        debugPrint('Flutter exception: $exception');
+      }
+
       debugDumpApp();
+
+      debugPrint(
+        '========== END STREAMIA TV CHECK ==========',
+      );
     }
 
     expect(
@@ -103,7 +124,9 @@ void main() {
   testWidgets(
     'Confirm commits text and invokes next-field callback once',
     (tester) async {
-      final controller = TextEditingController(text: 'old');
+      final controller =
+          TextEditingController(text: 'old');
+
       addTearDown(controller.dispose);
 
       var calls = 0;
@@ -131,7 +154,9 @@ void main() {
   testWidgets(
     'Cancel does not invoke next-field callback',
     (tester) async {
-      final controller = TextEditingController(text: 'old');
+      final controller =
+          TextEditingController(text: 'old');
+
       addTearDown(controller.dispose);
 
       var calls = 0;
