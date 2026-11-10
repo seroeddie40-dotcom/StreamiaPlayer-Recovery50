@@ -1,4 +1,3 @@
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -14,6 +13,7 @@ import 'providers/theme_provider.dart';
 import 'providers/locale_provider.dart';
 import 'providers/content_provider.dart';
 import 'providers/auth_provider.dart';
+import 'services/playlist_profile_store.dart';
 
 import 'screens/login_screen.dart';
 import 'screens/language_selection_screen.dart';
@@ -123,7 +123,7 @@ class StreamiaApp extends StatelessWidget {
     }
 
     if (!content.isLoaded) {
-      return const SetupScreen();
+      return const _LibraryStartupGate();
     }
 
     SystemChrome.setPreferredOrientations([
@@ -132,6 +132,67 @@ class StreamiaApp extends StatelessWidget {
     ]);
 
     return const DashboardScreen();
+  }
+}
+
+
+/// Restores the last active catalog only after device access has been approved.
+/// Keeps the setup screen hidden until the local cache has been checked.
+class _LibraryStartupGate extends StatefulWidget {
+  const _LibraryStartupGate();
+
+  @override
+  State<_LibraryStartupGate> createState() => _LibraryStartupGateState();
+}
+
+class _LibraryStartupGateState extends State<_LibraryStartupGate> {
+  bool _loading = true;
+  Object? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _restore();
+  }
+
+  Future<void> _restore() async {
+    if (mounted) setState(() { _loading = true; _error = null; });
+    try {
+      final profiles = await PlaylistProfileStore().load();
+      if (!mounted) return;
+      if (profiles.isNotEmpty) {
+        final active = profiles.where((p) => p.isActive).firstOrNull ?? profiles.first;
+        await context.read<ContentProvider>().restoreStoredLibrary(active.sourceKey);
+      }
+    } catch (error) {
+      if (mounted) _error = error;
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (context.watch<ContentProvider>().isLoaded) {
+      return const DashboardScreen();
+    }
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_error != null) {
+      return Scaffold(body: Center(child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Saved playlist could not be restored.'),
+          const SizedBox(height: 16),
+          FilledButton(onPressed: _restore, child: const Text('Retry')),
+          TextButton(onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const SetupScreen()),
+          ), child: const Text('Playlist setup')),
+        ],
+      )));
+    }
+    return const SetupScreen();
   }
 }
 
