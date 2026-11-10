@@ -13,6 +13,8 @@ void main() {
   }) async {
     await tester.pumpWidget(
       MaterialApp(
+        // Fresh widget tree and Navigator for every test.
+        key: UniqueKey(),
         locale: const Locale('de'),
         localizationsDelegates:
             AppLocalizations.localizationsDelegates
@@ -37,8 +39,17 @@ void main() {
     );
 
     await tester.pumpAndSettle();
+
+    expect(
+      find.text('Open'),
+      findsOneWidget,
+      reason: 'Keyboard launch button must be visible.',
+    );
+
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsOneWidget);
   }
 
   testWidgets(
