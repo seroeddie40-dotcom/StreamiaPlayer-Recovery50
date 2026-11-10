@@ -1,3 +1,4 @@
+
 import 'dart:io';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
@@ -368,7 +369,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
           const SizedBox(height: 32),
           ElevatedButton.icon(
             autofocus: true,
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.electricBlue, focusColor: Colors.white24),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.electricBlue, overlayColor: Colors.white24),
             onPressed: () => _tabController.animateTo(1),
             icon: const Icon(Icons.edit, color: Colors.white),
             label: Text(l10n.t('qr_btn_manual'), style: const TextStyle(color: Colors.white)),
@@ -421,7 +422,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(focusColor: AppTheme.electricBlue.withOpacity(0.18)),
+                  style: OutlinedButton.styleFrom(overlayColor: AppTheme.electricBlue.withValues(alpha: 0.18)),
                   onPressed: () => _pickFile(true),
                   icon: const Icon(Icons.folder_open),
                   label: Text(l10n.t('btn_m3u_phone'), textAlign: TextAlign.center),
@@ -430,7 +431,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
               const SizedBox(width: 16),
               Expanded(
                 child: OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(focusColor: AppTheme.electricBlue.withOpacity(0.18)),
+                  style: OutlinedButton.styleFrom(overlayColor: AppTheme.electricBlue.withValues(alpha: 0.18)),
                   onPressed: () => _pickFile(false),
                   icon: const Icon(Icons.calendar_today),
                   label: Text(l10n.t('btn_epg_phone'), textAlign: TextAlign.center),
@@ -445,7 +446,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.electricBlue,
-                focusColor: Colors.white24,
+                overlayColor: Colors.white24,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               onPressed: () {
@@ -561,7 +562,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
                 focusNode: _xtreamConnectFocus,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.electricBlue,
-                  focusColor: Colors.white24,
+                  overlayColor: Colors.white24,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 onPressed: _connectXtream,
