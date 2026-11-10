@@ -12,6 +12,8 @@ void main() {
   ) async {
     await tester.pumpWidget(
       MaterialApp(
+        // Ensure a fresh Navigator and widget tree for every test.
+        key: UniqueKey(),
         locale: const Locale('de'),
         localizationsDelegates:
             AppLocalizations.localizationsDelegates
@@ -33,8 +35,6 @@ void main() {
       ),
     );
 
-    // Wait for the widget tree and asynchronous localization
-    // delegates to finish building before searching for Open.
     await tester.pumpAndSettle();
 
     expect(
@@ -46,7 +46,6 @@ void main() {
     await tester.tap(find.text('Open'));
     await tester.pumpAndSettle();
 
-    // Confirm that the keyboard dialog opened successfully.
     expect(find.byType(AlertDialog), findsOneWidget);
   }
 
