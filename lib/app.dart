@@ -136,8 +136,8 @@ class StreamiaApp extends StatelessWidget {
 }
 
 
-/// Restores the last active catalog only after device access has been approved.
-/// Keeps the setup screen hidden until the local cache has been checked.
+/// Recovery-first startup: never deserialize a potentially huge saved catalog
+/// automatically. The user can enter setup without deleting saved data.
 class _LibraryStartupGate extends StatefulWidget {
   const _LibraryStartupGate();
 
@@ -146,26 +146,30 @@ class _LibraryStartupGate extends StatefulWidget {
 }
 
 class _LibraryStartupGateState extends State<_LibraryStartupGate> {
-  bool _loading = true;
-  Object? _error;
+  bool _loading = false;
+  String? _error;
 
-  @override
-  void initState() {
-    super.initState();
-    _restore();
-  }
-
-  Future<void> _restore() async {
-    if (mounted) setState(() { _loading = true; _error = null; });
+  Future<void> _restoreOnDemand() async {
+    if (_loading) return;
+    setState(() { _loading = true; _error = null; });
     try {
       final profiles = await PlaylistProfileStore().load();
       if (!mounted) return;
-      if (profiles.isNotEmpty) {
-        final active = profiles.where((p) => p.isActive).firstOrNull ?? profiles.first;
-        await context.read<ContentProvider>().restoreStoredLibrary(active.sourceKey);
+      if (profiles.isEmpty) {
+        setState(() => _error = 'Keine gespeicherte Playlist gefunden.');
+        return;
+      }
+      final active = profiles.where((p) => p.isActive).firstOrNull ?? profiles.first;
+      final restored = await context.read<ContentProvider>()
+          .restoreStoredLibrary(active.sourceKey);
+      if (!mounted) return;
+      if (!restored) {
+        setState(() => _error = 'Keine gespeicherte Mediathek gefunden.');
       }
     } catch (error) {
-      if (mounted) _error = error;
+      if (mounted) {
+        setState(() => _error = 'Wiederherstellung fehlgeschlagen: $error');
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -176,23 +180,62 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
     if (context.watch<ContentProvider>().isLoaded) {
       return const DashboardScreen();
     }
-    if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    }
-    if (_error != null) {
-      return Scaffold(body: Center(child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Text('Saved playlist could not be restored.'),
-          const SizedBox(height: 16),
-          FilledButton(onPressed: _restore, child: const Text('Retry')),
-          TextButton(onPressed: () => Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const SetupScreen()),
-          ), child: const Text('Playlist setup')),
-        ],
-      )));
-    }
-    return const SetupScreen();
+    return Scaffold(
+      appBar: AppBar(title: const Text('Streamia Player')),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 460),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Icon(Icons.shield_outlined, size: 56),
+                  const SizedBox(height: 16),
+                  const Text('Sicherer Start',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Die gespeicherte Mediathek wird nicht automatisch geladen. '
+                    'So kannst du die Einrichtung öffnen, auch wenn die letzte '
+                    'Playlist beim Laden Probleme verursacht hat. '
+                    'Deine gespeicherten Daten werden nicht gelöscht.',
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  FilledButton.icon(
+                    onPressed: _loading ? null : () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const SetupScreen()),
+                    ),
+                    icon: const Icon(Icons.playlist_add),
+                    label: const Text('Playlist einrichten'),
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _loading ? null : _restoreOnDemand,
+                    icon: const Icon(Icons.restore),
+                    label: const Text('Gespeicherte Mediathek laden'),
+                  ),
+                  if (_loading) ...[
+                    const SizedBox(height: 16),
+                    const Center(child: CircularProgressIndicator()),
+                  ],
+                  if (_error != null) ...[
+                    const SizedBox(height: 16),
+                    Text(_error!, style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    )),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
