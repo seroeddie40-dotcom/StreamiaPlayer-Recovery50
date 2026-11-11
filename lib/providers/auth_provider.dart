@@ -1,4 +1,3 @@
-
 import 'dart:convert';
 import 'dart:math';
 
@@ -11,115 +10,57 @@ import '../config/supabase_config.dart';
 import '../core/storage/prefs_service.dart';
 
 class AuthProvider extends ChangeNotifier {
-  static const MethodChannel _deviceChannel =
-      MethodChannel('com.streamia/device_identity');
-
-  static const String _installKey =
-      'streamia_installation_id';
-
+  static const MethodChannel _deviceChannel = MethodChannel('com.streamia/device_identity');
+  static const String _installKey = 'streamia_installation_id';
   final PrefsService _prefs;
-
   String? _installationId;
   String? _deviceId;
   String? _deviceStatus;
-
   Map<String, dynamic>? _access;
-
   bool _busy = false;
   bool _accessChecked = false;
   String? _error;
+  bool _registrationSubmitted = false;
+  bool _registrationNeedsConfirmation = false;
 
   AuthProvider(this._prefs) {
     _installationId = _prefs.getString(_installKey);
-
     if (SupabaseConfig.isConfigured) {
-      Supabase.instance.client.auth.onAuthStateChange
-          .listen((event) {
-        if (event.event == AuthChangeEvent.signedOut) {
-          _clearAccess();
-        }
+      Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+        if (event.event == AuthChangeEvent.signedOut) _clearAccess();
         notifyListeners();
       });
-
       Future<void>.microtask(() async {
-        if (isLoggedIn) {
-          await refreshDeviceAndAccess();
-        }
+        if (isLoggedIn) await refreshDeviceAndAccess();
       });
     }
   }
 
-  SupabaseClient? get _client =>
-      SupabaseConfig.isConfigured
-          ? Supabase.instance.client
-          : null;
-
+  SupabaseClient? get _client => SupabaseConfig.isConfigured ? Supabase.instance.client : null;
   User? get user => _client?.auth.currentUser;
-
   bool get isLoggedIn => user != null;
-
   bool get isBusy => _busy;
-
   bool get accessChecked => _accessChecked;
-
   String? get error => _error;
-
   String? get deviceId => _deviceId;
-
   String? get deviceStatus => _deviceStatus;
-
   Map<String, dynamic>? get access => _access;
-
-  String get macAddress =>
-      _installationId ?? 'Noch nicht registriert';
-
-  bool get hasAccountAccess =>
-      _access?['has_access'] == true;
-
-  // Supabase uses "active" for approved devices.
-  bool get deviceApproved =>
-      _deviceStatus == 'active' ||
-      _deviceStatus == 'approved';
-
-  bool get devicePending =>
-      _deviceStatus == 'pending';
-
-  bool get deviceBlocked =>
-      _deviceStatus == 'blocked' ||
-      _deviceStatus == 'rejected' ||
-      _deviceStatus == 'revoked';
-
-  bool get hasAccess =>
-      _accessChecked &&
-      _error == null &&
-      hasAccountAccess &&
-      deviceApproved;
-
-  bool get requiresPayment =>
-      _accessChecked &&
-      _error == null &&
-      _access != null &&
-      !hasAccountAccess;
-
-  String? get accessReason =>
-      _access?['access_reason']?.toString();
-
+  bool get registrationSubmitted => _registrationSubmitted;
+  bool get registrationNeedsConfirmation => _registrationNeedsConfirmation;
+  String get macAddress => _installationId ?? 'Noch nicht registriert';
+  bool get hasAccountAccess => _access?['has_access'] == true;
+  bool get deviceApproved => _deviceStatus == 'active' || _deviceStatus == 'approved';
+  bool get devicePending => _deviceStatus == 'pending';
+  bool get deviceBlocked => _deviceStatus == 'blocked' || _deviceStatus == 'rejected' || _deviceStatus == 'revoked';
+  bool get hasAccess => _accessChecked && _error == null && hasAccountAccess && deviceApproved;
+  bool get requiresPayment => _accessChecked && _error == null && _access != null && !hasAccountAccess;
+  String? get accessReason => _access?['access_reason']?.toString();
   int get maxDevices {
     final value = _access?['max_devices'];
-
-    if (value is int) {
-      return value;
-    }
-
-    return int.tryParse(
-          value?.toString() ?? '',
-        ) ??
-        0;
+    if (value is int) return value;
+    return int.tryParse(value?.toString() ?? '') ?? 0;
   }
-
-  bool get isAdminGrant =>
-      _access?['manual_override'] == true &&
-      _access?['entitlement_source'] == 'admin_grant';
+  bool get isAdminGrant => _access?['manual_override'] == true && _access?['entitlement_source'] == 'admin_grant';
 
   void _clearAccess() {
     _deviceId = null;
@@ -130,180 +71,87 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<String> _getInstallationId() async {
-    if (_installationId != null &&
-        _installationId!.isNotEmpty) {
-      return _installationId!;
-    }
-
+    if (_installationId != null && _installationId!.isNotEmpty) return _installationId!;
     final random = Random.secure();
-
-    final bytes = List<int>.generate(
-      32,
-      (_) => random.nextInt(256),
-    );
-
-    _installationId =
-        base64Url.encode(bytes).replaceAll('=', '');
-
+    final bytes = List<int>.generate(32, (_) => random.nextInt(256));
+    _installationId = base64Url.encode(bytes).replaceAll('=', '');
     final prefs = await SharedPreferences.getInstance();
-
-    await prefs.setString(
-      _installKey,
-      _installationId!,
-    );
-
+    await prefs.setString(_installKey, _installationId!);
     return _installationId!;
   }
 
   Future<String> _readDeviceName() async {
-    if (!kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android) {
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       try {
-        final name = await _deviceChannel
-            .invokeMethod<String>('getDeviceName');
-
-        if (name != null && name.isNotEmpty) {
-          return name;
-        }
-      } catch (_) {
-        // Use the platform name.
-      }
+        final name = await _deviceChannel.invokeMethod<String>('getDeviceName');
+        if (name != null && name.isNotEmpty) return name;
+      } catch (_) {}
     }
-
-    return kIsWeb
-        ? 'Web-Gerät'
-        : defaultTargetPlatform.name;
+    return kIsWeb ? 'Web-Gerät' : defaultTargetPlatform.name;
   }
 
-  Future<void> signIn(
-    String email,
-    String password,
-  ) async {
+  Future<void> signIn(String email, String password) async {
+    _registrationSubmitted = false;
+    _registrationNeedsConfirmation = false;
     await _run(() async {
       final client = _client;
-
-      if (client == null) {
-        throw Exception(
-          'Supabase ist nicht konfiguriert.',
-        );
-      }
-
+      if (client == null) throw Exception('Supabase ist nicht konfiguriert.');
       _clearAccess();
-
-      await client.auth.signInWithPassword(
-        email: email.trim(),
-        password: password,
-      );
-
+      await client.auth.signInWithPassword(email: email.trim(), password: password);
       await refreshDeviceAndAccess();
     });
   }
 
-  Future<void> signUp(
-    String email,
-    String password,
-  ) async {
+  Future<void> signUp(String email, String password) async {
+    _registrationSubmitted = false;
+    _registrationNeedsConfirmation = false;
     await _run(() async {
       final client = _client;
-
-      if (client == null) {
-        throw Exception(
-          'Supabase ist nicht konfiguriert.',
-        );
-      }
-
+      if (client == null) throw Exception('Supabase ist nicht konfiguriert.');
       _clearAccess();
-
-      final response = await client.auth.signUp(
-        email: email.trim(),
-        password: password,
-      );
-
-      if (response.session != null) {
-        await refreshDeviceAndAccess();
+      final response = await client.auth.signUp(email: email.trim(), password: password);
+      if (response.user == null && response.session == null) {
+        throw const AuthException('Registration returned no user');
       }
+      _registrationSubmitted = true;
+      _registrationNeedsConfirmation = response.session == null;
+      if (response.session != null) await refreshDeviceAndAccess();
     });
   }
 
   Future<void> refreshDeviceAndAccess() async {
     final client = _client;
-
-    if (client == null ||
-        client.auth.currentUser == null) {
+    if (client == null || client.auth.currentUser == null) {
       _clearAccess();
       notifyListeners();
       return;
     }
-
     _accessChecked = false;
     _error = null;
     _access = null;
     _deviceStatus = null;
-
     notifyListeners();
-
     try {
-      final installationId =
-          await _getInstallationId();
-
-      final deviceName =
-          await _readDeviceName();
-
-      final platform = kIsWeb
-          ? 'web'
-          : switch (defaultTargetPlatform) {
-              TargetPlatform.android => 'android',
-              TargetPlatform.iOS => 'ios',
-              _ => 'unknown',
-            };
-
-      // Register device using the existing Supabase RPC.
-      // The server determines whether the device
-      // can be automatically activated.
-      final registered = await client.rpc(
-        'register_my_device',
-        params: {
-          'p_installation_id': installationId,
-          'p_device_name': deviceName,
-          'p_platform': platform,
-        },
-      );
-
-      final registrationRow =
-          _firstRow(registered);
-
-      if (registrationRow == null) {
-        throw Exception(
-          'Die Geräteregistrierung hat '
-          'keine Daten zurückgegeben.',
-        );
-      }
-
-      _deviceId =
-          registrationRow['device_id']?.toString();
-
-      _deviceStatus =
-          registrationRow['device_status']
-              ?.toString()
-              .toLowerCase();
-
-      // Read the account entitlement from Supabase.
-      final accountResult = await client.rpc(
-        'get_my_access_status',
-      );
-
-      final accountRow =
-          _firstRow(accountResult);
-
-      if (accountRow == null) {
-        throw Exception(
-          'Die Kontoberechtigung konnte '
-          'nicht ermittelt werden.',
-        );
-      }
-
+      final installationId = await _getInstallationId();
+      final deviceName = await _readDeviceName();
+      final platform = kIsWeb ? 'web' : switch (defaultTargetPlatform) {
+        TargetPlatform.android => 'android',
+        TargetPlatform.iOS => 'ios',
+        _ => 'unknown',
+      };
+      final registered = await client.rpc('register_my_device', params: {
+        'p_installation_id': installationId,
+        'p_device_name': deviceName,
+        'p_platform': platform,
+      });
+      final registrationRow = _firstRow(registered);
+      if (registrationRow == null) throw Exception('Die Geräteregistrierung hat keine Daten zurückgegeben.');
+      _deviceId = registrationRow['device_id']?.toString();
+      _deviceStatus = registrationRow['device_status']?.toString().toLowerCase();
+      final accountResult = await client.rpc('get_my_access_status');
+      final accountRow = _firstRow(accountResult);
+      if (accountRow == null) throw Exception('Die Kontoberechtigung konnte nicht ermittelt werden.');
       _access = accountRow;
-
       _accessChecked = true;
       _error = null;
     } catch (e) {
@@ -311,39 +159,27 @@ class AuthProvider extends ChangeNotifier {
       _accessChecked = true;
       _error = _friendlyError(e);
     }
-
     notifyListeners();
   }
 
-  Map<String, dynamic>? _firstRow(
-    dynamic result,
-  ) {
-    if (result is Map) {
-      return Map<String, dynamic>.from(result);
+  Map<String, dynamic>? _firstRow(dynamic result) {
+    if (result is Map) return Map<String, dynamic>.from(result);
+    if (result is List && result.isNotEmpty && result.first is Map) {
+      return Map<String, dynamic>.from(result.first as Map);
     }
-
-    if (result is List && result.isNotEmpty) {
-      final first = result.first;
-
-      if (first is Map) {
-        return Map<String, dynamic>.from(first);
-      }
-    }
-
     return null;
   }
 
-  Future<void> _run(
-    Future<void> Function() action,
-  ) async {
+  Future<void> _run(Future<void> Function() action) async {
+    if (_busy) return;
     _busy = true;
     _error = null;
-
     notifyListeners();
-
     try {
       await action();
     } catch (e) {
+      _registrationSubmitted = false;
+      _registrationNeedsConfirmation = false;
       _error = _friendlyError(e);
       _accessChecked = true;
     } finally {
@@ -354,49 +190,25 @@ class AuthProvider extends ChangeNotifier {
 
   String _friendlyError(Object error) {
     if (error is AuthException) {
-      // Return a stable internal error key for
-      // common authentication failures.
       final message = error.message.toLowerCase();
-
-      if (message.contains(
-            'invalid login credentials',
-          ) ||
-          message.contains(
-            'invalid credentials',
-          )) {
-        return 'invalid_credentials';
-      }
-
-      if (message.contains(
-        'email not confirmed',
-      )) {
-        return 'email_not_confirmed';
-      }
-
-      if (message.contains(
-        'too many requests',
-      )) {
-        return 'too_many_requests';
-      }
-
-      return error.message;
+      if (message.contains('invalid login credentials') || message.contains('invalid credentials')) return 'invalid_credentials';
+      if (message.contains('email not confirmed')) return 'email_not_confirmed';
+      if (message.contains('too many requests') || message.contains('rate limit') || message.contains('over_email_send_rate_limit')) return 'too_many_requests';
+      if (message.contains('invalid format') || message.contains('invalid email') || message.contains('unable to validate email')) return 'invalid_email';
+      if (message.contains('already registered') || message.contains('already exists') || message.contains('user already registered')) return 'email_already_registered';
+      if (message.contains('password') && (message.contains('weak') || message.contains('short') || message.contains('least'))) return 'weak_password';
+      if (message.contains('registration returned no user')) return 'registration_failed';
+      return 'auth_unavailable';
     }
-
-    if (error is PostgrestException) {
-      return error.message;
-    }
-
-    return error.toString().replaceFirst(
-          'Exception: ',
-          '',
-        );
+    if (error is PostgrestException) return error.message;
+    return error.toString().replaceFirst('Exception: ', '');
   }
 
   Future<void> logout() async {
     await _client?.auth.signOut();
-
+    _registrationSubmitted = false;
+    _registrationNeedsConfirmation = false;
     _clearAccess();
-
     notifyListeners();
   }
 }
