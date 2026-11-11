@@ -19,9 +19,21 @@ class _LoginScreenState extends State<LoginScreen> {
 
   bool _createAccount = false;
   bool _showPassword = false;
+  bool _showConfirmation = false;
+  bool _confirmationNeedsEmail = true;
 
   static const Map<String, Map<String, String>> _translations = {
     'de': {
+      'invalid_email': 'Bitte gib eine gültige E-Mail-Adresse ein.',
+      'registration_received': 'Registrierungsanfrage angenommen',
+      'confirmation_instructions': 'Prüfe dein E-Mail-Postfach und bestätige deine Adresse über den Link. Sieh auch im Spam-Ordner nach.',
+      'back_to_sign_in': 'Zur Anmeldung',
+      'registration_success': 'Registrierung erfolgreich.',
+      'email_already_registered': 'Diese E-Mail ist möglicherweise bereits registriert.',
+      'weak_password': 'Das Passwort erfüllt die Sicherheitsanforderungen nicht.',
+      'registration_failed': 'Die Registrierung konnte nicht abgeschlossen werden.',
+      'auth_unavailable': 'Anmeldung derzeit nicht möglich. Bitte später erneut versuchen.',
+
       'invalid_credentials': 'E-Mail-Adresse oder Passwort ist falsch.',
       'email_not_confirmed': 'Bitte bestätige zuerst deine E-Mail-Adresse.',
       'too_many_requests': 'Zu viele Versuche. Bitte versuche es später erneut.',
@@ -42,6 +54,16 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Passwort verbergen',
     },
     'tr': {
+      'invalid_email': 'Lütfen geçerli bir e-posta adresi girin.',
+      'registration_received': 'Kayıt isteği alındı',
+      'confirmation_instructions': 'E-posta kutunuzu kontrol edin ve bağlantıyla adresinizi doğrulayın. Spam klasörünü de kontrol edin.',
+      'back_to_sign_in': 'Giriş ekranına dön',
+      'registration_success': 'Kayıt başarılı.',
+      'email_already_registered': 'Bu e-posta zaten kayıtlı olabilir.',
+      'weak_password': 'Şifre güvenlik gereksinimlerini karşılamıyor.',
+      'registration_failed': 'Kayıt tamamlanamadı.',
+      'auth_unavailable': 'İşlem şu anda yapılamıyor. Daha sonra tekrar deneyin.',
+
       'invalid_credentials': 'E-posta adresi veya şifre hatalı.',
       'email_not_confirmed': 'Lütfen önce e-posta adresinizi doğrulayın.',
       'too_many_requests': 'Çok fazla deneme yapıldı. Lütfen daha sonra tekrar deneyin.',
@@ -62,6 +84,16 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Şifreyi gizle',
     },
     'en': {
+      'invalid_email': 'Please enter a valid email address.',
+      'registration_received': 'Registration request received',
+      'confirmation_instructions': 'Check your inbox and confirm your address using the link. Check your spam folder too.',
+      'back_to_sign_in': 'Back to sign in',
+      'registration_success': 'Registration successful.',
+      'email_already_registered': 'This email may already be registered.',
+      'weak_password': 'Password does not meet security requirements.',
+      'registration_failed': 'Registration could not be completed.',
+      'auth_unavailable': 'Authentication is temporarily unavailable. Please try again later.',
+
       'invalid_credentials': 'Incorrect email address or password.',
       'email_not_confirmed': 'Please confirm your email address first.',
       'too_many_requests': 'Too many attempts. Please try again later.',
@@ -82,6 +114,16 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Hide password',
     },
     'ru': {
+      'invalid_email': 'Введите действительный адрес электронной почты.',
+      'registration_received': 'Запрос на регистрацию принят',
+      'confirmation_instructions': 'Проверьте почту и подтвердите адрес по ссылке. Проверьте папку «Спам».',
+      'back_to_sign_in': 'Вернуться ко входу',
+      'registration_success': 'Регистрация успешна.',
+      'email_already_registered': 'Этот адрес, возможно, уже зарегистрирован.',
+      'weak_password': 'Пароль не соответствует требованиям безопасности.',
+      'registration_failed': 'Не удалось завершить регистрацию.',
+      'auth_unavailable': 'Авторизация временно недоступна.',
+
       'invalid_credentials': 'Неверный адрес электронной почты или пароль.',
       'email_not_confirmed': 'Сначала подтвердите адрес электронной почты.',
       'too_many_requests': 'Слишком много попыток. Повторите позже.',
@@ -102,6 +144,16 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Скрыть пароль',
     },
     'ar': {
+      'invalid_email': 'يرجى إدخال بريد إلكتروني صالح.',
+      'registration_received': 'تم استلام طلب التسجيل',
+      'confirmation_instructions': 'تحقق من بريدك الإلكتروني وأكد عنوانك عبر الرابط. تحقق أيضاً من مجلد الرسائل غير المرغوب فيها.',
+      'back_to_sign_in': 'العودة إلى تسجيل الدخول',
+      'registration_success': 'تم التسجيل بنجاح.',
+      'email_already_registered': 'قد يكون هذا البريد مسجلاً بالفعل.',
+      'weak_password': 'كلمة المرور لا تستوفي متطلبات الأمان.',
+      'registration_failed': 'تعذر إكمال التسجيل.',
+      'auth_unavailable': 'المصادقة غير متاحة حالياً.',
+
       'invalid_credentials': 'البريد الإلكتروني أو كلمة المرور غير صحيحة.',
       'email_not_confirmed': 'يرجى تأكيد بريدك الإلكتروني أولاً.',
       'too_many_requests': 'محاولات كثيرة جدًا. حاول مرة أخرى لاحقًا.',
@@ -122,6 +174,16 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'إخفاء كلمة المرور',
     },
     'pl': {
+      'invalid_email': 'Podaj prawidłowy adres e-mail.',
+      'registration_received': 'Otrzymano zgłoszenie rejestracji',
+      'confirmation_instructions': 'Sprawdź pocztę i potwierdź adres przez link. Sprawdź też spam.',
+      'back_to_sign_in': 'Wróć do logowania',
+      'registration_success': 'Rejestracja zakończona.',
+      'email_already_registered': 'Ten adres może być już zarejestrowany.',
+      'weak_password': 'Hasło nie spełnia wymagań bezpieczeństwa.',
+      'registration_failed': 'Nie udało się zakończyć rejestracji.',
+      'auth_unavailable': 'Logowanie jest chwilowo niedostępne.',
+
       'invalid_credentials': 'Nieprawidłowy adres e-mail lub hasło.',
       'email_not_confirmed': 'Najpierw potwierdź swój adres e-mail.',
       'too_many_requests': 'Zbyt wiele prób. Spróbuj ponownie później.',
@@ -142,6 +204,16 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Ukryj hasło',
     },
     'es': {
+      'invalid_email': 'Introduce una dirección de correo válida.',
+      'registration_received': 'Solicitud de registro recibida',
+      'confirmation_instructions': 'Revisa tu correo y confirma la dirección mediante el enlace. Comprueba también el spam.',
+      'back_to_sign_in': 'Volver al inicio de sesión',
+      'registration_success': 'Registro completado.',
+      'email_already_registered': 'Es posible que este correo ya esté registrado.',
+      'weak_password': 'La contraseña no cumple los requisitos de seguridad.',
+      'registration_failed': 'No se pudo completar el registro.',
+      'auth_unavailable': 'La autenticación no está disponible.',
+
       'invalid_credentials': 'Correo electrónico o contraseña incorrectos.',
       'email_not_confirmed': 'Confirma primero tu correo electrónico.',
       'too_many_requests': 'Demasiados intentos. Inténtalo más tarde.',
@@ -162,6 +234,16 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Ocultar contraseña',
     },
     'fr': {
+      'invalid_email': 'Saisissez une adresse e-mail valide.',
+      'registration_received': 'Demande d’inscription reçue',
+      'confirmation_instructions': 'Vérifiez votre boîte mail et confirmez votre adresse via le lien. Vérifiez aussi les spams.',
+      'back_to_sign_in': 'Retour à la connexion',
+      'registration_success': 'Inscription réussie.',
+      'email_already_registered': 'Cette adresse est peut-être déjà enregistrée.',
+      'weak_password': 'Le mot de passe ne respecte pas les exigences de sécurité.',
+      'registration_failed': 'Impossible de terminer l’inscription.',
+      'auth_unavailable': 'Authentification indisponible.',
+
       'invalid_credentials': 'Adresse e-mail ou mot de passe incorrect.',
       'email_not_confirmed': 'Veuillez d’abord confirmer votre adresse e-mail.',
       'too_many_requests': 'Trop de tentatives. Réessayez plus tard.',
@@ -188,6 +270,9 @@ class _LoginScreenState extends State<LoginScreen> {
         _translations['en']?[key] ??
         key;
   }
+
+  bool _validEmail(String email) =>
+      RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(email);
 
   @override
   void dispose() {
@@ -270,7 +355,36 @@ class _LoginScreenState extends State<LoginScreen> {
                 padding: EdgeInsets.fromLTRB(28, 20, 28,
                     MediaQuery.viewInsetsOf(context).bottom > 0 ? 28 : 20),
                 child: FocusTraversalGroup(
-                  child: Column(
+                  child: _showConfirmation
+                      ? Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            const Icon(Icons.mark_email_read_outlined,
+                                color: AppTheme.electricBlue, size: 76),
+                            const SizedBox(height: 24),
+                            Text(_t(languageCode, _confirmationNeedsEmail
+                                    ? 'registration_received' : 'registration_success'),
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: foregroundColor,
+                                    fontSize: 23, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 18),
+                            if (_confirmationNeedsEmail)
+                              Text(_t(languageCode, 'confirmation_instructions'),
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(color: secondaryColor, fontSize: 16)),
+                            const SizedBox(height: 28),
+                            FilledButton(
+                              onPressed: () => setState(() {
+                                _showConfirmation = false;
+                                _createAccount = false;
+                                _password.clear();
+                              }),
+                              child: Text(_t(languageCode, 'back_to_sign_in')),
+                            ),
+                          ],
+                        )
+                      : Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment:
                         CrossAxisAlignment.stretch,
@@ -396,8 +510,13 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: auth.isBusy
                             ? null
                             : () async {
-                                if (_email.text.trim().isEmpty ||
-                                    _password.text.length < 6) {
+                                if (!_validEmail(_email.text.trim())) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text(_t(languageCode, 'invalid_email'))),
+                                  );
+                                  return;
+                                }
+                                if (_password.text.length < 6) {
                                   ScaffoldMessenger.of(context)
                                       .showSnackBar(
                                     SnackBar(
@@ -420,6 +539,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                     _email.text,
                                     _password.text,
                                   );
+                                  if (!mounted) return;
+                                  if (provider.registrationSubmitted) {
+                                    setState(() {
+                                      _showConfirmation = true;
+                                      _confirmationNeedsEmail =
+                                          provider.registrationNeedsConfirmation;
+                                    });
+                                  }
                                 } else {
                                   await provider.signIn(
                                     _email.text,
