@@ -12,6 +12,7 @@ import '../services/download_service.dart';
 import '../services/playlist_source_store.dart';
 import '../services/xtream_service.dart';
 import '../widgets/favorite_toggle_button.dart';
+import '../widgets/voice_input_field.dart';
 import 'player_screen.dart';
 
 class SeriesScreen extends StatefulWidget {
@@ -24,6 +25,26 @@ class SeriesScreen extends StatefulWidget {
 class _SeriesScreenState extends State<SeriesScreen> {
   String? _category;
   String _query = '';
+  final TextEditingController _searchController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    if (mounted && _query != _searchController.text) {
+      setState(() => _query = _searchController.text);
+    }
+  }
+
+  @override
+  void dispose() {
+    _searchController.removeListener(_onSearchChanged);
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,6 +60,13 @@ class _SeriesScreenState extends State<SeriesScreen> {
       }
     }
     final categories = genres.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final categoryCounts = <String, int>{};
+    for (final item in all) {
+      for (final part in (item.genre ?? '').split(RegExp(r'[,/|]'))) {
+        final key = part.trim();
+        if (key.isNotEmpty) categoryCounts[key] = (categoryCounts[key] ?? 0) + 1;
+      }
+    }
     final selected = categories.contains(_category) ? _category : null;
     final filtered = all.where((item) {
       final inCategory = selected == null ||
@@ -63,8 +91,8 @@ class _SeriesScreenState extends State<SeriesScreen> {
         for (final category in categories)
           ListTile(
             selected: selected == category,
-            title: Text(category, maxLines: 2, overflow: TextOverflow.ellipsis),
-            trailing: Text('${all.where((s) => (s.genre ?? '').split(RegExp(r'[,/|]')).any((g) => g.trim() == category)).length}'),
+            title: Tooltip(message: category, child: Text(category, maxLines: 1, overflow: TextOverflow.ellipsis)),
+            trailing: Text('${categoryCounts[category] ?? 0}'),
             onTap: () {
               setState(() => _category = category);
               if (closeOnSelect) Navigator.of(context).pop();
@@ -118,13 +146,18 @@ class _SeriesScreenState extends State<SeriesScreen> {
               children: [
                 Padding(
                   padding: const EdgeInsets.all(12),
-                  child: TextField(
-                    onChanged: (value) => setState(() => _query = value),
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(Icons.search),
-                      hintText: _seriesText(lang, 'search'),
-                      border: const OutlineInputBorder(),
-                      isDense: true,
+                  child: SizedBox(
+                    height: 48,
+                    child: VoiceInputField(
+                      controller: _searchController,
+                      appLanguageCode: lang,
+                      decoration: InputDecoration(
+                        prefixIcon: const Icon(Icons.search),
+                        hintText: _seriesText(lang, 'search'),
+                        border: const OutlineInputBorder(),
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                      ),
                     ),
                   ),
                 ),
@@ -455,9 +488,7 @@ class _SeriesDetailScreenState
             width: 240,
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+              child: ListView(
                 children: [
                   if (series.backdropUrl != null)
                     ClipRRect(
@@ -580,251 +611,202 @@ class _SeriesEpisodesPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final lang = context.watch<LocaleProvider>().locale.languageCode;
-    if (sourceChanged) return Center(child: Text(_seriesText(lang, 'playlistChanged')));
+    if (sourceChanged) {
+      return Center(child: Text(_seriesText(lang, 'playlistChanged')));
+    }
     if (loading && series.seasons.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
     if (series.seasons.isEmpty) {
-      return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Padding(padding: const EdgeInsets.all(12), child: Text(error ?? _seriesText(lang, 'noEpisodes'))),
-        FilledButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh),
-          label: Text(_seriesText(lang, 'retry'))),
-      ]));
+      return Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Text(error ?? _seriesText(lang, 'noEpisodes')),
+          ),
+          FilledButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: Text(_seriesText(lang, 'retry')),
+          ),
+        ]),
+      );
     }
+
+    // One lazily built list for ALL episodes. Avoid creating thousands of
+    // widgets eagerly when a large M3U series is opened.
+    final offsets = <int>[];
+    var total = 0;
+    for (final season in series.seasons) {
+      offsets.add(total);
+      total += 1 + season.episodes.length;
+    }
+
     return ListView.builder(
-      itemCount: series.seasons.length,
-      itemBuilder: (context, i) => _SeasonSection(
-        series: series,
-        season: series.seasons[i],
-        autofocusFirstEpisode: i == 0,
-      ),
+      padding: const EdgeInsets.only(bottom: 20),
+      itemCount: total,
+      itemBuilder: (context, index) {
+        var low = 0;
+        var high = offsets.length - 1;
+        while (low < high) {
+          final mid = (low + high + 1) ~/ 2;
+          if (offsets[mid] <= index) {
+            low = mid;
+          } else {
+            high = mid - 1;
+          }
+        }
+        final season = series.seasons[low];
+        final episodeIndex = index - offsets[low] - 1;
+        if (episodeIndex < 0) {
+          return _SeasonHeader(series: series, season: season, language: lang);
+        }
+        return _EpisodeRow(
+          series: series,
+          season: season,
+          index: episodeIndex,
+          autofocus: index == 1,
+        );
+      },
     );
   }
 }
 
-class _SeasonSection extends StatelessWidget {
+class _SeasonHeader extends StatelessWidget {
   final Series series;
   final Season season;
-  final bool autofocusFirstEpisode;
+  final String language;
 
-  const _SeasonSection({
+  const _SeasonHeader({
     required this.series,
     required this.season,
-    this.autofocusFirstEpisode = false,
+    required this.language,
   });
 
-  Future<void> _downloadSeason(
-    BuildContext context,
-  ) async {
+  Future<void> _downloadSeason(BuildContext context) async {
     var failed = false;
-
     for (final ep in season.episodes) {
       try {
         await DownloadService.download(
           url: ep.streamUrl,
-          filename:
-              '${series.title}_S${season.number}'
-              'E${ep.number}.mp4',
+          filename: '${series.title}_S${season.number}E${ep.number}.mp4',
         );
       } catch (_) {
         failed = true;
       }
     }
-
     if (failed && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            AppLocalizations.of(context)
-                .t('download_season_failed'),
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(AppLocalizations.of(context).t('download_season_failed')),
+      ));
     }
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding:
-              const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: Row(
-            children: [
-              Text(
-                '${_seriesText(context.watch<LocaleProvider>().locale.languageCode, 'season')} ${season.number}',
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const Spacer(),
-              FilledButton.icon(
-                onPressed: () =>
-                    _downloadSeason(context),
-                icon: const Icon(
-                  Icons.download,
-                  size: 18,
-                ),
-                label: Text(_seriesText(context.watch<LocaleProvider>().locale.languageCode, 'downloadSeason')),
-              ),
-            ],
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+        child: Row(children: [
+          Expanded(
+            child: Text(
+              '${_seriesText(language, 'season')} ${season.number}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
           ),
-        ),
-        FocusTraversalGroup(
-          child: Column(
-            children: season.episodes
-                .asMap()
-                .entries
-                .map((entry) {
-              final ep = entry.value;
+          IconButton(
+            tooltip: _seriesText(language, 'downloadSeason'),
+            onPressed: () => _downloadSeason(context),
+            icon: const Icon(Icons.download_for_offline_outlined),
+          ),
+        ]),
+      );
+}
 
-              return InkWell(
-                autofocus:
-                    autofocusFirstEpisode &&
-                        entry.key == 0,
-                focusColor: AppTheme.electricBlue
-                    .withValues(alpha: 0.18),
-                onTap: () => pushWithFocusRestore(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PlayerScreen(
-                      episodes: season.episodes,
-                      initialEpisodeIndex:
-                          season.episodes.indexOf(ep),
-                      title:
-                          '${series.title} - ${ep.title}',
-                      series: series,
-                      contentId: series.id,
-                    ),
-                  ),
-                ),
-                child: ListTile(
-                  leading: ep.stillUrl != null
-                      ? ClipRRect(
-                          borderRadius:
-                              BorderRadius.circular(6),
-                          child: CachedNetworkImage(
-                            imageUrl: ep.stillUrl!,
-                            width: 76,
-                            height: 52,
-                            fit: BoxFit.cover,
-                            errorWidget: (_, __, ___) =>
-                                CircleAvatar(
-                              child: Text(
-                                '${ep.number}',
-                              ),
-                            ),
-                          ),
-                        )
-                      : CircleAvatar(
-                          child: Text(
-                            '${ep.number}',
-                          ),
-                        ),
-                  title: Text(ep.title),
-                  subtitle: ep.plot == null &&
-                          ep.releaseDate == null &&
-                          ep.durationSeconds == null &&
-                          ep.metadataAttribution == null
-                      ? null
-                      : Column(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
-                          children: [
-                            if (ep.releaseDate != null ||
-                                ep.durationSeconds !=
-                                    null)
-                              Text(
-                                [
-                                  if (ep.releaseDate !=
-                                      null)
-                                    ep.releaseDate!,
-                                  if (ep.durationSeconds !=
-                                      null)
-                                    '${ep.durationSeconds! ~/ 60} Min.',
-                                ].join(' · '),
-                              ),
-                            if (ep.plot != null)
-                              Text(
-                                ep.plot!,
-                                maxLines: 2,
-                                overflow:
-                                    TextOverflow.ellipsis,
-                              ),
-                            if (ep.metadataAttribution !=
-                                null)
-                              Text(
-                                '${ep.metadataAttribution} '
-                                '· ${ep.metadataLicense ?? ''}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall,
-                              ),
-                          ],
-                        ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (ep.metadataAttribution != null)
-                        const Tooltip(
-                          message:
-                              'Zusätzliche '
-                              'Episodeninformationen '
-                              'von TVmaze',
-                          child: Icon(
-                            Icons.info_outline,
-                            size: 18,
-                          ),
-                        ),
-                      InkWell(
-                        onTap: () async {
-                          try {
-                            await DownloadService.download(
-                              url: ep.streamUrl,
-                              filename:
-                                  '${series.title}_S'
-                                  '${season.number}E'
-                                  '${ep.number}.mp4',
-                            );
-                          } catch (_) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(
-                                context,
-                              ).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    AppLocalizations.of(
-                                      context,
-                                    ).t(
-                                      'download_failed',
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }
-                          }
-                        },
-                        focusColor:
-                            AppTheme.electricBlue
-                                .withValues(alpha: 0.22),
-                        borderRadius:
-                            BorderRadius.circular(8),
-                        child: const Padding(
-                          padding: EdgeInsets.all(8),
-                          child: Icon(Icons.download),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }).toList(growable: false),
+class _EpisodeRow extends StatelessWidget {
+  final Series series;
+  final Season season;
+  final int index;
+  final bool autofocus;
+
+  const _EpisodeRow({
+    required this.series,
+    required this.season,
+    required this.index,
+    this.autofocus = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ep = season.episodes[index];
+    return InkWell(
+      autofocus: autofocus,
+      focusColor: AppTheme.electricBlue.withValues(alpha: 0.18),
+      onTap: () => pushWithFocusRestore(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PlayerScreen(
+            episodes: season.episodes,
+            initialEpisodeIndex: index,
+            title: '${series.title} - ${ep.title}',
+            series: series,
+            contentId: series.id,
           ),
         ),
-      ],
+      ),
+      child: ListTile(
+        dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+        leading: ep.stillUrl != null && ep.stillUrl!.isNotEmpty
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: CachedNetworkImage(
+                  imageUrl: ep.stillUrl!,
+                  width: 68,
+                  height: 46,
+                  memCacheWidth: 136,
+                  fit: BoxFit.cover,
+                  errorWidget: (_, __, ___) => CircleAvatar(
+                    child: Text('${ep.number}'),
+                  ),
+                ),
+              )
+            : CircleAvatar(child: Text('${ep.number}')),
+        title: Text(ep.title, maxLines: 2, overflow: TextOverflow.ellipsis),
+        subtitle: ep.plot == null && ep.releaseDate == null &&
+                ep.durationSeconds == null
+            ? null
+            : Text(
+                [
+                  if (ep.releaseDate != null) ep.releaseDate!,
+                  if (ep.durationSeconds != null)
+                    '${ep.durationSeconds! ~/ 60} Min.',
+                  if (ep.plot != null) ep.plot!,
+                ].join(' · '),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+        trailing: IconButton(
+          tooltip: 'Download',
+          icon: const Icon(Icons.download_outlined),
+          onPressed: () async {
+            try {
+              await DownloadService.download(
+                url: ep.streamUrl,
+                filename: '${series.title}_S${season.number}E${ep.number}.mp4',
+              );
+            } catch (_) {
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(AppLocalizations.of(context).t('download_failed')),
+                ));
+              }
+            }
+          },
+        ),
+      ),
     );
   }
 }
