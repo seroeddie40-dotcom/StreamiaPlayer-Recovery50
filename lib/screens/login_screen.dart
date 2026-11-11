@@ -15,6 +15,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _formScrollController = ScrollController();
 
   bool _createAccount = false;
   bool _showPassword = false;
@@ -192,6 +193,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _formScrollController.dispose();
     super.dispose();
   }
 
@@ -257,12 +259,16 @@ class _LoginScreenState extends State<LoginScreen> {
           isArabic ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         backgroundColor: backgroundColor,
+        resizeToAvoidBottomInset: true,
         body: SafeArea(
           child: Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 440),
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(28),
+                controller: _formScrollController,
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: EdgeInsets.fromLTRB(28, 20, 28,
+                    MediaQuery.viewInsetsOf(context).bottom > 0 ? 28 : 20),
                 child: FocusTraversalGroup(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -307,8 +313,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       const SizedBox(height: 28),
 
                       TextField(
-                        autofocus: true,
+                        autofocus: false,
                         controller: _email,
+                        scrollPadding: const EdgeInsets.only(bottom: 140),
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        textCapitalization: TextCapitalization.none,
                         keyboardType: TextInputType.emailAddress,
                         textDirection: TextDirection.ltr,
                         autofillHints: const [
@@ -329,6 +339,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
                       TextField(
                         controller: _password,
+                        scrollPadding: const EdgeInsets.only(bottom: 140),
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        textCapitalization: TextCapitalization.none,
+                        keyboardType: TextInputType.visiblePassword,
                         obscureText: !_showPassword,
                         textDirection: TextDirection.ltr,
                         autofillHints: const [
