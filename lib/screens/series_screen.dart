@@ -14,40 +14,179 @@ import '../services/xtream_service.dart';
 import '../widgets/favorite_toggle_button.dart';
 import 'player_screen.dart';
 
-class SeriesScreen extends StatelessWidget {
+class SeriesScreen extends StatefulWidget {
   const SeriesScreen({super.key});
 
   @override
+  State<SeriesScreen> createState() => _SeriesScreenState();
+}
+
+class _SeriesScreenState extends State<SeriesScreen> {
+  String? _category;
+  String _query = '';
+
+  @override
   Widget build(BuildContext context) {
-    final list = context.watch<ContentProvider>().series;
+    final all = context.watch<ContentProvider>().series;
+    final lang = context.watch<LocaleProvider>().locale.languageCode;
+    final genres = <String>{};
+    for (final item in all) {
+      final value = item.genre?.trim();
+      if (value != null && value.isNotEmpty) {
+        for (final part in value.split(RegExp(r'[,/|]'))) {
+          if (part.trim().isNotEmpty) genres.add(part.trim());
+        }
+      }
+    }
+    final categories = genres.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final selected = categories.contains(_category) ? _category : null;
+    final filtered = all.where((item) {
+      final inCategory = selected == null ||
+          (item.genre ?? '').split(RegExp(r'[,/|]')).any((g) => g.trim() == selected);
+      return inCategory && item.title.toLowerCase().contains(_query.trim().toLowerCase());
+    }).toList(growable: false);
+    final width = MediaQuery.sizeOf(context).width;
+    final wide = width >= 720;
+
+    Widget categoryList({bool closeOnSelect = false}) => ListView(
+      children: [
+        ListTile(
+          selected: selected == null,
+          leading: const Icon(Icons.apps),
+          title: Text(_seriesText(lang, 'all')),
+          trailing: Text('${all.length}'),
+          onTap: () {
+            setState(() => _category = null);
+            if (closeOnSelect) Navigator.of(context).pop();
+          },
+        ),
+        for (final category in categories)
+          ListTile(
+            selected: selected == category,
+            title: Text(category, maxLines: 2, overflow: TextOverflow.ellipsis),
+            trailing: Text('${all.where((s) => (s.genre ?? '').split(RegExp(r'[,/|]')).any((g) => g.trim() == category)).length}'),
+            onTap: () {
+              setState(() => _category = category);
+              if (closeOnSelect) Navigator.of(context).pop();
+            },
+          ),
+      ],
+    );
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Serien'),
-      ),
-      body: list.isEmpty
-          ? const Center(
-              child: Text('Keine Serien vorhanden'),
-            )
-          : FocusTraversalGroup(
-              child: GridView.builder(
-                padding: const EdgeInsets.all(24),
-                gridDelegate:
-                    const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 5,
-                  mainAxisSpacing: 16,
-                  crossAxisSpacing: 16,
-                  childAspectRatio: 0.6,
-                ),
-                itemCount: list.length,
-                itemBuilder: (context, i) => _SeriesTile(
-                  series: list[i],
-                  autofocus: i == 0,
+        leading: const BackButton(),
+        title: Text(_seriesText(lang, 'series')),
+        actions: [
+          if (!wide)
+            IconButton(
+              tooltip: _seriesText(lang, 'categories'),
+              icon: const Icon(Icons.category_outlined),
+              onPressed: () => showModalBottomSheet<void>(
+                context: context,
+                isScrollControlled: true,
+                builder: (sheetContext) => SafeArea(
+                  child: SizedBox(
+                    height: MediaQuery.sizeOf(sheetContext).height * 0.65,
+                    child: categoryList(closeOnSelect: true),
+                  ),
                 ),
               ),
             ),
+        ],
+      ),
+      body: Row(
+        children: [
+          if (wide)
+            SizedBox(
+              width: width >= 1100 ? 260 : 210,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(_seriesText(lang, 'categories'),
+                        style: Theme.of(context).textTheme.titleMedium),
+                  ),
+                  Expanded(child: categoryList()),
+                ],
+              ),
+            ),
+          if (wide) const VerticalDivider(width: 1),
+          Expanded(
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: TextField(
+                    onChanged: (value) => setState(() => _query = value),
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.search),
+                      hintText: _seriesText(lang, 'search'),
+                      border: const OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                if (!wide && selected != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: InputChip(
+                        label: Text(selected),
+                        onDeleted: () => setState(() => _category = null),
+                      ),
+                    ),
+                  ),
+                Expanded(
+                  child: filtered.isEmpty
+                      ? Center(child: Text(all.isEmpty
+                          ? _seriesText(lang, 'empty')
+                          : _seriesText(lang, 'noResults')))
+                      : LayoutBuilder(
+                          builder: (context, constraints) {
+                            final columns = (constraints.maxWidth / 165).floor().clamp(2, 7);
+                            return FocusTraversalGroup(
+                              child: GridView.builder(
+                                padding: const EdgeInsets.all(12),
+                                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: columns,
+                                  mainAxisSpacing: 12,
+                                  crossAxisSpacing: 12,
+                                  childAspectRatio: 0.62,
+                                ),
+                                itemCount: filtered.length,
+                                itemBuilder: (context, i) => _SeriesTile(
+                                  series: filtered[i],
+                                  autofocus: i == 0,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
+}
+
+String _seriesText(String language, String key) {
+  const labels = <String, Map<String, String>>{
+    'de': {'series': 'Serien', 'all': 'Alle Serien', 'categories': 'Kategorien', 'search': 'Serien suchen', 'empty': 'Keine Serien vorhanden', 'noResults': 'Keine Treffer', 'season': 'Staffel', 'downloadSeason': 'Staffel herunterladen', 'retry': 'Erneut laden', 'noEpisodes': 'Keine Episoden vorhanden', 'playlistChanged': 'Die aktive Playlist wurde gewechselt. Bitte zurückgehen.'},
+    'tr': {'series': 'Diziler', 'all': 'Tüm diziler', 'categories': 'Kategoriler', 'search': 'Dizi ara', 'empty': 'Dizi bulunamadı', 'noResults': 'Sonuç bulunamadı', 'season': 'Sezon', 'downloadSeason': 'Sezonu indir', 'retry': 'Tekrar dene', 'noEpisodes': 'Bölüm bulunamadı', 'playlistChanged': 'Etkin oynatma listesi değişti. Lütfen geri dönün.'},
+    'en': {'series': 'Series', 'all': 'All series', 'categories': 'Categories', 'search': 'Search series', 'empty': 'No series available', 'noResults': 'No results', 'season': 'Season', 'downloadSeason': 'Download season', 'retry': 'Retry', 'noEpisodes': 'No episodes available', 'playlistChanged': 'The active playlist has changed. Please go back.'},
+    'ru': {'series': 'Сериалы', 'all': 'Все сериалы', 'categories': 'Категории', 'search': 'Поиск сериалов', 'empty': 'Нет сериалов', 'noResults': 'Ничего не найдено', 'season': 'Сезон', 'downloadSeason': 'Скачать сезон', 'retry': 'Повторить', 'noEpisodes': 'Нет серий', 'playlistChanged': 'Плейлист изменён. Вернитесь назад.'},
+    'pl': {'series': 'Seriale', 'all': 'Wszystkie seriale', 'categories': 'Kategorie', 'search': 'Szukaj seriali', 'empty': 'Brak seriali', 'noResults': 'Brak wyników', 'season': 'Sezon', 'downloadSeason': 'Pobierz sezon', 'retry': 'Ponów', 'noEpisodes': 'Brak odcinków', 'playlistChanged': 'Lista odtwarzania została zmieniona. Wróć.'},
+    'es': {'series': 'Series', 'all': 'Todas las series', 'categories': 'Categorías', 'search': 'Buscar series', 'empty': 'No hay series', 'noResults': 'Sin resultados', 'season': 'Temporada', 'downloadSeason': 'Descargar temporada', 'retry': 'Reintentar', 'noEpisodes': 'No hay episodios', 'playlistChanged': 'La lista ha cambiado. Vuelve atrás.'},
+    'fr': {'series': 'Séries', 'all': 'Toutes les séries', 'categories': 'Catégories', 'search': 'Rechercher des séries', 'empty': 'Aucune série', 'noResults': 'Aucun résultat', 'season': 'Saison', 'downloadSeason': 'Télécharger la saison', 'retry': 'Réessayer', 'noEpisodes': 'Aucun épisode', 'playlistChanged': 'La liste de lecture a changé. Revenez en arrière.'},
+    'ar': {'series': 'المسلسلات', 'all': 'كل المسلسلات', 'categories': 'الفئات', 'search': 'بحث عن مسلسل', 'empty': 'لا توجد مسلسلات', 'noResults': 'لا توجد نتائج', 'season': 'الموسم', 'downloadSeason': 'تنزيل الموسم', 'retry': 'إعادة المحاولة', 'noEpisodes': 'لا توجد حلقات', 'playlistChanged': 'تم تغيير قائمة التشغيل. يرجى الرجوع.'},
+  };
+  return (labels[language] ?? labels['en']!)[key] ?? labels['en']![key] ?? key;
 }
 
 class _SeriesTile extends StatelessWidget {
@@ -285,7 +424,32 @@ class _SeriesDetailScreenState
           ),
         ],
       ),
-      body: Row(
+      body: LayoutBuilder(
+        builder: (context, constraints) => constraints.maxWidth < 650
+            ? Column(
+                children: [
+                  SizedBox(
+                    height: 190,
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (series.plot != null) Text(series.plot!, maxLines: 4, overflow: TextOverflow.ellipsis),
+                          if (series.genre != null) Text(series.genre!),
+                          if (series.releaseDate != null) Text(series.releaseDate!),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  Expanded(child: _SeriesEpisodesPanel(
+                    series: series, sourceChanged: sourceChanged, loading: _loadingEpisodes,
+                    error: _episodeError, onRetry: _loadEpisodes,
+                  )),
+                ],
+              )
+            : Row(
         children: [
           SizedBox(
             width: 240,
@@ -384,37 +548,55 @@ class _SeriesDetailScreenState
               ),
             ),
           ),
-           Expanded(
-             child: sourceChanged
-                 ? const Center(child: Text('Die aktive Playlist wurde gewechselt. Bitte zurückgehen.'))
-                 : _loadingEpisodes && series.seasons.isEmpty
-                     ? const Center(child: CircularProgressIndicator())
-                     : series.seasons.isEmpty
-                         ? Center(
-                             child: Column(
-                               mainAxisSize: MainAxisSize.min,
-                               children: [
-                                 Text(_episodeError ?? 'Keine Episoden vorhanden.'),
-                                 const SizedBox(height: 12),
-                                 FilledButton.icon(
-                                   onPressed: _loadingEpisodes ? null : _loadEpisodes,
-                                   icon: const Icon(Icons.refresh),
-                                   label: const Text('Erneut laden'),
-                                 ),
-                               ],
-                             ),
-                           )
-                         : ListView.builder(
-               itemCount: series.seasons.length,
-               itemBuilder: (context, i) =>
-                   _SeasonSection(
-                series: series,
-                season: series.seasons[i],
-                autofocusFirstEpisode: i == 0,
-              ),
-            ),
-          ),
+           Expanded(child: _SeriesEpisodesPanel(
+             series: series,
+             sourceChanged: sourceChanged,
+             loading: _loadingEpisodes,
+             error: _episodeError,
+             onRetry: _loadEpisodes,
+           )),
         ],
+      ),
+      ),
+    );
+  }
+}
+
+class _SeriesEpisodesPanel extends StatelessWidget {
+  final Series series;
+  final bool sourceChanged;
+  final bool loading;
+  final String? error;
+  final VoidCallback onRetry;
+
+  const _SeriesEpisodesPanel({
+    required this.series,
+    required this.sourceChanged,
+    required this.loading,
+    required this.error,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final lang = context.watch<LocaleProvider>().locale.languageCode;
+    if (sourceChanged) return Center(child: Text(_seriesText(lang, 'playlistChanged')));
+    if (loading && series.seasons.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (series.seasons.isEmpty) {
+      return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Padding(padding: const EdgeInsets.all(12), child: Text(error ?? _seriesText(lang, 'noEpisodes'))),
+        FilledButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh),
+          label: Text(_seriesText(lang, 'retry'))),
+      ]));
+    }
+    return ListView.builder(
+      itemCount: series.seasons.length,
+      itemBuilder: (context, i) => _SeasonSection(
+        series: series,
+        season: series.seasons[i],
+        autofocusFirstEpisode: i == 0,
       ),
     );
   }
@@ -472,7 +654,7 @@ class _SeasonSection extends StatelessWidget {
           child: Row(
             children: [
               Text(
-                'Staffel ${season.number}',
+                '${_seriesText(context.watch<LocaleProvider>().locale.languageCode, 'season')} ${season.number}',
                 style: const TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -486,9 +668,7 @@ class _SeasonSection extends StatelessWidget {
                   Icons.download,
                   size: 18,
                 ),
-                label: const Text(
-                  'Staffel herunterladen',
-                ),
+                label: Text(_seriesText(context.watch<LocaleProvider>().locale.languageCode, 'downloadSeason')),
               ),
             ],
           ),
