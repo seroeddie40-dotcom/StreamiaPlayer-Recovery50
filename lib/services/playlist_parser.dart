@@ -1,15 +1,15 @@
-
-import 'package:http/http.dart' as http;
-import 'package:crypto/crypto.dart';
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+
+import 'package:crypto/crypto.dart';
 
 import '../models/channel.dart';
 import '../models/vod_item.dart';
 import '../models/series.dart';
 import '../providers/content_provider.dart';
 
-/// Parses a user-supplied M3U playlist.
-/// The app does not provide channel content.
+/// Parses user-supplied M3U playlists. Streamia provides no streams.
 class PlaylistParser {
   static Future<void> parseAndLoad(
     String urlOrContent,
@@ -18,246 +18,199 @@ class PlaylistParser {
     int? activationGeneration,
   }) async {
     final input = urlOrContent.trim();
-
-    if (input.isEmpty) {
-      throw const FormatException('Die Playlist ist leer.');
-    }
-
-    var text = input;
-
+    if (input.isEmpty) throw const FormatException('Die Playlist ist leer.');
     if (_looksLikeUrl(input)) {
       final uri = Uri.tryParse(input);
-
-      if (uri == null ||
-          !uri.hasScheme ||
-          !{'http', 'https'}.contains(uri.scheme)) {
-        throw const FormatException(
-          'Bitte eine gültige HTTP- oder HTTPS-Playlist-URL eingeben.',
-        );
+      if (uri == null || !{'http', 'https'}.contains(uri.scheme) || uri.host.isEmpty) {
+        throw const FormatException('Bitte eine gültige HTTP- oder HTTPS-Playlist-URL eingeben.');
       }
-
-      final response = await http
-          .get(uri)
-          .timeout(const Duration(seconds: 30));
-
-      if (response.statusCode != 200) {
-        throw Exception(
-          'Playlist konnte nicht geladen werden '
-          '(HTTP ${response.statusCode}).',
+      final client = HttpClient();
+      try {
+        final request = await client.getUrl(uri).timeout(const Duration(seconds: 30));
+        final response = await request.close().timeout(const Duration(seconds: 30));
+        if (response.statusCode != 200) {
+          throw HttpException('Playlist konnte nicht geladen werden (HTTP ${response.statusCode}).');
+        }
+        await _parseLines(
+          response.transform(utf8.decoder).transform(const LineSplitter()),
+          content,
+          sourceKeyOverride: sourceKeyOverride,
+          activationGeneration: activationGeneration,
+          sourceHost: uri.host,
         );
+      } finally {
+        client.close();
       }
-
-      text = response.body;
-    }
-
-    if (!text.trimLeft().startsWith('#EXTM3U')) {
-      throw const FormatException(
-        'Ungültige M3U-Datei: #EXTM3U-Kopfzeile fehlt.',
+    } else {
+      await _parseLines(
+        Stream<String>.fromIterable(const LineSplitter().convert(input)),
+        content,
+        sourceKeyOverride: sourceKeyOverride,
+        activationGeneration: activationGeneration,
       );
     }
+  }
 
-    String stableStreamIdentity(String value) {
-      final uri = Uri.tryParse(value);
-
-      if (uri == null) {
-        return sha256.convert(utf8.encode(value)).toString();
-      }
-
-      final lastSegment = uri.pathSegments.isEmpty
-          ? ''
-          : uri.pathSegments.last;
-
-      return '${uri.scheme.toLowerCase()}://'
-          '${uri.host.toLowerCase()}'
-          '${uri.hasPort ? ':${uri.port}' : ''}'
-          '/$lastSegment';
+  /// Imports local M3U files without materializing the whole file as a String.
+  /// The picker should provide a readable temporary file path on Android.
+  static Future<void> parseAndLoadFile(
+    String path,
+    ContentProvider content, {
+    String? sourceKeyOverride,
+    int? activationGeneration,
+  }) async {
+    final file = File(path);
+    if (!await file.exists()) {
+      throw const FileSystemException('Die ausgewählte M3U-Datei ist nicht mehr verfügbar.');
     }
+    await _parseLines(
+      file.openRead().transform(utf8.decoder).transform(const LineSplitter()),
+      content,
+      sourceKeyOverride: sourceKeyOverride,
+      activationGeneration: activationGeneration,
+    );
+  }
 
-    String stableId(String kind, String value) =>
-        '${kind}_${sha256.convert(utf8.encode(value)).toString().substring(0, 24)}';
-
+  static Future<void> _parseLines(
+    Stream<String> lines,
+    ContentProvider content, {
+    String? sourceKeyOverride,
+    int? activationGeneration,
+    String? sourceHost,
+  }) async {
     final channels = <Channel>[];
     final vod = <VodItem>[];
     final series = <String, Series>{};
-
-    String? name;
-    String? logo;
-    String? group;
-    String? tvgId;
-    String? pendingUrl;
-
     final episodeCounter = <String, int>{};
+    final descriptors = <String>[];
+    String? name, logo, group, tvgId;
+    bool headerSeen = false;
 
-    for (final raw in text.split(RegExp(r'\r?\n'))) {
+    await for (final raw in lines) {
       final line = raw.trim();
-
-      if (line.isEmpty || line.startsWith('#EXTM3U')) {
+      if (line.isEmpty) continue;
+      if (!headerSeen) {
+        if (line.startsWith('\uFEFF')) {
+          if (!line.substring(1).startsWith('#EXTM3U')) {
+            throw const FormatException('Ungültige M3U-Datei: #EXTM3U-Kopfzeile fehlt.');
+          }
+        } else if (!line.startsWith('#EXTM3U')) {
+          throw const FormatException('Ungültige M3U-Datei: #EXTM3U-Kopfzeile fehlt.');
+        }
+        headerSeen = true;
         continue;
       }
-
       if (line.startsWith('#EXTINF:')) {
         final comma = line.lastIndexOf(',');
-
         name = comma >= 0 && comma < line.length - 1
             ? line.substring(comma + 1).trim()
-            : _attribute(line, 'tvg-name') ??
-                'Unbenannter Eintrag';
-
+            : _attribute(line, 'tvg-name') ?? 'Unbenannter Eintrag';
         logo = _attribute(line, 'tvg-logo');
         group = _attribute(line, 'group-title');
         tvgId = _attribute(line, 'tvg-id');
-        pendingUrl = null;
         continue;
       }
-
-      if (line.startsWith('#') || name == null) {
-        continue;
-      }
-
+      if (line.startsWith('#') || name == null) continue;
       final uri = Uri.tryParse(line);
-
-      if (uri == null ||
-          !{'http', 'https', 'rtsp', 'rtmp'}
-              .contains(uri.scheme)) {
-        continue;
-      }
-
-      pendingUrl = line;
-
+      if (uri == null || !{'http', 'https', 'rtsp', 'rtmp'}.contains(uri.scheme)) continue;
+      final identity = _stableStreamIdentity(line);
       final normalizedGroup = (group ?? '').toLowerCase();
-
-      final looksSeries =
-          normalizedGroup.contains('series') ||
-          normalizedGroup.contains('serie') ||
-          normalizedGroup.contains('tv show');
-
-      final looksVod =
-          normalizedGroup.contains('movie') ||
-          normalizedGroup.contains('vod') ||
-          normalizedGroup.contains('film') ||
+      final looksSeries = normalizedGroup.contains('series') ||
+          normalizedGroup.contains('serie') || normalizedGroup.contains('tv show');
+      final looksVod = normalizedGroup.contains('movie') ||
+          normalizedGroup.contains('vod') || normalizedGroup.contains('film') ||
           _hasVideoExtension(uri.path);
 
       if (looksSeries) {
-        final key = group!.trim();
-
-        final number =
-            (episodeCounter[key] ?? 0) + 1;
-
+        final key = (group ?? '').trim();
+        final number = (episodeCounter[key] ?? 0) + 1;
         episodeCounter[key] = number;
-
         final episode = Episode(
-          id: stableId(
-            'm3u_ep',
-            '$key|$number|$name|'
-            '${stableStreamIdentity(pendingUrl)}',
-          ),
+          id: _stableId('m3u_ep', '$key|$number|$name|$identity'),
           title: name,
           number: number,
-          streamUrl: pendingUrl,
+          streamUrl: line,
         );
-
         final existing = series[key];
-
         if (existing == null) {
-          series[key] = Series(
-            id: stableId('m3u_series', key),
+          final created = Series(
+            id: _stableId('m3u_series', key),
             title: key,
             posterUrl: logo,
-            seasons: [
-              Season(
-                number: 1,
-                episodes: [episode],
-              ),
-            ],
+            seasons: [Season(number: 1, episodes: [episode])],
           );
+          series[key] = created;
+          descriptors.add('series|${created.id}');
         } else {
           existing.seasons.first.episodes.add(episode);
         }
       } else if (looksVod) {
-        vod.add(
-          VodItem(
-            id: stableId(
-              'm3u_vod',
-              '$name|${stableStreamIdentity(pendingUrl)}',
-            ),
-            title: name,
-            posterUrl: logo,
-            streamUrl: pendingUrl,
-          ),
+        final item = VodItem(
+          id: _stableId('m3u_vod', '$name|$identity'),
+          title: name,
+          posterUrl: logo,
+          streamUrl: line,
         );
+        vod.add(item);
+        descriptors.add('vod|${item.id}');
       } else {
-        channels.add(
-          Channel(
-            id: stableId(
-              'm3u_ch',
-              '$name|${stableStreamIdentity(pendingUrl)}',
-            ),
-            name: name,
-            streamUrl: pendingUrl,
-            logoUrl: logo,
-            category: group,
-            epgChannelId: tvgId,
-          ),
+        final item = Channel(
+          id: _stableId('m3u_ch', '$name|$identity'),
+          name: name,
+          streamUrl: line,
+          logoUrl: logo,
+          category: group,
+          epgChannelId: tvgId,
         );
+        channels.add(item);
+        descriptors.add('live|${item.id}');
       }
-
       name = null;
       logo = null;
       group = null;
       tvgId = null;
-      pendingUrl = null;
     }
 
-    if (channels.isEmpty &&
-        vod.isEmpty &&
-        series.isEmpty) {
-      throw const FormatException(
-        'Die Playlist enthält keine erkennbaren Einträge.',
-      );
+    if (!headerSeen) {
+      throw const FormatException('Ungültige M3U-Datei: #EXTM3U-Kopfzeile fehlt.');
     }
-
-    final sourceDescriptor = <String>[
-      ...channels.map((c) => 'live|${c.id}'),
-      ...vod.map((v) => 'vod|${v.id}'),
-      ...series.values.map((s) => 'series|${s.id}'),
-    ]..sort();
-
-    final parsedUri =
-        _looksLikeUrl(input) ? Uri.tryParse(input) : null;
-
-    final sourceIdentity =
-        'm3u-v2|'
-        '${parsedUri == null ? 'file' : parsedUri.host.toLowerCase()}|'
-        '${sourceDescriptor.join('\n')}';
-
+    if (channels.isEmpty && vod.isEmpty && series.isEmpty) {
+      throw const FormatException('Die Playlist enthält keine erkennbaren Einträge.');
+    }
+    descriptors.sort();
+    final sourceIdentity = 'm3u-v2|${sourceHost?.toLowerCase() ?? 'file'}|${descriptors.join('\n')}';
     final sourceKey = sourceKeyOverride ??
         'src:v1:${sha256.convert(utf8.encode(sourceIdentity))}';
-
     content.replaceLibrary(
       channels: channels,
       vod: vod,
       series: series.values.toList(),
       sourceKey: sourceKey,
-      sourceLabel: parsedUri?.host ?? 'M3U-Datei',
+      sourceLabel: sourceHost ?? 'M3U-Datei',
       activationGeneration: activationGeneration,
     );
   }
 
-  static bool _looksLikeUrl(String value) =>
-      value.startsWith('http://') ||
-      value.startsWith('https://');
-
-  static String? _attribute(String line, String key) {
-    final escaped = RegExp.escape(key);
-
-    return RegExp(
-      '$escaped="([^"]*)"',
-      caseSensitive: false,
-    ).firstMatch(line)?.group(1);
+  static String _stableStreamIdentity(String value) {
+    final uri = Uri.tryParse(value);
+    if (uri == null) return sha256.convert(utf8.encode(value)).toString();
+    final lastSegment = uri.pathSegments.isEmpty ? '' : uri.pathSegments.last;
+    return '${uri.scheme.toLowerCase()}://${uri.host.toLowerCase()}'
+        '${uri.hasPort ? ':${uri.port}' : ''}/$lastSegment';
   }
 
-  static bool _hasVideoExtension(String path) =>
-      RegExp(
+  static String _stableId(String kind, String value) =>
+      '${kind}_${sha256.convert(utf8.encode(value)).toString().substring(0, 24)}';
+
+  static bool _looksLikeUrl(String value) =>
+      value.startsWith('http://') || value.startsWith('https://');
+
+  static String? _attribute(String line, String key) => RegExp(
+        '${RegExp.escape(key)}="([^"]*)"',
+        caseSensitive: false,
+      ).firstMatch(line)?.group(1);
+
+  static bool _hasVideoExtension(String path) => RegExp(
         r'\.(mp4|mkv|avi|mov|m4v|webm)$',
         caseSensitive: false,
       ).hasMatch(path);
