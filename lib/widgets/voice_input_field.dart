@@ -4,9 +4,8 @@ import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
 import 'tv_text_keyboard.dart';
 
-/// Dictation-enabled input for non-secret values (URLs, usernames, search terms).
-/// Recognition uses the selected app language when the device provides it.
-/// Recognized text is inserted verbatim; the user can review and correct it.
+/// Speech-enabled text input. URL dictation preserves existing text and
+/// normalizes technical syntax without modifying ordinary search fields.
 class VoiceInputField extends StatefulWidget {
   final TextEditingController controller;
   final String appLanguageCode;
@@ -43,8 +42,29 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
   bool _busy = false;
   bool _listening = false;
   String? _localeId;
+  String _prefix = '';
+  String _suffix = '';
 
-  String _languageOf(String id) => id.replaceAll('-', '_').split('_').first.toLowerCase();
+  bool get _urlMode => widget.keyboardType == TextInputType.url;
+
+  String _languageOf(String id) =>
+      id.replaceAll('-', '_').split('_').first.toLowerCase();
+
+  static String normalizeUrl(String value) {
+    var text = value.trim();
+    // Speech engines may capitalize schemes, add spaces after colons or
+    // transcribe a spoken scheme as words.
+    text = text.replaceFirst(
+      RegExp(r'^https?\s*:\s*/\s*/', caseSensitive: false),
+      text.toLowerCase().startsWith('https') ? 'https://' : 'http://',
+    );
+    text = text.replaceFirst(
+      RegExp(r'^https?\s+(?:colon|doppelpunkt|iki nokta)\s*(?:slash|schrägstrich|barra|/)\s*(?:slash|schrägstrich|barra|/)', caseSensitive: false),
+      text.toLowerCase().startsWith('https') ? 'https://' : 'http://',
+    );
+    text = text.replaceAll(RegExp(r'\s+'), '');
+    return text;
+  }
 
   Future<void> _startDictation() async {
     if (_busy) return;
@@ -61,18 +81,20 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
             if (mounted) setState(() => _listening = status == 'listening');
           },
           onError: (_) {
-            if (mounted) {
-              setState(() => _listening = false);
-              _message(AppLocalizations.of(context).t('speech_unavailable'));
-            }
+            if (!mounted) return;
+            setState(() => _listening = false);
+            _message(AppLocalizations.of(context).t('speech_unavailable'));
           },
         );
+        if (!mounted) return;
         if (!available) {
           _message(AppLocalizations.of(context).t('speech_unavailable'));
           return;
         }
         final locales = await _speech.locales();
-        final matches = locales.where((l) => _languageOf(l.localeId) == widget.appLanguageCode.toLowerCase()).toList();
+        if (!mounted) return;
+        final matches = locales.where((l) =>
+            _languageOf(l.localeId) == widget.appLanguageCode.toLowerCase()).toList();
         if (matches.isEmpty) {
           _message(AppLocalizations.of(context).t('speech_language_missing'));
           return;
@@ -80,6 +102,17 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
         _localeId = matches.first.localeId;
         _ready = true;
       }
+
+      final existing = widget.controller.value;
+      final start = existing.selection.isValid
+          ? existing.selection.start.clamp(0, existing.text.length)
+          : existing.text.length;
+      final end = existing.selection.isValid
+          ? existing.selection.end.clamp(0, existing.text.length)
+          : existing.text.length;
+      _prefix = existing.text.substring(0, start);
+      _suffix = existing.text.substring(end);
+
       await _speech.listen(
         localeId: _localeId,
         listenFor: const Duration(seconds: 30),
@@ -91,16 +124,25 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
         ),
         onResult: (result) {
           if (!mounted || result.recognizedWords.isEmpty) return;
-          final text = result.recognizedWords;
+          final spoken = result.recognizedWords;
+          final insertion = _urlMode ? normalizeUrl(spoken) : spoken;
+          // One recognition session replaces only its own partial result.
+          // Previously typed scheme and port are never discarded.
+          final separator = !_urlMode && _prefix.isNotEmpty &&
+                  !_prefix.endsWith(' ') && insertion.isNotEmpty
+              ? ' '
+              : '';
+          final before = '$_prefix$separator$insertion';
+          final value = _urlMode ? normalizeUrl('$before$_suffix') : '$before$_suffix';
           widget.controller.value = TextEditingValue(
-            text: text,
-            selection: TextSelection.collapsed(offset: text.length),
+            text: value,
+            selection: TextSelection.collapsed(offset: _urlMode ? value.length : before.length),
           );
         },
       );
       if (mounted) setState(() => _listening = true);
     } catch (_) {
-      _message(AppLocalizations.of(context).t('speech_unavailable'));
+      if (mounted) _message(AppLocalizations.of(context).t('speech_unavailable'));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -136,7 +178,7 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
         context,
         controller: widget.controller,
         languageCode: widget.appLanguageCode,
-        urlMode: widget.keyboardType == TextInputType.url,
+        urlMode: _urlMode,
         onConfirmed: widget.onSubmitted == null
             ? null
             : () => widget.onSubmitted!(widget.controller.text),
