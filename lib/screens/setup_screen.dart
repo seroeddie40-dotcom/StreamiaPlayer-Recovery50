@@ -51,6 +51,8 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   bool _isLoading = false;
   String? _loadingMessage;
   String? _importError;
+  String? _selectedM3uPath;
+  String? _selectedM3uName;
 
   String _tr(String de, String tr, String en) {
     final code = context.read<LocaleProvider>().locale.languageCode;
@@ -71,6 +73,11 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _m3uController.addListener(() {
+      if (_selectedM3uPath != null && _m3uController.text.trim().isNotEmpty && mounted) {
+        setState(() { _selectedM3uPath = null; _selectedM3uName = null; });
+      }
+    });
     _initServer();
   }
 
@@ -115,39 +122,111 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     });
   }
 
+  // Keep local playlist contents out of TextEditingController: large M3U files
+  // can otherwise exhaust memory during text layout and IME synchronization.
   Future<void> _pickFile(bool isM3u) async {
-    setState(() { _isLoading = true; _importError = null; });
+    if (_isLoading) return;
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: isM3u ? ['m3u', 'm3u8'] : ['xml', 'gz'],
-        withData: true, // Wichtig für stabile Android-Kompatibilität
+        withData: false,
       );
-      
-      if (result != null && result.files.single.bytes != null) {
-        final content = utf8.decode(result.files.single.bytes!, allowMalformed: true);
+      if (!mounted || result == null || result.files.isEmpty) return;
+      final selected = result.files.single;
+      final path = selected.path;
+      if (path == null || path.isEmpty) {
+        _showError(_copy(
+          'Die ausgewählte Datei konnte nicht geöffnet werden.',
+          'Seçilen dosya açılamadı.',
+          'The selected file could not be opened.',
+        ));
+        return;
+      }
+      // Avoid loading an unbounded file into memory, especially on phones.
+      const maxBytes = 12 * 1024 * 1024;
+      if (selected.size > maxBytes) {
+        _showError(_copy(
+          'Datei ist zu groß (maximal 12 MB).',
+          'Dosya çok büyük (en fazla 12 MB).',
+          'File is too large (maximum 12 MB).',
+        ));
+        return;
+      }
+      if (isM3u) {
         setState(() {
-          if (isM3u) {
-            _m3uController.text = content;
-          } else {
-            _epgController.text = content;
-          }
+          _selectedM3uPath = path;
+          _selectedM3uName = selected.name;
+          _m3uController.clear();
+          _importError = null;
         });
+      } else {
+        if (selected.name.toLowerCase().endsWith('.gz')) {
+          _showError(_copy(
+            'Komprimierte EPG-Dateien können hier nicht als Text eingefügt werden. Bitte eine XML-URL verwenden.',
+            'Sıkıştırılmış EPG dosyaları buraya metin olarak eklenemez. Lütfen XML bağlantısı kullanın.',
+            'Compressed EPG files cannot be inserted as text here. Please use an XML URL.',
+          ));
+          return;
+        }
+        setState(() => _isLoading = true);
+        try {
+          final content = await File(path).readAsString();
+          if (mounted) setState(() => _epgController.text = content);
+        } finally {
+          if (mounted) setState(() => _isLoading = false);
+        }
       }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Fehler beim Laden der Datei: $e')),
-        );
+    } catch (_) {
+      _showError(_copy(
+        'Dateiauswahl fehlgeschlagen. Bitte eine andere Datei versuchen.',
+        'Dosya seçimi başarısız. Lütfen başka bir dosya deneyin.',
+        'File selection failed. Please try another file.',
+      ));
+    }
+  }
+
+  Future<void> _startM3uImport() async {
+    if (_isLoading) return;
+    final path = _selectedM3uPath;
+    if (path == null) {
+      final value = _m3uController.text.trim();
+      if (value.isEmpty) {
+        _showError(_copy('Bitte M3U-Link eingeben oder Datei auswählen.',
+          'M3U bağlantısı girin veya dosya seçin.',
+          'Enter an M3U link or select a file.'));
+        return;
       }
+      await _processPlaylist(value);
+      return;
+    }
+    setState(() {
+      _isLoading = true;
+      _importError = null;
+      _loadingMessage = _copy('Lokale M3U-Datei wird gelesen…',
+        'Yerel M3U dosyası okunuyor…', 'Reading local M3U file…');
+    });
+    try {
+      final file = File(path);
+      const maxBytes = 12 * 1024 * 1024;
+      if (await file.length() > maxBytes) {
+        throw const FormatException('Playlist exceeds the 12 MB safety limit');
+      }
+      final input = await file.readAsString();
+      if (!mounted) return;
+      // Keep the loading overlay active until parsing and persistence finish.
+      await _processPlaylist(input);
+    } catch (_) {
+      _showError(_copy('Die M3U-Datei konnte nicht gelesen werden.',
+        'M3U dosyası okunamadı.', 'Could not read the M3U file.'));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _processPlaylist(String input) async {
-    if (input.isEmpty) return;
-    setState(() { _isLoading = true; _importError = null; });
+    if (input.isEmpty || !mounted) return;
+    setState(() { _isLoading = true; _importError = null; _loadingMessage = _copy('Playlist wird verarbeitet…', 'Oynatma listesi işleniyor…', 'Processing playlist…'); });
     try {
       final contentProvider = context.read<ContentProvider>();
       await PlaylistParser.parseAndLoad(input, contentProvider)
@@ -317,7 +396,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   Widget _fieldTitle(String title, {String? hint}) => Padding(
     padding: const EdgeInsets.only(bottom: 9),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Colors.white)),
+      Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Colors.white)),
       if (hint != null) ...[
         const SizedBox(height: 3),
         Text(hint, style: const TextStyle(fontSize: 12, color: Color(0xFF9EADC4))),
@@ -371,9 +450,10 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
               ),
               const SizedBox(width: 14),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(title, style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w800, color: Colors.white)),
+                Text(title, maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+                   style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800, color: Colors.white)),
                 const SizedBox(height: 4),
-                Text(description, style: const TextStyle(fontSize: 13, color: Color(0xFFA6B5CB), height: 1.4)),
+                Text(description, maxLines: 3, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, color: Color(0xFFA6B5CB), height: 1.4)),
               ])),
             ]),
             const SizedBox(height: 22),
@@ -512,6 +592,21 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         VoiceInputField(controller: _m3uController, appLanguageCode: language,
           keyboardType: TextInputType.url, maxLines: 3,
           decoration: _decoration('https://example.com/playlist.m3u', Icons.link_rounded)),
+        if (_selectedM3uName != null) ...[
+          const SizedBox(height: 10),
+          Row(children: [
+            const Icon(Icons.insert_drive_file_outlined, color: _aqua, size: 18),
+            const SizedBox(width: 8),
+            Expanded(child: Text(_selectedM3uName!, maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white70))),
+            IconButton(tooltip: 'Remove selected file',
+              onPressed: () => setState(() {
+                _selectedM3uName = null;
+                _selectedM3uPath = null;
+              }), icon: const Icon(Icons.close, size: 18)),
+          ]),
+        ],
         const SizedBox(height: 20),
         _fieldTitle(l10n.t('epg_url'), hint: _copy('Optional – Programmübersicht', 'İsteğe bağlı – yayın rehberi', 'Optional – program guide')),
         VoiceInputField(controller: _epgController, appLanguageCode: language, keyboardType: TextInputType.url,
@@ -526,13 +621,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
             : Row(children: [Expanded(child: first), const SizedBox(width: 12), Expanded(child: second)]);
         }),
         const SizedBox(height: 24),
-        _actionButton(text: l10n.t('btn_start'), icon: Icons.arrow_forward_rounded, onPressed: () {
-          if (_m3uController.text.trim().isEmpty) {
-            _showError(_copy('Bitte M3U-Link eingeben oder Datei auswählen.', 'M3U bağlantısı girin veya dosya seçin.', 'Enter an M3U link or select a file.'));
-          } else {
-            _processPlaylist(_m3uController.text);
-          }
-        }),
+        _actionButton(text: l10n.t('btn_start'), icon: Icons.arrow_forward_rounded, onPressed: _startM3uImport),
       ]),
     );
   }
