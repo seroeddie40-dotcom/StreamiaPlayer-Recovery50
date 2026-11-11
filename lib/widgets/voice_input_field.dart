@@ -32,6 +32,23 @@ class VoiceInputField extends StatefulWidget {
     this.onSubmitted,
   });
 
+  static String normalizeUrl(String value) {
+    var text = value.trim();
+    // Speech engines may capitalize schemes, add spaces after colons or
+    // transcribe a spoken scheme as words.
+    text = text.replaceFirst(
+      RegExp(r'^https?\s*:\s*/\s*/', caseSensitive: false),
+      text.toLowerCase().startsWith('https') ? 'https://' : 'http://',
+    );
+    text = text.replaceFirst(
+      RegExp(r'^https?\s+(?:colon|doppelpunkt|iki nokta)\s*(?:slash|schrägstrich|barra|/)\s*(?:slash|schrägstrich|barra|/)', caseSensitive: false),
+      text.toLowerCase().startsWith('https') ? 'https://' : 'http://',
+    );
+    text = text.replaceAll(RegExp(r'\s+'), '');
+    return text;
+  }
+
+
   @override
   State<VoiceInputField> createState() => _VoiceInputFieldState();
 }
@@ -50,21 +67,6 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
   String _languageOf(String id) =>
       id.replaceAll('-', '_').split('_').first.toLowerCase();
 
-  static String normalizeUrl(String value) {
-    var text = value.trim();
-    // Speech engines may capitalize schemes, add spaces after colons or
-    // transcribe a spoken scheme as words.
-    text = text.replaceFirst(
-      RegExp(r'^https?\s*:\s*/\s*/', caseSensitive: false),
-      text.toLowerCase().startsWith('https') ? 'https://' : 'http://',
-    );
-    text = text.replaceFirst(
-      RegExp(r'^https?\s+(?:colon|doppelpunkt|iki nokta)\s*(?:slash|schrägstrich|barra|/)\s*(?:slash|schrägstrich|barra|/)', caseSensitive: false),
-      text.toLowerCase().startsWith('https') ? 'https://' : 'http://',
-    );
-    text = text.replaceAll(RegExp(r'\s+'), '');
-    return text;
-  }
 
   Future<void> _startDictation() async {
     if (_busy) return;
@@ -125,7 +127,7 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
         onResult: (result) {
           if (!mounted || result.recognizedWords.isEmpty) return;
           final spoken = result.recognizedWords;
-          final insertion = _urlMode ? normalizeUrl(spoken) : spoken;
+          final insertion = _urlMode ? VoiceInputField.normalizeUrl(spoken) : spoken;
           // One recognition session replaces only its own partial result.
           // Previously typed scheme and port are never discarded.
           final separator = !_urlMode && _prefix.isNotEmpty &&
@@ -133,7 +135,7 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
               ? ' '
               : '';
           final before = '$_prefix$separator$insertion';
-          final value = _urlMode ? normalizeUrl('$before$_suffix') : '$before$_suffix';
+          final value = _urlMode ? VoiceInputField.normalizeUrl('$before$_suffix') : '$before$_suffix';
           widget.controller.value = TextEditingValue(
             text: value,
             selection: TextSelection.collapsed(offset: _urlMode ? value.length : before.length),
