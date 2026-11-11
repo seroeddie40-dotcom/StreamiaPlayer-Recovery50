@@ -6,7 +6,6 @@ import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
-import '../widgets/playlist_source_navigation.dart';
 import 'continue_watching_screen.dart';
 import 'live_tv_screen.dart';
 import 'master_search_screen.dart';
@@ -23,8 +22,6 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  int _sourceNavigationRevision = 0;
-
   String _label(BuildContext context, String de, String tr, String en) {
     final language = Localizations.localeOf(context).languageCode;
     if (language == 'tr') return tr;
@@ -62,8 +59,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _HomeEntry(Icons.play_circle_outline_rounded,
           l10n.t('nav_continue_watching'),
           () => _open(const ContinueWatchingScreen())),
-      _HomeEntry(Icons.search_rounded, l10n.t('nav_search'),
-          () => _open(const MasterSearchScreen())),
     ];
 
     return Scaffold(
@@ -78,7 +73,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Container(
                     width: compact ? 42 : 52,
                     height: compact ? 42 : 52,
-                    decoration: BoxDecoration(
+                    decoration: const BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: AppTheme.accentGradient,
                     ),
@@ -133,23 +128,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           builder: (_) => const SettingsScreen(),
                         ),
                       );
-                      if (mounted) {
-                        setState(() => _sourceNavigationRevision++);
-                      }
                     },
                     icon: const Icon(Icons.settings_outlined),
                   ),
                 ],
               ),
             ),
-            PlaylistSourceNavigation(
-              key: ValueKey(_sourceNavigationRevision),
-            ),
             Expanded(
               child: LayoutBuilder(builder: (context, constraints) {
                 final width = constraints.maxWidth;
                 final horizontal = width < 600 ? 16.0 : 36.0;
-                final columns = width >= 1050 ? 4 : width >= 680 ? 3 : 2;
+                final columns = width >= 600 ? 4 : 2;
                 return FocusTraversalGroup(
                   child: CustomScrollView(
                     slivers: [
@@ -200,7 +189,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             crossAxisCount: columns,
                             mainAxisSpacing: 14,
                             crossAxisSpacing: 14,
-                            childAspectRatio: compact ? 1.35 : 1.8,
+                            childAspectRatio: compact ? 1.35 : (width < 850 ? 1.25 : 1.65),
                           ),
                         ),
                       ),
@@ -287,7 +276,7 @@ class _PremiumTile extends StatelessWidget {
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Icon(entry.icon,
-                      size: 28, color: AppTheme.electricBlue),
+                      size: 24, color: AppTheme.electricBlue),
                 ),
                 Row(
                   children: [
@@ -296,7 +285,7 @@ class _PremiumTile extends StatelessWidget {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                              fontSize: 17, fontWeight: FontWeight.w700)),
+                              fontSize: 15, fontWeight: FontWeight.w700)),
                     ),
                     const Icon(Icons.arrow_forward_ios_rounded, size: 14),
                   ],
