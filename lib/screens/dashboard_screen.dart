@@ -73,7 +73,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Container(
                     width: compact ? 42 : 52,
                     height: compact ? 42 : 52,
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       gradient: AppTheme.accentGradient,
                     ),
