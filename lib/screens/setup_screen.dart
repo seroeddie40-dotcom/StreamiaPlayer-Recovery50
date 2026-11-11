@@ -143,9 +143,9 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         ));
         return;
       }
-      // Avoid loading an unbounded file into memory, especially on phones.
+      // XML EPG is still inserted into a text field; limit only that path.
       const maxBytes = 12 * 1024 * 1024;
-      if (selected.size > maxBytes) {
+      if (!isM3u && selected.size > maxBytes) {
         _showError(_copy(
           'Datei ist zu groß (maximal 12 MB).',
           'Dosya çok büyük (en fazla 12 MB).',
@@ -208,14 +208,40 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     });
     try {
       final file = File(path);
-      const maxBytes = 12 * 1024 * 1024;
-      if (await file.length() > maxBytes) {
-        throw const FormatException('Playlist exceeds the 12 MB safety limit');
+      if (!await file.exists()) {
+        throw const FileSystemException('Selected playlist is no longer available.');
       }
-      final input = await file.readAsString();
+      final contentProvider = context.read<ContentProvider>();
+      await PlaylistParser.parseAndLoadFile(path, contentProvider);
       if (!mounted) return;
-      // Keep the loading overlay active until parsing and persistence finish.
-      await _processPlaylist(input);
+      // Keep a private copy so reactivation does not depend on the picker cache.
+      final directory = await getApplicationDocumentsDirectory();
+      final playlistDirectory = Directory('${directory.path}/streamia_playlists');
+      await playlistDirectory.create(recursive: true);
+      final safeKey = contentProvider.sourceKey.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+      final localPath = '${playlistDirectory.path}/$safeKey.m3u';
+      if (file.absolute.path != File(localPath).absolute.path) {
+        await file.copy(localPath);
+      }
+      await PlaylistSourceStore().save(PlaylistSourceConfig(
+        sourceKey: contentProvider.sourceKey, type: 'm3u', localFilePath: localPath,
+      ));
+      await PlaylistProfileStore().upsert(PlaylistProfile(
+        sourceKey: contentProvider.sourceKey,
+        displayName: _m3uNameController.text.trim().isEmpty
+            ? 'M3U Playlist' : _m3uNameController.text.trim(),
+        type: 'm3u', folderName: '', isVisible: true, isActive: true,
+        createdAt: DateTime.now(),
+      ));
+      contentProvider.setLoaded(true);
+      if (!mounted) return;
+      if (widget.returnToPreviousOnSuccess) {
+        Navigator.of(context).pop(true);
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+        );
+      }
     } catch (_) {
       _showError(_copy('Die M3U-Datei konnte nicht gelesen werden.',
         'M3U dosyası okunamadı.', 'Could not read the M3U file.'));
@@ -280,7 +306,8 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
 
   Future<void> _connectXtream() async {
     if (_isLoading) return;
-    final server = _xtreamServerController.text.trim();
+    final server = VoiceInputField.normalizeUrl(_xtreamServerController.text);
+    _xtreamServerController.text = server;
     final user = _xtreamUserController.text.trim();
     final pass = _xtreamPassController.text;
     final validationError = XtreamInputValidator.serverError(server) ??
@@ -519,6 +546,8 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
             controller: _tabController,
             indicatorColor: _aqua,
             indicatorWeight: 3,
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
             labelColor: Colors.white,
             unselectedLabelColor: const Color(0xFF91A0B6),
             tabs: [
@@ -629,7 +658,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   void _applyServerScheme(String scheme) {
     final current = _xtreamServerController.text.trimLeft();
     final withoutScheme = current.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '');
-    final value = '$scheme$withoutScheme';
+    final value = VoiceInputField.normalizeUrl('$scheme$withoutScheme');
     _xtreamServerController.value = TextEditingValue(text: value, selection: TextSelection.collapsed(offset: value.length));
     _xtreamServerFocus.requestFocus();
   }
