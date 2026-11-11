@@ -2,17 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/localization/app_localizations.dart';
 
-/// Compact, remote-control-friendly alternative to the device keyboard.
-/// The original controller is changed only when the user confirms.
+/// Remote-control friendly text entry. The OS keyboard remains available;
+/// this dialog is an alternative for devices without a convenient IME.
 class TvTextKeyboard {
   static const Map<String, String> _extraLetters = {
-    'de': 'äöüß',
-    'tr': 'çğıöşü',
-    'en': '',
-    'ru': 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя',
-    'pl': 'ąćęłńóśźż',
-    'es': 'áéíñóúü',
-    'fr': 'àâæçéèêëîïôœùûüÿ',
+    'de': 'äöüß', 'tr': 'çğıöşü', 'en': '', 'ru': 'абвгдеёжзийклмнопрстуфхцчшщъыьэюя',
+    'pl': 'ąćęłńóśźż', 'es': 'áéíñóúü', 'fr': 'àâæçéèêëîïôœùûüÿ',
     'ar': 'ابتثجحخدذرزسشصضطظعغفقكلمنهويءآأإؤئىة',
   };
 
@@ -38,14 +33,7 @@ class TvTextKeyboard {
 }
 
 class _TvKeyboardDialog extends StatefulWidget {
-  const _TvKeyboardDialog({
-    required this.controller,
-    required this.languageCode,
-    required this.secret,
-    required this.urlMode,
-    this.onConfirmed,
-  });
-
+  const _TvKeyboardDialog({required this.controller, required this.languageCode, required this.secret, required this.urlMode, this.onConfirmed});
   final TextEditingController controller;
   final String languageCode;
   final bool secret;
@@ -58,111 +46,58 @@ class _TvKeyboardDialog extends StatefulWidget {
 
 class _TvKeyboardDialogState extends State<_TvKeyboardDialog> {
   late final TextEditingController _draft;
+  bool _showSecret = false;
   late final FocusNode _cancelFocus;
   late final FocusNode _confirmFocus;
-  final ScrollController _gridScroll = ScrollController();
-  bool _showSecret = false;
-  int _page = 0; // 0 lowercase, 1 uppercase, 2 numbers/symbols
+  FocusNode? _lastKeyFocus;
 
-  String get _language => widget.languageCode
-      .toLowerCase()
-      .replaceAll('_', '-')
-      .split('-')
-      .first;
-
-  @override
-  void initState() {
-    super.initState();
-    _draft = TextEditingController(text: widget.controller.text);
-    _draft.selection = TextSelection.collapsed(offset: _draft.text.length);
-    _cancelFocus = FocusNode(debugLabel: 'TV keyboard cancel');
-    _confirmFocus = FocusNode(debugLabel: 'TV keyboard confirm');
-  }
-
-  @override
-  void dispose() {
-    _draft.dispose();
-    _gridScroll.dispose();
-    _cancelFocus.dispose();
-    _confirmFocus.dispose();
-    super.dispose();
-  }
-
-  List<String> get _keys {
-    if (_page == 2) {
-      return '0123456789'.split('') +
-          const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#',
-            '!', '*', '(', ')', ',', ';', '\'', '"'];
+  // Arrow keys use spatial navigation, while Tab keeps the explicit order.
+  // This handler is an ancestor of the dialog's buttons so it also receives
+  // key events when the currently focused key is inside the scrolling area.
+  KeyEventResult _handleDpad(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
     }
-    final alphabet = _language == 'ru' || _language == 'ar'
-        ? TvTextKeyboard._extraLetters[_language]!
-        : 'abcdefghijklmnopqrstuvwxyz${TvTextKeyboard._extraLetters[_language] ?? ''}';
-    final unique = alphabet.runes.map(String.fromCharCode).toSet().toList();
-    if (_page == 1) {
-      return unique.map((letter) => letter.toUpperCase()).toList();
+    final key = event.logicalKey;
+    final direction = switch (key) {
+      LogicalKeyboardKey.arrowLeft => TraversalDirection.left,
+      LogicalKeyboardKey.arrowRight => TraversalDirection.right,
+      LogicalKeyboardKey.arrowUp => TraversalDirection.up,
+      LogicalKeyboardKey.arrowDown => TraversalDirection.down,
+      _ => null,
+    };
+    if (direction == null) return KeyEventResult.ignored;
+    final current = FocusManager.instance.primaryFocus;
+    if (current == null || current == node) return KeyEventResult.ignored;
+
+    final onCancel = identical(current, _cancelFocus);
+    final onConfirm = identical(current, _confirmFocus);
+    if (onCancel || onConfirm) {
+      if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.arrowRight) {
+        (onCancel ? _confirmFocus : _cancelFocus).requestFocus();
+      } else if (key == LogicalKeyboardKey.arrowUp) {
+        final target = _lastKeyFocus;
+        if (target != null && target.canRequestFocus) {
+          target.requestFocus();
+        } else {
+          FocusTraversalGroup.of(context).inDirection(current, TraversalDirection.up);
+        }
+      }
+      // At the bottom edge, do not let focus escape the dialog.
+      return KeyEventResult.handled;
     }
-    return unique;
-  }
 
-  void _changePage(int page) {
-    if (_page == page) return;
-    setState(() => _page = page);
-    if (_gridScroll.hasClients) _gridScroll.jumpTo(0);
-  }
-
-  void _insert(String value) {
-    final old = _draft.text;
-    final selection = _draft.selection;
-    final start = selection.isValid
-        ? selection.start.clamp(0, old.length).toInt()
-        : old.length;
-    final end = selection.isValid
-        ? selection.end.clamp(0, old.length).toInt()
-        : old.length;
-    final updated = old.replaceRange(start, end, value);
-    _draft.value = TextEditingValue(
-      text: updated,
-      selection: TextSelection.collapsed(offset: start + value.length),
-    );
-  }
-
-  void _delete() {
-    final old = _draft.text;
-    final selection = _draft.selection;
-    final start = selection.isValid
-        ? selection.start.clamp(0, old.length).toInt()
-        : old.length;
-    final end = selection.isValid
-        ? selection.end.clamp(0, old.length).toInt()
-        : old.length;
-    if (start != end) {
-      _draft.value = TextEditingValue(
-        text: old.replaceRange(start, end, ''),
-        selection: TextSelection.collapsed(offset: start),
-      );
-    } else if (start > 0) {
-      final before = old.substring(0, start);
-      final rune = before.runes.last;
-      final length = String.fromCharCode(rune).length;
-      final from = start - length;
-      _draft.value = TextEditingValue(
-        text: old.replaceRange(from, start, ''),
-        selection: TextSelection.collapsed(offset: from),
-      );
+    _lastKeyFocus = current;
+    final moved = FocusTraversalGroup.of(context).inDirection(current, direction);
+    if (!moved && key == LogicalKeyboardKey.arrowDown) {
+      _confirmFocus.requestFocus();
     }
+    // Always consume direction keys inside the modal dialog. Otherwise a
+    // second traversal pass may move focus again or escape to the background.
+    return KeyEventResult.handled;
   }
 
-  void _insertUrlScheme(String scheme) {
-    final old = _draft.text;
-    final existing = RegExp(r'^https?://', caseSensitive: false).firstMatch(old);
-    final updated = existing == null
-        ? '$scheme$old'
-        : '$scheme${old.substring(existing.end)}';
-    _draft.value = TextEditingValue(
-      text: updated,
-      selection: TextSelection.collapsed(offset: updated.length),
-    );
-  }
+  void _cancel() => Navigator.of(context).pop();
 
   void _confirm() {
     widget.controller.value = TextEditingValue(
@@ -170,170 +105,174 @@ class _TvKeyboardDialogState extends State<_TvKeyboardDialog> {
       selection: TextSelection.collapsed(offset: _draft.text.length),
     );
     Navigator.of(context).pop();
+    // Run after closing the modal so focus is not trapped in the dialog.
     widget.onConfirmed?.call();
   }
 
-  Widget _actionButton(String label, VoidCallback onPressed, {IconData? icon}) {
-    return OutlinedButton(
-      onPressed: onPressed,
-      style: OutlinedButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
-        minimumSize: const Size(42, 38),
-      ),
-      child: icon == null
-          ? Text(label, maxLines: 1)
-          : Icon(icon, size: 20),
-    );
+  @override
+  void initState() {
+    super.initState();
+    _draft = TextEditingController(text: widget.controller.text);
+    _cancelFocus = FocusNode(debugLabel: 'TV keyboard cancel');
+    _confirmFocus = FocusNode(debugLabel: 'TV keyboard confirm');
   }
+
+  @override
+  void dispose() {
+    _draft.dispose();
+    _cancelFocus.dispose();
+    _confirmFocus.dispose();
+    super.dispose();
+  }
+
+  void _insert(String value) {
+    final text = _draft.text;
+    final selection = _draft.selection;
+    final start = selection.isValid ? selection.start.clamp(0, text.length).toInt() : text.length;
+    final end = selection.isValid ? selection.end.clamp(0, text.length).toInt() : text.length;
+    final updated = text.replaceRange(start, end, value);
+    _draft.value = TextEditingValue(text: updated, selection: TextSelection.collapsed(offset: start + value.length));
+    setState(() {});
+  }
+
+  // URL shortcuts must not turn an existing http://host into
+  // https://http://host. Replace a leading scheme rather than append it.
+  // The remaining URL (including port, path and query) stays unchanged.
+  void _insertUrlScheme(String scheme) {
+    final current = _draft.text;
+    final existing = RegExp(r'^https?://', caseSensitive: false).firstMatch(current);
+    final updated = existing == null
+        ? '$scheme$current'
+        : '$scheme${current.substring(existing.end)}';
+    _draft.value = TextEditingValue(
+      text: updated,
+      selection: TextSelection.collapsed(offset: scheme.length),
+    );
+    setState(() {});
+  }
+
+  void _delete() {
+    final text = _draft.text;
+    final selection = _draft.selection;
+    final end = selection.isValid ? selection.end.clamp(0, text.length).toInt() : text.length;
+    final start = selection.isValid ? selection.start.clamp(0, text.length).toInt() : text.length;
+    if (start != end) {
+      _draft.value = TextEditingValue(text: text.replaceRange(start, end, ''), selection: TextSelection.collapsed(offset: start));
+    } else if (start > 0) {
+      // Unicode code points, not UTF-16 units, so emoji are not split in half.
+      final before = text.substring(0, start);
+      final last = before.runes.last;
+      final deleteStart = start - String.fromCharCode(last).length;
+      _draft.value = TextEditingValue(text: text.replaceRange(deleteStart, start, ''), selection: TextSelection.collapsed(offset: deleteStart));
+    }
+    setState(() {});
+  }
+
+  Widget _key(String label, String value, {required double order, bool autofocus = false}) =>
+      FocusTraversalOrder(
+        order: NumericFocusOrder(order),
+        child: _TvKeyboardKey(
+        label: label,
+        autofocus: autofocus,
+        onPressed: () => _insert(value),
+      ),
+      );
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final media = MediaQuery.of(context);
-    final size = media.size;
-    final availableHeight = size.height - media.viewInsets.bottom;
-    final dialogWidth = (size.width - 32).clamp(260.0, 680.0);
-    final dialogHeight = (availableHeight - 36).clamp(210.0, 550.0);
-    final columns = dialogWidth >= 520 ? 10 : dialogWidth >= 360 ? 8 : 6;
-    final keys = _keys;
-
-    return Directionality(
-      textDirection: _language == 'ar' ? TextDirection.rtl : TextDirection.ltr,
-      child: Dialog(
-        insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        child: SizedBox(
-          width: dialogWidth,
-          height: dialogHeight,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(l10n.t('tv_keyboard_title'),
-                    style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                SizedBox(
-                  height: 48,
-                  child: TextField(
-                    controller: _draft,
-                    readOnly: true,
-                    canRequestFocus: false,
-                    showCursor: true,
-                    obscureText: widget.secret && !_showSecret,
-                    enableSuggestions: false,
-                    autocorrect: false,
-                    textCapitalization: TextCapitalization.none,
-                    decoration: InputDecoration(
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 10),
-                      border: const OutlineInputBorder(),
-                      hintText: l10n.t('tv_keyboard_input'),
-                      suffixIcon: widget.secret
-                          ? IconButton(
-                              tooltip: _showSecret
-                                  ? l10n.t('tv_keyboard_hide_password')
-                                  : l10n.t('tv_keyboard_show_password'),
-                              onPressed: () => setState(
-                                  () => _showSecret = !_showSecret),
-                              icon: Icon(_showSecret
-                                  ? Icons.visibility_off
-                                  : Icons.visibility),
-                            )
-                          : null,
-                    ),
-                  ),
+    String tr(String key) => l10n.t(key);
+    final lang = widget.languageCode.toLowerCase().replaceAll('_', '-').split('-').first;
+    final alphabet = lang == 'ru' || lang == 'ar'
+        ? TvTextKeyboard._extraLetters[lang]!
+        : 'abcdefghijklmnopqrstuvwxyz${TvTextKeyboard._extraLetters[lang] ?? ''}';
+    final letters = <String>{...alphabet.split('')}.toList();
+    final digits = '0123456789'.split('');
+    final viewport = MediaQuery.sizeOf(context);
+    // A TV keyboard must fit both compact 720p screens and wide 1080p displays.
+    final width = (viewport.width - 32).clamp(260.0, 680.0);
+    final maxHeight = (viewport.height - MediaQuery.viewInsetsOf(context).bottom - 96).clamp(180.0, 520.0);
+    return Focus(
+      canRequestFocus: false,
+      onKeyEvent: _handleDpad,
+      child: CallbackShortcuts(
+      bindings: {LogicalKeySet(LogicalKeyboardKey.escape): _cancel},
+      child: Directionality(
+      textDirection: lang == 'ar' ? TextDirection.rtl : TextDirection.ltr,
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: AlertDialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        title: Text(tr('tv_keyboard_title')),
+        content: SizedBox(
+          width: width,
+          height: maxHeight,
+          child: FocusTraversalGroup(
+            policy: OrderedTraversalPolicy(),
+            child: Column(children: [
+              TextField(
+                canRequestFocus: false,
+                controller: _draft,
+                readOnly: true, // Do not pop up the OS IME over the TV keyboard.
+                showCursor: true,
+                obscureText: widget.secret && !_showSecret,
+                enableSuggestions: false,
+                autocorrect: false,
+                textCapitalization: TextCapitalization.none,
+                decoration: InputDecoration(
+                  border: const OutlineInputBorder(),
+                  labelText: tr('tv_keyboard_input'),
+                  suffixIcon: widget.secret ? Focus(canRequestFocus: false, child: IconButton(
+                    tooltip: _showSecret ? tr('tv_keyboard_hide_password') : tr('tv_keyboard_show_password'),
+                    onPressed: () => setState(() => _showSecret = !_showSecret),
+                    icon: Icon(_showSecret ? Icons.visibility_off : Icons.visibility),
+                  )) : null,
                 ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(child: _modeButton('abc', 0)),
-                    const SizedBox(width: 5),
-                    Expanded(child: _modeButton('ABC', 1)),
-                    const SizedBox(width: 5),
-                    Expanded(child: _modeButton('123 #', 2)),
+              ),
+              const SizedBox(height: 6),
+              Expanded(child: SingleChildScrollView(child: Column(children: [
+                Wrap(spacing: 4, runSpacing: 4, alignment: WrapAlignment.center, children: [
+                  // Every letter case has its own remote-selectable button.
+                  // No Shift step is required between lowercase and uppercase.
+                  for (var i = 0; i < letters.length; i++) ...[
+                    _key(letters[i], letters[i], order: (i * 2).toDouble(), autofocus: i == 0),
+                    if (letters[i].toUpperCase() != letters[i])
+                      _key(letters[i].toUpperCase(), letters[i].toUpperCase(), order: (i * 2 + 1).toDouble()),
                   ],
-                ),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: GridView.builder(
-                    controller: _gridScroll,
-                    padding: EdgeInsets.zero,
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: columns,
-                      crossAxisSpacing: 5,
-                      mainAxisSpacing: 5,
-                      childAspectRatio: 1.18,
-                    ),
-                    itemCount: keys.length,
-                    itemBuilder: (context, index) => _TvKeyboardKey(
-                      key: ValueKey('$_page-$index'),
-                      label: keys[index],
-                      autofocus: index == 0,
-                      onPressed: () => _insert(keys[index]),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  alignment: WrapAlignment.center,
-                  spacing: 5,
-                  runSpacing: 5,
-                  children: [
-                    _actionButton(l10n.t('tv_keyboard_space'), () => _insert(' ')),
-                    _actionButton('', _delete, icon: Icons.backspace_outlined),
-                    if (widget.urlMode) ...[
-                      _actionButton('http://', () => _insertUrlScheme('http://')),
-                      _actionButton('https://', () => _insertUrlScheme('https://')),
-                    ],
-                  ],
-                ),
+                  for (var i = 0; i < digits.length; i++) _key(digits[i], digits[i], order: 100 + i.toDouble()),
+                  for (var i = 0; i < const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#'].length; i++)
+                    _key(const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#'][i],
+                         const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#'][i], order: 120 + i.toDouble()),
+                ]),
                 const SizedBox(height: 6),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      focusNode: _cancelFocus,
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: Text(l10n.t('tv_keyboard_cancel')),
-                    ),
-                    const SizedBox(width: 6),
-                    FilledButton(
-                      focusNode: _confirmFocus,
-                      onPressed: _confirm,
-                      child: Text(l10n.t('tv_keyboard_confirm')),
-                    ),
+                Wrap(spacing: 5, runSpacing: 5, alignment: WrapAlignment.center, children: [
+                  FocusTraversalOrder(order: const NumericFocusOrder(200), child: OutlinedButton(onPressed: () => _insert(' '), child: Text(tr('tv_keyboard_space')))),
+                  FocusTraversalOrder(order: const NumericFocusOrder(201), child: OutlinedButton(onPressed: _delete, child: Text(tr('tv_keyboard_backspace')))),
+                  if (widget.urlMode) ...[
+                    FocusTraversalOrder(order: const NumericFocusOrder(202), child: OutlinedButton(onPressed: () => _insertUrlScheme('http://'), child: const Text('http://'))),
+                    FocusTraversalOrder(order: const NumericFocusOrder(203), child: OutlinedButton(onPressed: () => _insertUrlScheme('https://'), child: const Text('https://'))),
                   ],
-                ),
-              ],
-            ),
+                ]),
+              ]))),
+            ]),
           ),
         ),
+        actions: [
+          FocusTraversalOrder(order: const NumericFocusOrder(300), child: TextButton(focusNode: _cancelFocus, onPressed: _cancel, child: Text(tr('tv_keyboard_cancel')))),
+          FocusTraversalOrder(order: const NumericFocusOrder(301), child: FilledButton(focusNode: _confirmFocus, onPressed: _confirm, child: Text(tr('tv_keyboard_confirm')))),
+        ],
       ),
-    );
-  }
-
-  Widget _modeButton(String label, int page) {
-    return OutlinedButton(
-      onPressed: () => _changePage(page),
-      style: OutlinedButton.styleFrom(
-        visualDensity: VisualDensity.compact,
-        minimumSize: const Size(0, 35),
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        backgroundColor: _page == page
-            ? Theme.of(context).colorScheme.primaryContainer
-            : null,
       ),
-      child: Text(label),
+      ),
+      ),
     );
   }
 }
 
-/// Owns a stable focus node and keeps the selected key in view for TV remotes.
+/// Keeps the currently selected key visible while navigating with a TV D-pad.
+/// Each key owns its focus node, so rebuilding the dialog does not lose focus.
 class _TvKeyboardKey extends StatefulWidget {
   const _TvKeyboardKey({
-    super.key,
     required this.label,
     required this.onPressed,
     this.autofocus = false,
@@ -354,17 +293,20 @@ class _TvKeyboardKeyState extends State<_TvKeyboardKey> {
   void initState() {
     super.initState();
     _focusNode = FocusNode(debugLabel: 'TV key ${widget.label}');
-    _focusNode.addListener(_keepVisible);
+    _focusNode.addListener(_keepFocusedKeyVisible);
   }
 
-  void _keepVisible() {
+  void _keepFocusedKeyVisible() {
     if (!_focusNode.hasFocus) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_focusNode.hasFocus) return;
+      // Only scroll the nearest ancestor (the keyboard's own scroll area).
+      // Do not move the whole dialog when focus changes.
       Scrollable.ensureVisible(
         context,
-        alignment: 0.4,
-        duration: const Duration(milliseconds: 120),
+        alignment: 0.5,
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
         alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
       );
     });
@@ -372,23 +314,24 @@ class _TvKeyboardKeyState extends State<_TvKeyboardKey> {
 
   @override
   void dispose() {
-    _focusNode.removeListener(_keepVisible);
+    _focusNode.removeListener(_keepFocusedKeyVisible);
     _focusNode.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
-    return OutlinedButton(
-      focusNode: _focusNode,
-      autofocus: widget.autofocus,
-      onPressed: widget.onPressed,
-      style: OutlinedButton.styleFrom(
-        padding: EdgeInsets.zero,
-        visualDensity: VisualDensity.compact,
-      ),
-      child: Text(widget.label,
-          maxLines: 1, style: const TextStyle(fontSize: 16)),
-    );
-  }
+  Widget build(BuildContext context) => SizedBox(
+        width: 49,
+        height: 49,
+        child: OutlinedButton(
+          focusNode: _focusNode,
+          autofocus: widget.autofocus,
+          style: OutlinedButton.styleFrom(
+            padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+          ),
+          onPressed: widget.onPressed,
+          child: Text(widget.label, style: const TextStyle(fontSize: 15)),
+        ),
+      );
 }
