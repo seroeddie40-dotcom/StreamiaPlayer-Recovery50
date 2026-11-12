@@ -26,7 +26,8 @@ class StreamRecordingService : Service() {
         private const val NOTIFICATION_ID = 2401
         private const val CHANNEL_ID = "streamia_recordings"
 
-        private val running = AtomicBoolean(false)
+        private val busy = AtomicBoolean(false)
+        private val recording = AtomicBoolean(false)
         private val stopRequested = AtomicBoolean(false)
 
         @Volatile
@@ -46,7 +47,10 @@ class StreamRecordingService : Service() {
             private set
 
         val isRecording: Boolean
-            get() = running.get()
+            get() = busy.get()
+
+        val isWriting: Boolean
+            get() = recording.get()
     }
 
     @Volatile
@@ -68,12 +72,16 @@ class StreamRecordingService : Service() {
             ACTION_STOP -> {
                 stopRequested.set(true)
                 connection?.disconnect()
-                if (!running.get()) stopSelf()
+
+                if (!busy.get()) {
+                    stopSelfResult(startId)
+                }
+
                 return START_NOT_STICKY
             }
 
             ACTION_START -> {
-                if (!running.compareAndSet(false, true)) {
+                if (!busy.compareAndSet(false, true)) {
                     return START_NOT_STICKY
                 }
 
@@ -83,26 +91,39 @@ class StreamRecordingService : Service() {
 
                 if (url.isNullOrBlank()) {
                     lastError = "Keine Stream-Adresse vorhanden."
-                    running.set(false)
-                    stopSelf(startId)
+                    busy.set(false)
+                    stopSelfResult(startId)
                     return START_NOT_STICKY
                 }
 
                 stopRequested.set(false)
+                recording.set(false)
                 bytesWritten = 0L
                 startedAt = 0L
                 lastError = null
                 outputPath = null
 
-                startForeground(
-                    NOTIFICATION_ID,
-                    buildNotification(name)
-                )
+                try {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        buildNotification(name)
+                    )
+                } catch (error: Exception) {
+                    lastError =
+                        "Der Vordergrunddienst konnte nicht gestartet werden."
+                    busy.set(false)
+                    stopSelfResult(startId)
+                    return START_NOT_STICKY
+                }
 
                 Thread {
-                    recordStream(url, name)
-                    running.set(false)
-                    stopSelf(startId)
+                    try {
+                        recordStream(url, name)
+                    } finally {
+                        recording.set(false)
+                        busy.set(false)
+                        stopSelf()
+                    }
                 }.apply {
                     name = "StreamiaRecorder"
                     isDaemon = false
@@ -132,7 +153,7 @@ class StreamRecordingService : Service() {
             require(
                 !parsed.path.lowercase().endsWith(".m3u8")
             ) {
-                "HLS benötigt die separate Aufnahme-Engine."
+                "HLS-Aufnahmen werden noch nicht unterstützt."
             }
 
             val http = parsed.openConnection() as HttpURLConnection
@@ -141,6 +162,7 @@ class StreamRecordingService : Service() {
             http.connectTimeout = 15000
             http.readTimeout = 30000
             http.instanceFollowRedirects = true
+
             http.setRequestProperty(
                 "User-Agent",
                 "StreamiaPlayer/1.0"
@@ -175,10 +197,7 @@ class StreamRecordingService : Service() {
             }
 
             val safeName = name
-                .replace(
-                    Regex("[^A-Za-z0-9_-]"),
-                    "_"
-                )
+                .replace(Regex("[^A-Za-z0-9_-]"), "_")
                 .take(60)
                 .ifBlank { "Live_TV" }
 
@@ -205,15 +224,16 @@ class StreamRecordingService : Service() {
                     received += count
                 }
 
+                if (stopRequested.get()) return
+
                 require(received >= 188 * 2) {
                     "Zu wenige Streamdaten empfangen."
                 }
 
-                val isTransportStream =
+                require(
                     firstBytes[0] == 0x47.toByte() &&
                     firstBytes[188] == 0x47.toByte()
-
-                require(isTransportStream) {
+                ) {
                     "Kein direktes MPEG-TS-Format erkannt."
                 }
 
@@ -222,6 +242,7 @@ class StreamRecordingService : Service() {
                     bytesWritten += received
                     startedAt = SystemClock.elapsedRealtime()
                     outputPath = outputFile.absolutePath
+                    recording.set(true)
 
                     val buffer = ByteArray(64 * 1024)
 
@@ -247,11 +268,14 @@ class StreamRecordingService : Service() {
             if (!stopRequested.get()) {
                 lastError = when (error) {
                     is IllegalArgumentException ->
-                        error.message ?: "Streamformat nicht unterstützt."
-                    else -> "Aufnahme durch Netzwerk- oder Speicherfehler beendet."
+                        error.message
+                            ?: "Streamformat nicht unterstützt."
+                    else ->
+                        "Aufnahme durch Netzwerk- oder Speicherfehler beendet."
                 }
             }
         } finally {
+            recording.set(false)
             connection?.disconnect()
             connection = null
 
@@ -298,17 +322,16 @@ class StreamRecordingService : Service() {
             flags
         )
 
-        val builder = if (
-            Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-        ) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            Notification.Builder(this)
-        }
+        val builder =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(this, CHANNEL_ID)
+            } else {
+                Notification.Builder(this)
+            }
 
         return builder
             .setContentTitle("Streamia Player")
-            .setContentText("Aufnahme wird vorbereitet: $name")
+            .setContentText("Live-TV-Aufnahme: $name")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
             .addAction(
