@@ -1,25 +1,46 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-11 children
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
-<queries>
-1 child
-
-<intent>
-1 child
-<uses-permission android:name="android.permission.INTERNET">
-<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE">
-<uses-permission android:name="android.permission.ACCESS_WIFI_STATE">
-<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32">
-<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28">
-<uses-permission android:name="android.permission.RECORD_AUDIO">
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE">
-<uses-feature android:name="android.software.leanback" android:required="false">
-<uses-feature android:name="android.hardware.touchscreen" android:required="false">
-
-<application android:label="Streamia Player" android:name="${applicationName}" android:icon="@mipmap/ic_launcher" android:banner="@drawable/tv_banner" android:usesCleartextTraffic="true">
-3 children
-
-<activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:theme="@style/LaunchTheme" android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode" android:hardwareAccelerated="true" android:windowSoftInputMode="adjustResize">
-2 children
-<meta-data android:name="flutter_deeplinking_enabled" android:value="false">
-<meta-data android:name="flutterEmbedding" android:value="2">
+    <application
+        android:label="Streamia Player"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:banner="@drawable/tv_banner"
+        android:usesCleartextTraffic="true">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+            <intent-filter android:label="Streamia Player email confirmation">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="streamiaplayer" android:host="auth" android:pathPrefix="/callback" />
+            </intent-filter>
+        </activity>
+        <meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
+        <meta-data android:name="flutterEmbedding" android:value="2" />
+    </application>
+</manifest>
