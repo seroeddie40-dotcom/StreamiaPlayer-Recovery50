@@ -24,40 +24,32 @@ class MainActivity : FlutterActivity() {
     ) {
         super.configureFlutterEngine(flutterEngine)
 
-        // Bestehende Geräteerkennung beibehalten.
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             DEVICE_CHANNEL
         ).setMethodCallHandler { call, result ->
-
             when (call.method) {
-                "getAndroidId" -> {
-                    result.success(
-                        Settings.Secure.getString(
-                            contentResolver,
-                            Settings.Secure.ANDROID_ID
-                        )
+                "getAndroidId" -> result.success(
+                    Settings.Secure.getString(
+                        contentResolver,
+                        Settings.Secure.ANDROID_ID
                     )
-                }
+                )
 
-                "getDeviceName" -> {
-                    result.success(
-                        "${Build.MANUFACTURER} ${Build.MODEL}".trim()
-                    )
-                }
+                "getDeviceName" -> result.success(
+                    "${Build.MANUFACTURER} ${Build.MODEL}".trim()
+                )
 
                 else -> result.notImplemented()
             }
         }
 
-        // Native Aufnahmeverwaltung.
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             RECORDING_CHANNEL
         ).setMethodCallHandler { call, result ->
 
             when (call.method) {
-
                 "startRecording" -> {
                     val streamUrl =
                         call.argument<String>("streamUrl")
@@ -89,14 +81,11 @@ class MainActivity : FlutterActivity() {
                             this,
                             StreamRecordingService::class.java
                         ).apply {
-                            action =
-                                StreamRecordingService.ACTION_START
-
+                            action = StreamRecordingService.ACTION_START
                             putExtra(
                                 StreamRecordingService.EXTRA_URL,
                                 streamUrl
                             )
-
                             putExtra(
                                 StreamRecordingService.EXTRA_NAME,
                                 channelName
@@ -109,15 +98,11 @@ class MainActivity : FlutterActivity() {
                             startService(intent)
                         }
 
-                        // Der Dienst wurde angefordert.
-                        // Das bedeutet noch NICHT, dass
-                        // bereits Videodaten geschrieben werden.
                         result.success(true)
-
-                    } catch (error: Exception) {
+                    } catch (_: Exception) {
                         result.error(
                             "START_FAILED",
-                            "Der Aufnahmedienst konnte nicht gestartet werden.",
+                            "Aufnahmedienst konnte nicht gestartet werden.",
                             null
                         )
                     }
@@ -129,17 +114,15 @@ class MainActivity : FlutterActivity() {
                             this,
                             StreamRecordingService::class.java
                         ).apply {
-                            action =
-                                StreamRecordingService.ACTION_STOP
+                            action = StreamRecordingService.ACTION_STOP
                         }
 
                         startService(intent)
                         result.success(true)
-
-                    } catch (error: Exception) {
+                    } catch (_: Exception) {
                         result.error(
                             "STOP_FAILED",
-                            "Die Aufnahme konnte nicht gestoppt werden.",
+                            "Aufnahme konnte nicht gestoppt werden.",
                             null
                         )
                     }
@@ -149,13 +132,16 @@ class MainActivity : FlutterActivity() {
                     val active =
                         StreamRecordingService.isRecording
 
+                    val writing =
+                        StreamRecordingService.isWriting
+
                     val startedAt =
                         StreamRecordingService.startedAt
 
                     val elapsedMs =
-                        if (active && startedAt > 0L) {
-                            SystemClock.elapsedRealtime() -
-                                startedAt
+                        if (startedAt > 0L) {
+                            (SystemClock.elapsedRealtime() - startedAt)
+                                .coerceAtLeast(0L)
                         } else {
                             0L
                         }
@@ -163,6 +149,7 @@ class MainActivity : FlutterActivity() {
                     result.success(
                         mapOf(
                             "active" to active,
+                            "writing" to writing,
                             "bytesWritten" to
                                 StreamRecordingService.bytesWritten,
                             "elapsedMs" to elapsedMs,
