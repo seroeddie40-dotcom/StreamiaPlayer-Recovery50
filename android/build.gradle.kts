@@ -1,7 +1,7 @@
 
 import org.gradle.api.tasks.compile.JavaCompile
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-import com.android.build.gradle.LibraryExtension
+import com.android.build.api.variant.LibraryAndroidComponentsExtension
 
 allprojects {
     repositories {
@@ -46,12 +46,18 @@ subprojects {
     }
 }
 
-// file_picker must compile against Android API 36.
+// Compile the affected Android library plugins against API 36.
+// finalizeDsl applies the setting after the plugin's own DSL configuration.
 subprojects {
-    if (project.name == "file_picker") {
+    if (
+        project.name == "file_picker" ||
+        project.name == "media_kit_video"
+    ) {
         plugins.withId("com.android.library") {
-            extensions.configure<LibraryExtension> {
-                compileSdk = 36
+            extensions.configure<LibraryAndroidComponentsExtension> {
+                finalizeDsl { androidDsl ->
+                    androidDsl.compileSdk = 36
+                }
             }
         }
     }
