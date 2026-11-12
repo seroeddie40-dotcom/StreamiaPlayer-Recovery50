@@ -106,14 +106,15 @@ class StreamiaApp extends StatelessWidget {
       );
     }
 
+    // Account entitlement takes precedence over a pending device.
+    if (auth.requiresPayment) {
+      return const PaywallScreen();
+    }
+
     if (auth.devicePending || !auth.deviceApproved) {
       return const _AccessStatusScreen(
         mode: _AccessStatusMode.pending,
       );
-    }
-
-    if (auth.requiresPayment) {
-      return const PaywallScreen();
     }
 
     if (!auth.hasAccess) {
@@ -245,12 +246,27 @@ enum _AccessStatusMode {
   error,
 }
 
-class _AccessStatusScreen extends StatelessWidget {
+class _AccessStatusScreen extends StatefulWidget {
   final _AccessStatusMode mode;
 
   const _AccessStatusScreen({
     required this.mode,
   });
+
+  @override
+  State<_AccessStatusScreen> createState() => _AccessStatusScreenState();
+}
+
+class _AccessStatusScreenState extends State<_AccessStatusScreen> {
+  @override
+  void initState() {
+    super.initState();
+    if (widget.mode == _AccessStatusMode.pending) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.read<AuthProvider>().loadActiveDevices();
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -268,7 +284,7 @@ class _AccessStatusScreen extends StatelessWidget {
     String description;
     IconData symbol;
 
-    switch (mode) {
+    switch (widget.mode) {
       case _AccessStatusMode.pending:
         title = isTurkish
             ? 'Cihaz onayı bekleniyor'
@@ -391,6 +407,61 @@ class _AccessStatusScreen extends StatelessWidget {
                       style: const TextStyle(
                         fontSize: 12,
                       ),
+                    ),
+                  ],
+
+                  if (widget.mode == _AccessStatusMode.pending &&
+                      auth.hasAccountAccess) ...[
+                    const SizedBox(height: 24),
+                    Text(
+                      isTurkish ? 'Kayıtlı cihazlarınız'
+                          : isGerman ? 'Deine aktiven Geräte'
+                          : 'Your active devices',
+                      style: const TextStyle(
+                        fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 12),
+                    if (auth.loadingDevices)
+                      const CircularProgressIndicator()
+                    else if (auth.deviceListError != null)
+                      SelectableText(auth.deviceListError!,
+                        textAlign: TextAlign.center)
+                    else if (auth.activeDevices.isEmpty)
+                      Text(isTurkish ? 'Aktif cihaz bulunamadı.'
+                          : isGerman ? 'Keine aktiven Geräte gefunden.'
+                          : 'No active devices found.')
+                    else
+                      ...auth.activeDevices.map((device) => Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.devices),
+                          title: Text(
+                            (device['device_name']?.toString().trim().isNotEmpty ?? false)
+                              ? device['device_name'].toString()
+                              : (isTurkish ? 'İsimsiz cihaz'
+                                  : isGerman ? 'Unbenanntes Gerät'
+                                  : 'Unnamed device'),
+                          ),
+                          subtitle: Text(device['platform']?.toString() ?? ''),
+                          trailing: const Icon(Icons.lock_outline),
+                        ),
+                      )),
+                    const SizedBox(height: 12),
+                    Text(
+                      isTurkish
+                          ? 'Cihaz değiştirme, güvenlik kontrolü tamamlanınca açılacak.'
+                          : isGerman
+                              ? 'Der Gerätewechsel wird nach Abschluss der Sicherheitsprüfung freigeschaltet.'
+                              : 'Device replacement will be enabled after security verification.',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: auth.loadingDevices ? null
+                          : () => auth.loadActiveDevices(),
+                      icon: const Icon(Icons.devices),
+                      label: Text(isTurkish ? 'Listeyi yenile'
+                          : isGerman ? 'Geräteliste aktualisieren'
+                          : 'Refresh device list'),
                     ),
                   ],
 
