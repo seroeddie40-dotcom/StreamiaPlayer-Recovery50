@@ -28,7 +28,7 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// Fix JVM target mismatch for volume_controller.
+// Keep Java and Kotlin JVM targets consistent for volume_controller.
 subprojects {
     if (project.name == "volume_controller") {
         tasks.withType<JavaCompile>().configureEach {
@@ -46,19 +46,13 @@ subprojects {
     }
 }
 
-// Compile affected Android library plugins against API 36.
-// finalizeDsl applies the setting after each plugin's own configuration.
+// Apply Android API 36 to every Android library plugin.
+// This also covers plugins that are added later.
 subprojects {
-    if (
-        project.name == "file_picker" ||
-        project.name == "media_kit_video" ||
-        project.name == "screen_brightness_android"
-    ) {
-        plugins.withId("com.android.library") {
-            extensions.configure<LibraryAndroidComponentsExtension> {
-                finalizeDsl { androidDsl ->
-                    androidDsl.compileSdk = 36
-                }
+    plugins.withId("com.android.library") {
+        extensions.configure<LibraryAndroidComponentsExtension> {
+            finalizeDsl { androidDsl ->
+                androidDsl.compileSdk = 36
             }
         }
     }
