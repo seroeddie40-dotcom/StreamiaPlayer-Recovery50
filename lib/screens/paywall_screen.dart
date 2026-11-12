@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -49,6 +48,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
       'logoutQuestion': 'Abmelden?',
       'logoutConfirm': 'Möchtest du dich wirklich abmelden?',
       'cancel': 'Abbrechen',
+      'trialActive': 'Dein Zugang ist aktiv',
+      'trialDescription': 'Vergleiche die Pro-Pakete jederzeit. Die Preise sind unverbindliche Beispielwerte; Käufe sind noch nicht möglich.',
+      'previewTitle': 'Tarifvorschau – keine verbindlichen Preise',
+      'examplePrice': 'Preise nur zur Veranschaulichung',
+      'paymentDisabled': 'Zahlung noch nicht verfügbar',
+      'starter': 'Starter Pro',
+      'family': 'Family Pro',
+      'ultimate': 'Ultimate Pro',
     },
     'tr': {
       'title': "Pro'ya yükselt",
@@ -74,6 +81,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
       'logoutQuestion': 'Çıkış yapılsın mı?',
       'logoutConfirm': 'Çıkış yapmak istediğinize emin misiniz?',
       'cancel': 'İptal',
+      'trialActive': 'Erişimin aktif',
+      'trialDescription': 'Pro paketlerini istediğin zaman karşılaştır. Fiyatlar yalnızca örnektir; satın alma henüz mümkün değildir.',
+      'previewTitle': 'Paket önizlemesi – kesin fiyat değil',
+      'examplePrice': 'Fiyatlar yalnızca örnektir',
+      'paymentDisabled': 'Ödeme henüz kullanılamıyor',
+      'starter': 'Starter Pro',
+      'family': 'Family Pro',
+      'ultimate': 'Ultimate Pro',
     },
     'en': {
       'title': 'Upgrade to Pro',
@@ -99,6 +114,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
       'logoutQuestion': 'Log out?',
       'logoutConfirm': 'Do you really want to log out?',
       'cancel': 'Cancel',
+      'trialActive': 'Your access is active',
+      'trialDescription': 'Compare Pro plans at any time. Prices are illustrative only; purchases are not available yet.',
+      'previewTitle': 'Plan preview – not final prices',
+      'examplePrice': 'Illustrative prices only',
+      'paymentDisabled': 'Payment not available yet',
+      'starter': 'Starter Pro',
+      'family': 'Family Pro',
+      'ultimate': 'Ultimate Pro',
     },
     'ru': {
       'title': 'Перейти на Pro',
@@ -124,6 +147,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
       'logoutQuestion': 'Выйти?',
       'logoutConfirm': 'Вы действительно хотите выйти?',
       'cancel': 'Отмена',
+      'trialActive': 'Доступ активен',
+      'trialDescription': 'Вы можете сравнить тарифы Pro. Цены приведены только для примера; покупка пока недоступна.',
+      'previewTitle': 'Предпросмотр тарифов — цены не окончательные',
+      'examplePrice': 'Цены только для примера',
+      'paymentDisabled': 'Оплата пока недоступна',
+      'starter': 'Starter Pro',
+      'family': 'Family Pro',
+      'ultimate': 'Ultimate Pro',
     },
     'ar': {
       'title': 'الترقية إلى Pro',
@@ -149,6 +180,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
       'logoutQuestion': 'تسجيل الخروج؟',
       'logoutConfirm': 'هل تريد حقًا تسجيل الخروج؟',
       'cancel': 'إلغاء',
+      'trialActive': 'الوصول نشط',
+      'trialDescription': 'يمكنك مقارنة باقات Pro في أي وقت. الأسعار توضيحية فقط والشراء غير متاح بعد.',
+      'previewTitle': 'معاينة الباقات — الأسعار غير نهائية',
+      'examplePrice': 'الأسعار للتوضيح فقط',
+      'paymentDisabled': 'الدفع غير متاح بعد',
+      'starter': 'Starter Pro',
+      'family': 'Family Pro',
+      'ultimate': 'Ultimate Pro',
     },
     'pl': {
       'title': 'Przejdź na Pro',
@@ -174,6 +213,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
       'logoutQuestion': 'Wylogować?',
       'logoutConfirm': 'Czy na pewno chcesz się wylogować?',
       'cancel': 'Anuluj',
+      'trialActive': 'Dostęp jest aktywny',
+      'trialDescription': 'Możesz porównać pakiety Pro. Ceny są przykładowe; zakup nie jest jeszcze dostępny.',
+      'previewTitle': 'Podgląd planów — ceny nie są ostateczne',
+      'examplePrice': 'Ceny tylko przykładowe',
+      'paymentDisabled': 'Płatności jeszcze niedostępne',
+      'starter': 'Starter Pro',
+      'family': 'Family Pro',
+      'ultimate': 'Ultimate Pro',
     },
     'es': {
       'title': 'Actualizar a Pro',
@@ -199,6 +246,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
       'logoutQuestion': '¿Cerrar sesión?',
       'logoutConfirm': '¿Seguro que quieres cerrar sesión?',
       'cancel': 'Cancelar',
+      'trialActive': 'Tu acceso está activo',
+      'trialDescription': 'Compara los planes Pro cuando quieras. Los precios son orientativos; todavía no se puede comprar.',
+      'previewTitle': 'Vista previa — precios no definitivos',
+      'examplePrice': 'Precios solo orientativos',
+      'paymentDisabled': 'Pago aún no disponible',
+      'starter': 'Starter Pro',
+      'family': 'Family Pro',
+      'ultimate': 'Ultimate Pro',
     },
     'fr': {
       'title': 'Passer à Pro',
@@ -224,6 +279,14 @@ class _PaywallScreenState extends State<PaywallScreen> {
       'logoutQuestion': 'Se déconnecter ?',
       'logoutConfirm': 'Voulez-vous vraiment vous déconnecter ?',
       'cancel': 'Annuler',
+      'trialActive': 'Votre accès est actif',
+      'trialDescription': 'Comparez les offres Pro à tout moment. Les prix sont indicatifs ; les achats ne sont pas encore disponibles.',
+      'previewTitle': 'Aperçu des offres — prix non définitifs',
+      'examplePrice': 'Prix donnés à titre indicatif',
+      'paymentDisabled': 'Paiement non disponible',
+      'starter': 'Starter Pro',
+      'family': 'Family Pro',
+      'ultimate': 'Ultimate Pro',
     },
   };
 
@@ -346,6 +409,8 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
     final deviceCount = [1, 3, 5][index];
 
+    final tierName = _t(languageCode, ['starter', 'family', 'ultimate'][index]);
+
     final deviceLabel =
         '$deviceCount ${_t(languageCode, deviceCount == 1 ? 'device' : 'devices')}';
 
@@ -388,6 +453,12 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     ),
                     const SizedBox(height: 12),
                     Text(
+                      tierName,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
                       deviceLabel,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
@@ -397,7 +468,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '${_price(_selectedPeriod, index)} €',
+                      '${_price(_selectedPeriod, index)} €*',
                       style: TextStyle(
                         fontSize: 23,
                         fontWeight: FontWeight.bold,
@@ -428,6 +499,11 @@ class _PaywallScreenState extends State<PaywallScreen> {
                             CrossAxisAlignment.start,
                         children: [
                           Text(
+                            tierName,
+                            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
                             deviceLabel,
                             style: const TextStyle(
                               fontSize: 17,
@@ -447,7 +523,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     const SizedBox(width: 8),
                     Flexible(
                       child: Text(
-                        '${_price(_selectedPeriod, index)} €',
+                        '${_price(_selectedPeriod, index)} €*',
                         textAlign: TextAlign.end,
                         style: TextStyle(
                           fontSize: 19,
@@ -499,6 +575,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
   Widget build(BuildContext context) {
     final languageCode =
         context.watch<LocaleProvider>().locale.languageCode;
+    final hasAccess = context.watch<AuthProvider>().hasAccess;
 
     return Scaffold(
       appBar: AppBar(
@@ -537,7 +614,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                         CrossAxisAlignment.stretch,
                     children: [
                       Text(
-                        _t(languageCode, 'inactive'),
+                        _t(languageCode, hasAccess ? 'trialActive' : 'inactive'),
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: horizontal ? 28 : 23,
@@ -546,7 +623,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        _t(languageCode, 'description'),
+                        _t(languageCode, hasAccess ? 'trialDescription' : 'description'),
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: horizontal ? 16 : 14,
@@ -556,6 +633,16 @@ class _PaywallScreenState extends State<PaywallScreen> {
                         ),
                       ),
                       const SizedBox(height: 24),
+
+                      Text(
+                        _t(languageCode, 'previewTitle'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
 
                       // Laufzeitwahl
                       LayoutBuilder(
@@ -613,7 +700,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                             for (var i = 0; i < 3; i++) ...[
                               Expanded(
                                 child: SizedBox(
-                                  height: 220,
+                                  height: 255,
                                   child: _tierCard(
                                     i,
                                     languageCode,
@@ -648,7 +735,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
                       Text(
                         '${_t(languageCode, 'total')}: '
-                        '${_price(_selectedPeriod, _selectedTier)} € '
+                        '${_price(_selectedPeriod, _selectedTier)} €* '
                         '${_priceSuffix(languageCode)}',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
@@ -657,6 +744,15 @@ class _PaywallScreenState extends State<PaywallScreen> {
                         ),
                       ),
 
+                      const SizedBox(height: 8),
+                      Text(
+                        '* ${_t(languageCode, 'examplePrice')}',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
                       const SizedBox(height: 16),
 
                       Center(
@@ -690,7 +786,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                                 ),
                               ),
                               child: Text(
-                                _t(languageCode, 'subscribe'),
+                                _t(languageCode, 'paymentDisabled'),
                                 textAlign: TextAlign.center,
                               ),
                             ),
