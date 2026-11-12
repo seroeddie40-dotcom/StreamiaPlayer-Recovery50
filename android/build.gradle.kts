@@ -46,12 +46,13 @@ subprojects {
     }
 }
 
-// Compile the affected Android library plugins against API 36.
-// finalizeDsl applies the setting after the plugin's own DSL configuration.
+// Compile affected Android library plugins against API 36.
+// finalizeDsl applies the setting after each plugin's own configuration.
 subprojects {
     if (
         project.name == "file_picker" ||
-        project.name == "media_kit_video"
+        project.name == "media_kit_video" ||
+        project.name == "screen_brightness_android"
     ) {
         plugins.withId("com.android.library") {
             extensions.configure<LibraryAndroidComponentsExtension> {
