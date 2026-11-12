@@ -258,6 +258,46 @@ class _AccessStatusScreen extends StatefulWidget {
 }
 
 class _AccessStatusScreenState extends State<_AccessStatusScreen> {
+  String? _selectedDeviceId;
+
+  Future<void> _showReplacementPreview(Map<String, dynamic> device) async {
+    final language = context.read<LocaleProvider>().locale.languageCode;
+    final name = (device['device_name']?.toString().trim().isNotEmpty ?? false)
+        ? device['device_name'].toString()
+        : (language == 'tr' ? 'İsimsiz cihaz'
+            : language == 'de' ? 'Unbenanntes Gerät' : 'Unnamed device');
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(language == 'tr' ? 'Cihazı değiştirmeyi onayla'
+            : language == 'de' ? 'Gerätewechsel bestätigen'
+            : 'Confirm device replacement'),
+        content: Text(language == 'tr'
+            ? '$name cihazının erişimi kaldırılacak ve mevcut kurulum etkinleştirilecek. '
+              'Güvenlik denetimi henüz tamamlanmadığı için işlem şu anda devre dışıdır.'
+            : language == 'de'
+                ? 'Die bisherige Installation „$name“ würde deaktiviert und die aktuelle '
+                  'Installation aktiviert. Der Wechsel ist noch gesperrt, bis die '
+                  'serverseitige Sicherheitsprüfung abgeschlossen ist.'
+                : 'The previous installation “$name” would be deactivated and the '
+                  'current installation activated. Replacement is unavailable until '
+                  'server-side security verification is complete.'),
+        actions: [
+          TextButton(
+            autofocus: true,
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(language == 'tr' ? 'İptal' : language == 'de' ? 'Abbrechen' : 'Cancel'),
+          ),
+          FilledButton(
+            onPressed: null,
+            child: Text(language == 'tr' ? 'Cihazı değiştir'
+                : language == 'de' ? 'Gerät ersetzen' : 'Replace device'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -431,20 +471,41 @@ class _AccessStatusScreenState extends State<_AccessStatusScreen> {
                           : isGerman ? 'Keine aktiven Geräte gefunden.'
                           : 'No active devices found.')
                     else
-                      ...auth.activeDevices.map((device) => Card(
-                        child: ListTile(
-                          leading: const Icon(Icons.devices),
-                          title: Text(
-                            (device['device_name']?.toString().trim().isNotEmpty ?? false)
-                              ? device['device_name'].toString()
-                              : (isTurkish ? 'İsimsiz cihaz'
-                                  : isGerman ? 'Unbenanntes Gerät'
-                                  : 'Unnamed device'),
+                      ...auth.activeDevices.map((device) {
+                        final id = device['device_id']?.toString() ?? '';
+                        final name = (device['device_name']?.toString().trim().isNotEmpty ?? false)
+                            ? device['device_name'].toString()
+                            : (isTurkish ? 'İsimsiz cihaz'
+                                : isGerman ? 'Unbenanntes Gerät' : 'Unnamed device');
+                        return Card(
+                          child: RadioListTile<String>(
+                            value: id,
+                            groupValue: _selectedDeviceId,
+                            onChanged: (value) => setState(() => _selectedDeviceId = value),
+                            title: Text(name),
+                            subtitle: Text(device['platform']?.toString() ?? ''),
+                            secondary: const Icon(Icons.devices),
                           ),
-                          subtitle: Text(device['platform']?.toString() ?? ''),
-                          trailing: const Icon(Icons.lock_outline),
+                        );
+                      }),
+                    if (auth.activeDevices.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _selectedDeviceId == null ? null : () {
+                            final matches = auth.activeDevices.where(
+                              (device) => device['device_id']?.toString() == _selectedDeviceId,
+                            );
+                            if (matches.isNotEmpty) _showReplacementPreview(matches.first);
+                          },
+                          icon: const Icon(Icons.swap_horiz),
+                          label: Text(isTurkish ? 'Seçilen cihazı değiştir (önizleme)'
+                              : isGerman ? 'Ausgewähltes Gerät ersetzen (Vorschau)'
+                              : 'Replace selected device (preview)'),
                         ),
-                      )),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     Text(
                       isTurkish
