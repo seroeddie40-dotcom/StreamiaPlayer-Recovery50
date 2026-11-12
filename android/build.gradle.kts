@@ -1,6 +1,7 @@
 
 import org.gradle.api.tasks.compile.JavaCompile
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import com.android.build.gradle.LibraryExtension
 
 allprojects {
     repositories {
@@ -27,8 +28,7 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// Fix for volume_controller JVM target mismatch.
-// Keep Java and Kotlin compilation targets consistent.
+// Fix JVM target mismatch for volume_controller.
 subprojects {
     if (project.name == "volume_controller") {
         tasks.withType<JavaCompile>().configureEach {
@@ -41,6 +41,17 @@ subprojects {
                 jvmTarget.set(
                     org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
                 )
+            }
+        }
+    }
+}
+
+// file_picker must compile against Android API 36.
+subprojects {
+    if (project.name == "file_picker") {
+        plugins.withId("com.android.library") {
+            extensions.configure<LibraryExtension> {
+                compileSdk = 36
             }
         }
     }
