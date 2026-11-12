@@ -24,6 +24,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   static const Map<String, Map<String, String>> _translations = {
     'de': {
+      'email_confirmed': 'E-Mail erfolgreich bestätigt! Du kannst dich jetzt anmelden.',
       'invalid_email': 'Bitte gib eine gültige E-Mail-Adresse ein.',
       'registration_received': 'Registrierungsanfrage angenommen',
       'confirmation_instructions': 'Prüfe dein E-Mail-Postfach und bestätige deine Adresse über den Link. Sieh auch im Spam-Ordner nach.',
@@ -54,6 +55,7 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Passwort verbergen',
     },
     'tr': {
+      'email_confirmed': 'E-posta adresin doğrulandı! Artık giriş yapabilirsin.',
       'invalid_email': 'Lütfen geçerli bir e-posta adresi girin.',
       'registration_received': 'Kayıt isteği alındı',
       'confirmation_instructions': 'E-posta kutunuzu kontrol edin ve bağlantıyla adresinizi doğrulayın. Spam klasörünü de kontrol edin.',
@@ -84,6 +86,7 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Şifreyi gizle',
     },
     'en': {
+      'email_confirmed': 'Email confirmed successfully! You can now sign in.',
       'invalid_email': 'Please enter a valid email address.',
       'registration_received': 'Registration request received',
       'confirmation_instructions': 'Check your inbox and confirm your address using the link. Check your spam folder too.',
@@ -114,6 +117,7 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Hide password',
     },
     'ru': {
+      'email_confirmed': 'Адрес электронной почты подтверждён! Теперь вы можете войти.',
       'invalid_email': 'Введите действительный адрес электронной почты.',
       'registration_received': 'Запрос на регистрацию принят',
       'confirmation_instructions': 'Проверьте почту и подтвердите адрес по ссылке. Проверьте папку «Спам».',
@@ -144,6 +148,7 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Скрыть пароль',
     },
     'ar': {
+      'email_confirmed': 'تم تأكيد بريدك الإلكتروني بنجاح! يمكنك الآن تسجيل الدخول.',
       'invalid_email': 'يرجى إدخال بريد إلكتروني صالح.',
       'registration_received': 'تم استلام طلب التسجيل',
       'confirmation_instructions': 'تحقق من بريدك الإلكتروني وأكد عنوانك عبر الرابط. تحقق أيضاً من مجلد الرسائل غير المرغوب فيها.',
@@ -174,6 +179,7 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'إخفاء كلمة المرور',
     },
     'pl': {
+      'email_confirmed': 'Adres e-mail został potwierdzony! Możesz się teraz zalogować.',
       'invalid_email': 'Podaj prawidłowy adres e-mail.',
       'registration_received': 'Otrzymano zgłoszenie rejestracji',
       'confirmation_instructions': 'Sprawdź pocztę i potwierdź adres przez link. Sprawdź też spam.',
@@ -204,6 +210,7 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Ukryj hasło',
     },
     'es': {
+      'email_confirmed': '¡Correo electrónico confirmado! Ya puedes iniciar sesión.',
       'invalid_email': 'Introduce una dirección de correo válida.',
       'registration_received': 'Solicitud de registro recibida',
       'confirmation_instructions': 'Revisa tu correo y confirma la dirección mediante el enlace. Comprueba también el spam.',
@@ -234,6 +241,7 @@ class _LoginScreenState extends State<LoginScreen> {
       'hidePassword': 'Ocultar contraseña',
     },
     'fr': {
+      'email_confirmed': 'Adresse e-mail confirmée ! Vous pouvez maintenant vous connecter.',
       'invalid_email': 'Saisissez une adresse e-mail valide.',
       'registration_received': 'Demande d’inscription reçue',
       'confirmation_instructions': 'Vérifiez votre boîte mail et confirmez votre adresse via le lien. Vérifiez aussi les spams.',
@@ -493,6 +501,31 @@ class _LoginScreenState extends State<LoginScreen> {
                           ),
                         ),
                       ),
+
+                      if (auth.emailConfirmationSuccess) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.green.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.green),
+                          ),
+                          child: Row(children: [
+                            const Icon(Icons.check_circle, color: Colors.green),
+                            const SizedBox(width: 10),
+                            Expanded(child: Text(
+                              _t(languageCode, 'email_confirmed'),
+                              style: TextStyle(color: foregroundColor),
+                            )),
+                            IconButton(
+                              tooltip: 'OK',
+                              onPressed: auth.dismissEmailConfirmationSuccess,
+                              icon: Icon(Icons.close, color: foregroundColor),
+                            ),
+                          ]),
+                        ),
+                      ],
 
                       if (auth.error != null) ...[
                         const SizedBox(height: 12),
