@@ -105,7 +105,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   int _selectedHistoryTab = 0;
-  bool _recording = false;
   int _videoFitIndex = 0;
   static const List<BoxFit> _videoFits = [BoxFit.contain, BoxFit.cover, BoxFit.fill];
   static const List<String> _videoFitLabels = ['Original', 'Ausfüllen', 'Strecken'];
@@ -203,6 +202,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     // Do not show raw player errors: stream URLs can contain account secrets.
     _errorSub = _player.stream.error.listen((_) => _handlePlaybackFailure());
     _loadStream();
+    RecordingService.refreshStatus();
     _stallMonitor = Timer.periodic(const Duration(seconds: 5), (_) => _checkPlaybackStall());
     _progressTimer = Timer.periodic(const Duration(seconds: 15), (_) => _saveProgress());
     // Retry queued offline progress while the player remains open.
@@ -553,28 +553,48 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                        ],
                      ),
                    ),
-                  if (widget.isLive)
-                    InkWell(
-                      focusColor: AppTheme.electricBlue.withOpacity(0.38),
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: _toggleRecording,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: _recording ? Colors.red : Colors.white.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(_recording ? Icons.stop : Icons.fiber_manual_record,
-                                color: Colors.white, size: 20),
-                            const SizedBox(width: 8),
-                            Text(_recording ? 'Aufnahme stoppen' : 'Aufnehmen',
-                                style: const TextStyle(color: Colors.white)),
-                          ],
-                        ),
-                      ),
-                    ),
+                   if (widget.isLive)
+                     ValueListenableBuilder<RecordingStatus>(
+                       valueListenable: RecordingService.status,
+                       builder: (context, recording, _) {
+                         final busy = recording.isBusy;
+                         final stopping = recording.phase == RecordingPhase.stopping;
+                         final starting = recording.phase == RecordingPhase.starting;
+                         final writing = recording.writing;
+                         final label = stopping
+                             ? 'Aufnahme wird beendet …'
+                             : starting
+                                 ? 'Aufnahme startet …'
+                                 : writing
+                                     ? 'Aufnahme stoppen'
+                                     : 'Aufnehmen';
+                         return Tooltip(
+                           message: recording.error ?? label,
+                           child: InkWell(
+                             focusColor: AppTheme.electricBlue.withOpacity(0.38),
+                             borderRadius: BorderRadius.circular(12),
+                             onTap: (stopping || starting) ? null : _toggleRecording,
+                             child: Container(
+                               padding: const EdgeInsets.symmetric(
+                                 horizontal: 16, vertical: 10),
+                               decoration: BoxDecoration(
+                                 color: writing ? Colors.red : Colors.white.withOpacity(0.2),
+                                 borderRadius: BorderRadius.circular(24),
+                               ),
+                               child: Row(
+                                 mainAxisSize: MainAxisSize.min,
+                                 children: [
+                                   Icon(busy ? Icons.stop : Icons.fiber_manual_record,
+                                       color: Colors.white, size: 20),
+                                   const SizedBox(width: 8),
+                                   Text(label, style: const TextStyle(color: Colors.white)),
+                                 ],
+                               ),
+                             ),
+                           ),
+                         );
+                       },
+                     ),
                 ],
               ),
             ),
@@ -1363,12 +1383,38 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   Future<void> _toggleRecording() async {
-    if (_recording) {
+    final state = await RecordingService.refreshStatus();
+    if (!mounted) return;
+
+    if (state.isBusy) {
       await RecordingService.stop();
-      setState(() => _recording = false);
+      if (!mounted) return;
+      final updated = RecordingService.status.value;
+      if (updated.phase == RecordingPhase.failed) {
+        _showTrackMessage(updated.error ?? 'Aufnahme konnte nicht gestoppt werden.');
+      } else {
+        _showTrackMessage('Aufnahme wird beendet …');
+      }
+      return;
+    }
+
+    final url = _currentUrl;
+    if (url == null || url.trim().isEmpty) {
+      _showTrackMessage('Keine Stream-Adresse für die Aufnahme vorhanden.');
+      return;
+    }
+
+    final accepted = await RecordingService.start(
+      widget.channel?.name ?? _currentTitle,
+      streamUrl: url,
+    );
+    if (!mounted) return;
+    if (!accepted) {
+      _showTrackMessage(
+        RecordingService.status.value.error ?? 'Aufnahme konnte nicht gestartet werden.',
+      );
     } else {
-      final ok = await RecordingService.start(widget.channel?.name ?? 'rec');
-      if (mounted) setState(() => _recording = ok);
+      _showTrackMessage('Aufnahmestart angefordert. Bitte Status abwarten.');
     }
   }
 
