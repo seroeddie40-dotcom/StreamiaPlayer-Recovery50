@@ -104,7 +104,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     });
   }
 
-  int? _expandedHistorySection = 0;
+  int _selectedHistoryTab = 0;
   bool _recording = false;
   int _videoFitIndex = 0;
   static const List<BoxFit> _videoFits = [BoxFit.contain, BoxFit.cover, BoxFit.fill];
@@ -378,6 +378,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     // Overlay widgets own their remote actions; never toggle playback behind them.
     if (_showDrawer || _showHistory) return KeyEventResult.ignored;
     final key = event.logicalKey;
+    // On the player surface, Right opens recent viewing history on Android TV.
+    // Focused buttons keep their normal left/right focus navigation.
+    if (key == LogicalKeyboardKey.arrowRight &&
+        _playerSurfaceFocus.hasPrimaryFocus) {
+      _toggleHistorySidebar();
+      return KeyEventResult.handled;
+    }
     if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.arrowLeft) {
       // When controls are visible, let Flutter's focus traversal move between
       // buttons. Use left/right for seeking only while the overlay is hidden.
@@ -529,11 +536,23 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                     child: const Icon(Icons.arrow_back, color: Colors.white, size: 32),
                   ),
                   const SizedBox(width: 16),
-                  Expanded(
-                    child: Text(_currentTitle,
-                        style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
-                        overflow: TextOverflow.ellipsis),
-                  ),
+                   Expanded(
+                     child: Column(
+                       crossAxisAlignment: CrossAxisAlignment.start,
+                       mainAxisSize: MainAxisSize.min,
+                       children: [
+                         Text(_currentTitle,
+                           style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                           overflow: TextOverflow.ellipsis),
+                         if (widget.isLive &&
+                             (widget.channel?.category ?? '').trim().isNotEmpty)
+                           Text(widget.channel!.category!.trim(),
+                             maxLines: 1,
+                             overflow: TextOverflow.ellipsis,
+                             style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                       ],
+                     ),
+                   ),
                   if (widget.isLive)
                     InkWell(
                       focusColor: AppTheme.electricBlue.withOpacity(0.38),
@@ -866,158 +885,160 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   Widget _buildHistorySidebar() {
     final library = context.watch<ContentProvider>();
+    final lists = <List<RecentPlaybackEntry>>[
+      library.recentLive,
+      library.recentVod,
+      library.recentSeries,
+    ];
+    final names = <String>['Live TV', 'Filme', 'Serien'];
+    final types = <RecentPlaybackType>[
+      RecentPlaybackType.live,
+      RecentPlaybackType.vod,
+      RecentPlaybackType.series,
+    ];
+    final icons = <IconData>[
+      Icons.live_tv_rounded,
+      Icons.movie_rounded,
+      Icons.video_library_rounded,
+    ];
+    final entries = lists[_selectedHistoryTab].take(10).toList(growable: false);
     return Positioned(
-      right: 0, top: 0, bottom: 0,
+      right: 0,
+      top: 0,
+      bottom: 0,
       child: ClipRRect(
         borderRadius: const BorderRadius.horizontal(left: Radius.circular(22)),
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
           child: Container(
-            width: 340,
+            width: MediaQuery.sizeOf(context).width.clamp(0.0, 380.0).toDouble(),
             decoration: BoxDecoration(
               color: const Color(0xE6101724),
-              border: Border(left: BorderSide(color: Colors.white.withOpacity(0.16))),
+              border: Border(
+                left: BorderSide(color: Colors.white.withOpacity(0.16)),
+              ),
             ),
-            child: FocusTraversalGroup(
-              child: Column(children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 22, 12, 12),
-                child: Row(children: [
-                  const Expanded(child: Text('Verlauf',
-                    style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold))),
-                  IconButton(
-                    focusNode: _historyCloseFocus,
-                    tooltip: 'Schließen',
-                    focusColor: AppTheme.electricBlue.withOpacity(0.38),
-                    onPressed: _closeHistorySidebar,
-                    icon: const Icon(Icons.close, color: Colors.white70),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 18, 12, 10),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text('Verlauf', style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 19,
+                          fontWeight: FontWeight.bold,
+                        )),
+                      ),
+                      IconButton(
+                        focusNode: _historyCloseFocus,
+                        tooltip: 'Schließen',
+                        focusColor: AppTheme.electricBlue.withOpacity(0.38),
+                        onPressed: _closeHistorySidebar,
+                        icon: const Icon(Icons.close, color: Colors.white70),
+                      ),
+                    ],
                   ),
-                ]),
-              ),
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 16),
-                  children: [
-                    _buildHistorySection(
-                      index: 0,
-                      title: '10 letzte Sender',
-                      subtitle: 'Zuletzt angesehene Live-TV-Sender',
-                      icon: Icons.live_tv_rounded,
-                      entries: library.recentLive,
-                      historyType: RecentPlaybackType.live,
-                    ),
-                    const SizedBox(height: 8),
-                    _buildHistorySection(
-                      index: 1,
-                      title: '10 letzte Filme',
-                      subtitle: 'Zuletzt angesehene Filme',
-                      icon: Icons.movie_rounded,
-                      entries: library.recentVod,
-                      historyType: RecentPlaybackType.vod,
-                    ),
-                    const SizedBox(height: 8),
-                    _buildHistorySection(
-                      index: 2,
-                      title: '10 letzte Serienepisoden',
-                      subtitle: 'Zuletzt angesehene Episoden',
-                      icon: Icons.video_library_rounded,
-                      entries: library.recentSeries,
-                      historyType: RecentPlaybackType.series,
-                    ),
-                  ],
                 ),
-              ),
-            ]),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    children: List.generate(3, (index) {
+                      final selected = index == _selectedHistoryTab;
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: Material(
+                            color: selected
+                                ? AppTheme.electricBlue.withOpacity(0.28)
+                                : Colors.white.withOpacity(0.06),
+                            borderRadius: BorderRadius.circular(10),
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(10),
+                              focusColor: AppTheme.electricBlue.withOpacity(0.45),
+                              onTap: () => setState(() => _selectedHistoryTab = index),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 2),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(icons[index], color: Colors.white, size: 20),
+                                    const SizedBox(height: 4),
+                                    Text(names[index], style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                      fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                                    )),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 10, 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text('Zuletzt angesehen · ${entries.length}/10',
+                          style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      ),
+                      IconButton(
+                        tooltip: '${names[_selectedHistoryTab]}-Verlauf löschen',
+                        focusColor: AppTheme.electricBlue.withOpacity(0.38),
+                        onPressed: entries.isEmpty ? null : () => _confirmClearHistory(
+                          types[_selectedHistoryTab], names[_selectedHistoryTab]),
+                        icon: Icon(Icons.delete_outline_rounded,
+                          color: entries.isEmpty ? Colors.white24 : Colors.white70),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: Colors.white24),
+                Expanded(
+                  child: entries.isEmpty
+                      ? const Center(
+                          child: Text('Noch nichts angesehen',
+                            style: TextStyle(color: Colors.white70)),
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.all(10),
+                          itemCount: entries.length,
+                          itemBuilder: (context, index) {
+                            final entry = entries[index];
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 6),
+                              child: Material(
+                                color: Colors.white.withOpacity(0.06),
+                                borderRadius: BorderRadius.circular(10),
+                                child: ListTile(
+                                  focusColor: AppTheme.electricBlue.withOpacity(0.38),
+                                  onTap: () => _openRecentEntry(entry),
+                                  leading: _historyImage(entry.imageUrl,
+                                    entry.type == RecentPlaybackType.live
+                                        ? Icons.tv : Icons.movie),
+                                  title: Text(entry.title,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: Colors.white, fontSize: 13)),
+                                  trailing: const Icon(Icons.play_arrow_rounded,
+                                    color: Colors.white70),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
             ),
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildHistorySection({
-    required int index,
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required List<RecentPlaybackEntry> entries,
-    required RecentPlaybackType historyType,
-  }) {
-    final expanded = _expandedHistorySection == index;
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(expanded ? 0.085 : 0.045),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: expanded
-            ? AppTheme.electricBlue.withOpacity(0.55)
-            : Colors.white.withOpacity(0.10)),
-      ),
-      child: Column(children: [
-        InkWell(
-          focusColor: AppTheme.electricBlue.withOpacity(0.38),
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => setState(() => _expandedHistorySection = expanded ? null : index),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
-            child: Row(children: [
-              Icon(icon, color: Colors.white70, size: 21),
-              const SizedBox(width: 10),
-              Expanded(child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(
-                    color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 2),
-                  Text('$subtitle · ${entries.length}/10',
-                    style: TextStyle(color: Colors.white.withOpacity(0.58), fontSize: 10)),
-                ],
-              )),
-              IconButton(
-                tooltip: '$title löschen',
-                focusColor: AppTheme.electricBlue.withOpacity(0.38),
-                visualDensity: VisualDensity.compact,
-                onPressed: entries.isEmpty ? null : () => _confirmClearHistory(historyType, title),
-                icon: Icon(Icons.delete_outline_rounded,
-                  color: entries.isEmpty ? Colors.white24 : Colors.white70, size: 20),
-              ),
-              Icon(expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
-                color: Colors.white70),
-            ]),
-          ),
-        ),
-        if (expanded) ...[
-          Divider(height: 1, color: Colors.white.withOpacity(0.10)),
-          if (entries.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 22, horizontal: 12),
-              child: Text('Noch nichts angesehen',
-                style: TextStyle(color: Colors.white.withOpacity(0.58), fontSize: 12)),
-            )
-          else
-            ...entries.asMap().entries.map((item) {
-              final entry = item.value;
-              return Padding(
-                padding: EdgeInsets.fromLTRB(8, item.key == 0 ? 8 : 2, 8,
-                    item.key == entries.length - 1 ? 8 : 2),
-                child: Material(
-                  color: Colors.white.withOpacity(0.045),
-                  borderRadius: BorderRadius.circular(10),
-                  child: ListTile(
-                    dense: true,
-                    visualDensity: const VisualDensity(vertical: -1),
-                    onTap: () => _openRecentEntry(entry),
-                    leading: _historyImage(entry.imageUrl,
-                      entry.type == RecentPlaybackType.live ? Icons.tv : Icons.movie),
-                    title: Text(entry.title, maxLines: 2, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white, fontSize: 12)),
-                    trailing: const Icon(Icons.play_arrow_rounded,
-                      color: Colors.white70, size: 20),
-                  ),
-                ),
-              );
-            }),
-        ],
-      ]),
     );
   }
 
@@ -1138,7 +1159,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       return;
     }
     _hideTimer?.cancel();
-    setState(() => _showHistory = true);
+    setState(() {
+      _showDrawer = false;
+      _selectedHistoryTab = widget.isLive ? 0 : (widget.episodes != null ? 2 : 1);
+      _showHistory = true;
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _showHistory) _historyCloseFocus.requestFocus();
     });
