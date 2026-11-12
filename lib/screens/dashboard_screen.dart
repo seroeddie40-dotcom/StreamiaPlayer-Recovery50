@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -34,6 +33,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return en;
   }
 
+  // All trial dates are issued by Supabase, never by the device.
+  DateTime? _trialExpiry(AuthProvider auth) {
+    final raw = auth.access?['trial_ends_at']?.toString();
+    if (raw == null || raw.isEmpty) return null;
+    return DateTime.tryParse(raw)?.toUtc();
+  }
+
+  String _trialText(BuildContext context, int days) {
+    final code = Localizations.localeOf(context).languageCode;
+    final remaining = days < 1 ? 1 : days;
+    switch (code) {
+      case 'de': return 'Noch $remaining ${remaining == 1 ? 'Tag' : 'Tage'} Testphase';
+      case 'tr': return 'Deneme süresinde $remaining gün kaldı';
+      case 'ru': return 'Пробный период: осталось $remaining дн.';
+      case 'pl': return 'Pozostało $remaining dni okresu próbnego';
+      case 'es': return 'Quedan $remaining días de prueba';
+      case 'fr': return 'Essai : encore $remaining jours';
+      case 'ar': return 'متبقٍ $remaining يوم من الفترة التجريبية';
+      default: return '$remaining ${remaining == 1 ? 'day' : 'days'} left in trial';
+    }
+  }
+
   void _open(Widget screen) {
     pushWithFocusRestore(
       context,
@@ -49,6 +70,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final auth = context.watch<AuthProvider>();
+    final trialExpiry = _trialExpiry(auth);
+    final now = DateTime.now().toUtc();
+    final trialActive = auth.hasAccountAccess &&
+        auth.access?['access_status'] == 'trial' &&
+        auth.access?['entitlement_source'] == 'trial' &&
+        trialExpiry != null && trialExpiry.isAfter(now);
+    final trialDaysLeft = trialActive
+        ? (trialExpiry.difference(now).inSeconds / 86400).ceil()
+        : 0;
+    // No promotional trial claim for a paid or admin-enabled account.
+    final showTrialCard = auth.isLoggedIn && auth.accessChecked &&
+        (trialActive || !auth.hasAccountAccess);
+
 
     final screenWidth = MediaQuery.sizeOf(context).width;
     final compact = screenWidth < 600;
@@ -230,28 +264,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 18),
-                                _TrialInfoCard(
-                                  title: _label(
-                                    context,
-                                    '7 Tage kostenlos testen',
-                                    '7 gün ücretsiz dene',
-                                    'Try 7 days free',
+                                if (showTrialCard)
+                                  _TrialInfoCard(
+                                    title: trialActive
+                                        ? _trialText(context, trialDaysLeft)
+                                        : _label(
+                                            context,
+                                            'Streamia Pro entdecken',
+                                            'Streamia Pro paketlerini keşfet',
+                                            'Explore Streamia Pro',
+                                          ),
+                                    subtitle: trialActive
+                                        ? _label(
+                                            context,
+                                            '1 Gerät · Testphase aktiv',
+                                            '1 cihaz · Deneme aktif',
+                                            '1 device · Trial active',
+                                          )
+                                        : _label(
+                                            context,
+                                            'Tarife für 1, 3 oder 5 Geräte ansehen',
+                                            '1, 3 veya 5 cihazlık paketler',
+                                            'View plans for 1, 3 or 5 devices',
+                                          ),
+                                    actionLabel: _label(
+                                      context,
+                                      'Pro-Tarife',
+                                      'Pro paketleri',
+                                      'Pro plans',
+                                    ),
+                                    onTap: () =>
+                                        _open(const PaywallScreen()),
                                   ),
-                                  subtitle: _label(
-                                    context,
-                                    '1 Gerät · Alle Player-Funktionen',
-                                    '1 cihaz · Tüm oynatıcı özellikleri',
-                                    '1 device · All player features',
-                                  ),
-                                  actionLabel: _label(
-                                    context,
-                                    'Pro-Tarife',
-                                    'Pro paketleri',
-                                    'Pro plans',
-                                  ),
-                                  onTap: () =>
-                                      _open(const PaywallScreen()),
-                                ),
                               ],
                             ),
                           ),
