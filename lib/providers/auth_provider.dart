@@ -23,6 +23,9 @@ class AuthProvider extends ChangeNotifier {
   String? _deviceStatus;
   Map<String, dynamic>? _access;
   bool _busy = false;
+  bool _loadingDevices = false;
+  String? _deviceListError;
+  List<Map<String, dynamic>> _activeDevices = const [];
   bool _accessChecked = false;
   bool _checkingConfirmation = true;
   bool _emailConfirmationSuccess = false;
@@ -51,6 +54,10 @@ class AuthProvider extends ChangeNotifier {
   User? get user => _client?.auth.currentUser;
   bool get isLoggedIn => !_checkingConfirmation && !_emailConfirmationSuccess && user != null;
   bool get isBusy => _busy;
+  bool get loadingDevices => _loadingDevices;
+  String? get deviceListError => _deviceListError;
+  List<Map<String, dynamic>> get activeDevices =>
+      List.unmodifiable(_activeDevices);
   bool get accessChecked => _accessChecked;
   String? get error => _error;
   String? get deviceId => _deviceId;
@@ -113,6 +120,9 @@ class AuthProvider extends ChangeNotifier {
   void _clearAccess() {
     _deviceId = null;
     _deviceStatus = null;
+    _activeDevices = const [];
+    _deviceListError = null;
+    _loadingDevices = false;
     _access = null;
     _accessChecked = false;
     _error = null;
@@ -189,6 +199,8 @@ class AuthProvider extends ChangeNotifier {
     _error = null;
     _access = null;
     _deviceStatus = null;
+    _activeDevices = const [];
+    _deviceListError = null;
     notifyListeners();
     try {
       // Check account access before registering the device. The server is the
@@ -237,6 +249,40 @@ class AuthProvider extends ChangeNotifier {
       _error = _friendlyError(e);
     }
     notifyListeners();
+  }
+
+  // Read-only. Never calls replace_my_device while its server-side
+  // installation verification is still being designed.
+  Future<void> loadActiveDevices() async {
+    if (_loadingDevices) return;
+    final client = _client;
+    if (client == null || client.auth.currentUser == null ||
+        !devicePending || !hasAccountAccess) {
+      _activeDevices = const [];
+      _deviceListError = null;
+      notifyListeners();
+      return;
+    }
+    _loadingDevices = true;
+    _deviceListError = null;
+    notifyListeners();
+    try {
+      final result = await client.rpc('list_my_active_devices');
+      if (result is! List) {
+        throw StateError('Ungültige Antwort der Geräteverwaltung.');
+      }
+      _activeDevices = result
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .where((item) => item['device_id'] != null)
+          .toList(growable: false);
+    } catch (e) {
+      _activeDevices = const [];
+      _deviceListError = _friendlyError(e);
+    } finally {
+      _loadingDevices = false;
+      notifyListeners();
+    }
   }
 
   Map<String, dynamic>? _firstRow(dynamic result) {
