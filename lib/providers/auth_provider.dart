@@ -191,6 +191,24 @@ class AuthProvider extends ChangeNotifier {
     _deviceStatus = null;
     notifyListeners();
     try {
+      // Check account access before registering the device. The server is the
+      // authority for trial eligibility, expiration, and administrative grants.
+      final initialAccess = _firstRow(await client.rpc('get_my_access_status'));
+      if (initialAccess == null) {
+        throw StateError('Die Kontoberechtigung konnte nicht ermittelt werden.');
+      }
+      if (initialAccess['has_access'] != true) {
+        // Existing server RPC: starts a trial only once. A rejected request
+        // must never grant access locally or prevent an expired user from
+        // reaching the normal payment screen.
+        try {
+          await client.rpc('start_streamia_trial');
+        } on PostgrestException {
+          // The server may reject repeat trials, expired trials, or other
+          // ineligible accounts. Re-read authoritative access below.
+        }
+      }
+
       final installationId = await _getInstallationId();
       final deviceName = await _readDeviceName();
       final platform = kIsWeb ? 'web' : switch (defaultTargetPlatform) {
