@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -12,13 +13,19 @@ import '../core/storage/prefs_service.dart';
 class AuthProvider extends ChangeNotifier {
   static const MethodChannel _deviceChannel = MethodChannel('com.streamia/device_identity');
   static const String _installKey = 'streamia_installation_id';
+  static const String _pendingEmailKey = 'streamia_pending_confirmation_email';
+  static const String _redirectUrl = 'streamiaplayer://auth/callback';
+
   final PrefsService _prefs;
+  StreamSubscription<AuthState>? _authSubscription;
   String? _installationId;
   String? _deviceId;
   String? _deviceStatus;
   Map<String, dynamic>? _access;
   bool _busy = false;
   bool _accessChecked = false;
+  bool _checkingConfirmation = true;
+  bool _emailConfirmationSuccess = false;
   String? _error;
   bool _registrationSubmitted = false;
   bool _registrationNeedsConfirmation = false;
@@ -26,19 +33,23 @@ class AuthProvider extends ChangeNotifier {
   AuthProvider(this._prefs) {
     _installationId = _prefs.getString(_installKey);
     if (SupabaseConfig.isConfigured) {
-      Supabase.instance.client.auth.onAuthStateChange.listen((event) {
+      _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((event) {
         if (event.event == AuthChangeEvent.signedOut) _clearAccess();
+        if (event.event == AuthChangeEvent.signedIn ||
+            event.event == AuthChangeEvent.initialSession) {
+          unawaited(_inspectConfirmationAndAccess());
+        }
         notifyListeners();
       });
-      Future<void>.microtask(() async {
-        if (isLoggedIn) await refreshDeviceAndAccess();
-      });
+      unawaited(_inspectConfirmationAndAccess());
+    } else {
+      _checkingConfirmation = false;
     }
   }
 
   SupabaseClient? get _client => SupabaseConfig.isConfigured ? Supabase.instance.client : null;
   User? get user => _client?.auth.currentUser;
-  bool get isLoggedIn => user != null;
+  bool get isLoggedIn => !_checkingConfirmation && !_emailConfirmationSuccess && user != null;
   bool get isBusy => _busy;
   bool get accessChecked => _accessChecked;
   String? get error => _error;
@@ -47,6 +58,7 @@ class AuthProvider extends ChangeNotifier {
   Map<String, dynamic>? get access => _access;
   bool get registrationSubmitted => _registrationSubmitted;
   bool get registrationNeedsConfirmation => _registrationNeedsConfirmation;
+  bool get emailConfirmationSuccess => _emailConfirmationSuccess;
   String get macAddress => _installationId ?? 'Noch nicht registriert';
   bool get hasAccountAccess => _access?['has_access'] == true;
   bool get deviceApproved => _deviceStatus == 'active' || _deviceStatus == 'approved';
@@ -61,6 +73,42 @@ class AuthProvider extends ChangeNotifier {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
   bool get isAdminGrant => _access?['manual_override'] == true && _access?['entitlement_source'] == 'admin_grant';
+
+  // The confirmation is tied to the email registered on this installation.
+  // Never treat an arbitrary sign-in as a confirmation without a confirmed email.
+  Future<void> _inspectConfirmationAndAccess() async {
+    final client = _client;
+    if (client == null) return;
+    _checkingConfirmation = true;
+    notifyListeners();
+    try {
+      final current = client.auth.currentUser;
+      final prefs = await SharedPreferences.getInstance();
+      final pendingEmail = prefs.getString(_pendingEmailKey);
+      final isConfirmed = current?.emailConfirmedAt != null;
+      final matchesPending = pendingEmail != null &&
+          current?.email?.toLowerCase() == pendingEmail.toLowerCase();
+      if (isConfirmed && matchesPending) {
+        // Clear marker before sign-out to prevent reprocessing.
+        await prefs.remove(_pendingEmailKey);
+        await client.auth.signOut();
+        _clearAccess();
+        _emailConfirmationSuccess = true;
+      } else if (current != null && !_emailConfirmationSuccess) {
+        await refreshDeviceAndAccess();
+      }
+    } catch (e) {
+      _error = _friendlyError(e);
+    } finally {
+      _checkingConfirmation = false;
+      notifyListeners();
+    }
+  }
+
+  void dismissEmailConfirmationSuccess() {
+    _emailConfirmationSuccess = false;
+    notifyListeners();
+  }
 
   void _clearAccess() {
     _deviceId = null;
@@ -93,6 +141,7 @@ class AuthProvider extends ChangeNotifier {
   Future<void> signIn(String email, String password) async {
     _registrationSubmitted = false;
     _registrationNeedsConfirmation = false;
+    _emailConfirmationSuccess = false;
     await _run(() async {
       final client = _client;
       if (client == null) throw Exception('Supabase ist nicht konfiguriert.');
@@ -105,16 +154,26 @@ class AuthProvider extends ChangeNotifier {
   Future<void> signUp(String email, String password) async {
     _registrationSubmitted = false;
     _registrationNeedsConfirmation = false;
+    _emailConfirmationSuccess = false;
     await _run(() async {
       final client = _client;
       if (client == null) throw Exception('Supabase ist nicht konfiguriert.');
       _clearAccess();
-      final response = await client.auth.signUp(email: email.trim(), password: password);
+      final normalizedEmail = email.trim();
+      final response = await client.auth.signUp(
+        email: normalizedEmail,
+        password: password,
+        emailRedirectTo: _redirectUrl,
+      );
       if (response.user == null && response.session == null) {
         throw const AuthException('Registration returned no user');
       }
       _registrationSubmitted = true;
       _registrationNeedsConfirmation = response.session == null;
+      if (_registrationNeedsConfirmation) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_pendingEmailKey, normalizedEmail.toLowerCase());
+      }
       if (response.session != null) await refreshDeviceAndAccess();
     });
   }
@@ -208,7 +267,14 @@ class AuthProvider extends ChangeNotifier {
     await _client?.auth.signOut();
     _registrationSubmitted = false;
     _registrationNeedsConfirmation = false;
+    _emailConfirmationSuccess = false;
     _clearAccess();
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    super.dispose();
   }
 }
