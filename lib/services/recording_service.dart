@@ -31,8 +31,7 @@ class RecordingStatus {
     this.error,
   });
 
-  bool get isRecording =>
-      phase == RecordingPhase.recording;
+  bool get isRecording => phase == RecordingPhase.recording;
 
   bool get isBusy =>
       active ||
@@ -57,6 +56,8 @@ class RecordingService {
 
   static Timer? _statusTimer;
   static bool _requestInProgress = false;
+  static bool _pollInProgress = false;
+  static bool _awaitingNativeStart = false;
 
   static bool get isActive => status.value.isBusy;
 
@@ -64,9 +65,14 @@ class RecordingService {
     String channelName, {
     required String streamUrl,
   }) async {
-    if (_requestInProgress || status.value.isBusy) {
-      return false;
-    }
+    if (_requestInProgress) return false;
+
+    // Zuerst Android abfragen, damit nach einer
+    // erneuten Player-Navigation keine zweite
+    // Aufnahme gestartet wird.
+    await refreshStatus();
+
+    if (status.value.isBusy) return false;
 
     if (streamUrl.trim().isEmpty) {
       _setFailure('Keine Stream-Adresse vorhanden.');
@@ -74,6 +80,7 @@ class RecordingService {
     }
 
     _requestInProgress = true;
+    _awaitingNativeStart = true;
 
     status.value = const RecordingStatus(
       phase: RecordingPhase.starting,
@@ -84,7 +91,7 @@ class RecordingService {
     );
 
     try {
-      await _channel.invokeMethod<bool>(
+      final accepted = await _channel.invokeMethod<bool>(
         'startRecording',
         {
           'streamUrl': streamUrl,
@@ -92,24 +99,30 @@ class RecordingService {
         },
       );
 
+      if (accepted != true) {
+        _awaitingNativeStart = false;
+        _setFailure('Android hat den Aufnahmestart abgelehnt.');
+        return false;
+      }
+
       _startMonitoring();
-
-      // Die native Startanforderung ist noch kein
-      // Beweis für eine laufende Aufnahme.
-      await refreshStatus();
-
       return true;
-    } on PlatformException {
-      _setFailure(
-        'Der Android-Aufnahmedienst konnte nicht gestartet werden.',
-      );
+    } on PlatformException catch (error) {
+      _awaitingNativeStart = false;
+
+      if (error.code == 'ALREADY_RECORDING') {
+        await refreshStatus();
+      } else {
+        _setFailure('Der Aufnahmedienst konnte nicht gestartet werden.');
+      }
+
       return false;
     } on MissingPluginException {
-      _setFailure(
-        'Die native Aufnahmefunktion ist nicht verfügbar.',
-      );
+      _awaitingNativeStart = false;
+      _setFailure('Die native Aufnahmefunktion ist nicht verfügbar.');
       return false;
     } catch (_) {
+      _awaitingNativeStart = false;
       _setFailure('Aufnahme konnte nicht gestartet werden.');
       return false;
     } finally {
@@ -121,6 +134,7 @@ class RecordingService {
     if (_requestInProgress) return;
 
     _requestInProgress = true;
+    _awaitingNativeStart = false;
 
     final previous = status.value;
 
@@ -136,8 +150,6 @@ class RecordingService {
     try {
       await _channel.invokeMethod<bool>('stopRecording');
 
-      // Nicht sofort auf idle setzen:
-      // Der native Thread muss erst die Datei schließen.
       _startMonitoring();
       await refreshStatus();
     } catch (_) {
@@ -148,6 +160,10 @@ class RecordingService {
   }
 
   static Future<RecordingStatus> refreshStatus() async {
+    if (_pollInProgress) return status.value;
+
+    _pollInProgress = true;
+
     try {
       final raw = await _channel.invokeMapMethod<String, dynamic>(
         'getRecordingStatus',
@@ -156,23 +172,24 @@ class RecordingService {
       if (raw == null) return status.value;
 
       final active = raw['active'] == true;
+      final writing = raw['writing'] == true;
+
       final bytes =
           (raw['bytesWritten'] as num?)?.toInt() ?? 0;
+
       final elapsedMs =
           (raw['elapsedMs'] as num?)?.toInt() ?? 0;
 
       final path = raw['outputPath'] as String?;
       final error = raw['error'] as String?;
 
-      // Bis zur Anpassung der nativen Schnittstelle
-      // gilt: Daten geschrieben = Aufnahme bestätigt.
-      final writing = active && bytes > 0;
-
       final previousPhase = status.value.phase;
 
       RecordingPhase phase;
 
       if (active) {
+        _awaitingNativeStart = false;
+
         if (previousPhase == RecordingPhase.stopping) {
           phase = RecordingPhase.stopping;
         } else if (writing) {
@@ -180,6 +197,10 @@ class RecordingService {
         } else {
           phase = RecordingPhase.starting;
         }
+      } else if (_awaitingNativeStart) {
+        // Der Android-Dienst kann kurz nach dem
+        // Startaufruf noch nicht initialisiert sein.
+        phase = RecordingPhase.starting;
       } else if (error != null && error.isNotEmpty) {
         phase = RecordingPhase.failed;
       } else {
@@ -188,7 +209,7 @@ class RecordingService {
 
       final updated = RecordingStatus(
         phase: phase,
-        active: active,
+        active: active || _awaitingNativeStart,
         writing: writing,
         bytesWritten: bytes,
         elapsed: Duration(
@@ -200,7 +221,7 @@ class RecordingService {
 
       status.value = updated;
 
-      if (!active) {
+      if (!updated.isBusy) {
         _statusTimer?.cancel();
         _statusTimer = null;
       }
@@ -208,6 +229,8 @@ class RecordingService {
       return updated;
     } catch (_) {
       return status.value;
+    } finally {
+      _pollInProgress = false;
     }
   }
 
