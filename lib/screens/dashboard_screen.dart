@@ -512,7 +512,7 @@ class _PremiumTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: dark
                 ? AppTheme.darkSurface
-                : AppTheme.lightSurface,
+                : AppTheme.hybridCard,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: AppTheme.electricBlue.withOpacity(0.25),
@@ -533,7 +533,7 @@ class _PremiumTile extends StatelessWidget {
                   child: Icon(
                     entry.icon,
                     size: 24,
-                    color: AppTheme.electricBlue,
+                    color: dark ? AppTheme.electricBlue : AppTheme.hybridAccent,
                   ),
                 ),
                 Row(
@@ -546,6 +546,7 @@ class _PremiumTile extends StatelessWidget {
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
+                          color: Colors.white,
                         ),
                       ),
                     ),
@@ -553,6 +554,7 @@ class _PremiumTile extends StatelessWidget {
                     const Icon(
                       Icons.arrow_forward_ios_rounded,
                       size: 14,
+                      color: Colors.white,
                     ),
                   ],
                 ),
