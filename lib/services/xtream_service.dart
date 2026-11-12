@@ -27,6 +27,46 @@ class XtreamService {
   })  : baseUrl = _normalizeBaseUrl(baseUrl),
         _client = client ?? http.Client();
 
+  // Cache category lookups per service instance, including concurrent calls.
+  final Map<String, Future<Map<String, String>>> _categoryRequests = {};
+
+  Future<Map<String, String>> _categoryNames(String action) =>
+      _categoryRequests.putIfAbsent(action, () async {
+        try {
+          final data = await _request({'action': action});
+          if (data is! List) return <String, String>{};
+          final names = <String, String>{};
+          for (final item in data) {
+            if (item is! Map) continue;
+            final id = _nullable(item['category_id']);
+            final name = _nullable(item['category_name']);
+            if (id != null && name != null) names[id.trim()] = name.trim();
+          }
+          return names;
+        } catch (_) {
+          // Some Xtream-compatible servers do not implement category actions.
+          // Keep the catalog accessible and fall back to embedded metadata.
+          _categoryRequests.remove(action);
+          return <String, String>{};
+        }
+      });
+
+  String? _originalCategory(Map<String, dynamic> item,
+      Map<String, String> names, String? fallback) {
+    final id = _nullable(item['category_id'])?.trim();
+    if (id != null && names.containsKey(id)) return names[id];
+    final embeddedName = _nullable(item['category_name']);
+    if (embeddedName != null) return embeddedName;
+    final ids = item['category_ids'];
+    if (ids is List) {
+      for (final value in ids) {
+        final candidate = names[_nullable(value)?.trim()];
+        if (candidate != null) return candidate;
+      }
+    }
+    return fallback;
+  }
+
   static String _normalizeBaseUrl(String value) {
     final parsed = Uri.tryParse(value.trim());
     if (parsed == null ||
@@ -101,6 +141,7 @@ class XtreamService {
   }
 
   Future<List<Channel>> getLiveStreams({int? categoryId}) async {
+    final categories = await _categoryNames('get_live_categories');
     final data = await _request({
       'action': 'get_live_streams',
       if (categoryId != null) 'category_id': '$categoryId',
@@ -115,13 +156,14 @@ class XtreamService {
         name: (j['name'] ?? 'Unbekannter Sender').toString(),
         streamUrl: '$baseUrl/live/${Uri.encodeComponent(username)}/${Uri.encodeComponent(password)}/$id.$ext',
         logoUrl: _nullable(j['stream_icon']),
-        category: _nullable(j['category_name']),
+        category: _originalCategory(j, categories, null),
         epgChannelId: _nullable(j['epg_channel_id']),
       );
     }).toList();
   }
 
   Future<List<VodItem>> getVodStreams({int? categoryId}) async {
+    final categories = await _categoryNames('get_vod_categories');
     final data = await _request({
       'action': 'get_vod_streams',
       if (categoryId != null) 'category_id': '$categoryId',
@@ -137,7 +179,7 @@ class XtreamService {
         plot: _nullable(j['plot']),
         posterUrl: _nullable(j['stream_icon']) ?? _nullable(j['cover_big']) ?? _nullable(j['cover']),
         backdropUrl: _firstString(j['backdrop_path']),
-        genre: _nullable(j['genre']),
+        genre: _originalCategory(j, categories, _nullable(j['genre'])),
         releaseDate: _nullable(j['releasedate']) ?? _nullable(j['releaseDate']),
         ageRating: _nullable(j['rating_age']),
         director: _nullable(j['director']),
@@ -154,6 +196,7 @@ class XtreamService {
   /// Loads only the series catalog. Fetching every series' episodes here would
   /// make large IPTV imports require thousands of sequential HTTP requests.
   Future<List<Series>> getSeries({int? categoryId}) async {
+    final categories = await _categoryNames('get_series_categories');
     final data = await _request({
       'action': 'get_series',
       if (categoryId != null) 'category_id': '$categoryId',
@@ -168,7 +211,7 @@ class XtreamService {
         plot: _nullable(j['plot']),
         posterUrl: _nullable(j['cover_big']) ?? _nullable(j['cover']),
         backdropUrl: _firstString(j['backdrop_path']),
-        genre: _nullable(j['genre']),
+        genre: _originalCategory(j, categories, _nullable(j['genre'])),
         releaseDate: _nullable(j['releaseDate']) ?? _nullable(j['release_date']),
         ageRating: _nullable(j['rating_age']),
         cast: _nullable(j['cast']),
@@ -226,7 +269,8 @@ class XtreamService {
       plot: _nullable(info['plot']),
       posterUrl: _nullable(info['cover']),
       backdropUrl: _firstString(info['backdrop_path']),
-      genre: _nullable(info['genre']),
+      // Preserve the provider folder selected in the series catalog.
+      genre: catalogSeries.genre ?? _nullable(info['genre']),
       releaseDate: _nullable(info['releaseDate']),
       ageRating: _nullable(info['rating_age']),
       cast: _nullable(info['cast']),
