@@ -141,12 +141,13 @@ class XtreamService {
   }
 
   Future<List<Channel>> getLiveStreams({int? categoryId}) async {
-    final categories = await _categoryNames('get_live_categories');
     final data = await _request({
       'action': 'get_live_streams',
       if (categoryId != null) 'category_id': '$categoryId',
     });
     if (data is! List) throw const FormatException('Unerwartete Live-TV-Antwort.');
+    if (data.isEmpty) return <Channel>[];
+    final categories = await _categoryNames('get_live_categories');
     return data.map((item) {
       final j = item as Map<String, dynamic>;
       final id = '${j['stream_id']}';
@@ -163,12 +164,13 @@ class XtreamService {
   }
 
   Future<List<VodItem>> getVodStreams({int? categoryId}) async {
-    final categories = await _categoryNames('get_vod_categories');
     final data = await _request({
       'action': 'get_vod_streams',
       if (categoryId != null) 'category_id': '$categoryId',
     });
     if (data is! List) throw const FormatException('Unerwartete VOD-Antwort.');
+    if (data.isEmpty) return <VodItem>[];
+    final categories = await _categoryNames('get_vod_categories');
     return data.map((item) {
       final j = item as Map<String, dynamic>;
       final id = '${j['stream_id']}';
@@ -196,12 +198,13 @@ class XtreamService {
   /// Loads only the series catalog. Fetching every series' episodes here would
   /// make large IPTV imports require thousands of sequential HTTP requests.
   Future<List<Series>> getSeries({int? categoryId}) async {
-    final categories = await _categoryNames('get_series_categories');
     final data = await _request({
       'action': 'get_series',
       if (categoryId != null) 'category_id': '$categoryId',
     });
     if (data is! List) throw const FormatException('Unerwartete Serien-Antwort.');
+    if (data.isEmpty) return <Series>[];
+    final categories = await _categoryNames('get_series_categories');
     return data.map<Series>((item) {
       if (item is! Map) throw const FormatException('Ungültiger Serieneintrag.');
       final j = Map<String, dynamic>.from(item);
