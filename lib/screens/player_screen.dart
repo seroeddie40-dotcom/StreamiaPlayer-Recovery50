@@ -1398,11 +1398,48 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (state.isBusy) {
       await RecordingService.stop();
       if (!mounted) return;
-      final updated = RecordingService.status.value;
-      if (updated.phase == RecordingPhase.failed) {
-        _showTrackMessage(updated.error ?? 'Aufnahme konnte nicht gestoppt werden.');
-      } else {
-        _showTrackMessage('Aufnahme wird beendet …');
+      _showTrackMessage('Aufnahme wird beendet …');
+
+      // The Android recorder closes its file asynchronously. Export only
+      // after the service reports that writing has finished.
+      RecordingStatus finished = RecordingService.status.value;
+      var stopped = false;
+      for (var attempt = 0; attempt < 40; attempt++) {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        finished = await RecordingService.refreshStatus();
+        if (!mounted) return;
+        if (!finished.isBusy && !finished.writing) {
+          stopped = true;
+          break;
+        }
+      }
+      if (!mounted) return;
+      if (!stopped) {
+        _showTrackMessage(
+          'Aufnahme wird noch beendet. Bitte Status prüfen.',
+        );
+        return;
+      }
+      if (finished.error != null && finished.error!.isNotEmpty) {
+        _showTrackMessage(finished.error!);
+      }
+      if (finished.outputPath == null || finished.outputPath!.isEmpty ||
+          finished.bytesWritten <= 0) {
+        _showTrackMessage('Keine gespeicherte Aufnahme zum Exportieren vorhanden.');
+        return;
+      }
+      try {
+        final uri = await RecordingService.exportLastRecording();
+        if (!mounted) return;
+        _showTrackMessage(uri == null
+            ? 'Export abgebrochen. Originalaufnahme bleibt gespeichert.'
+            : 'Aufnahme am gewählten Speicherort gespeichert.');
+      } on PlatformException catch (error) {
+        if (!mounted) return;
+        _showTrackMessage(error.message ?? 'Export nicht möglich. Original bleibt erhalten.');
+      } catch (_) {
+        if (!mounted) return;
+        _showTrackMessage('Export nicht möglich. Original bleibt erhalten.');
       }
       return;
     }
@@ -1412,19 +1449,15 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _showTrackMessage('Keine Stream-Adresse für die Aufnahme vorhanden.');
       return;
     }
-
     final accepted = await RecordingService.start(
       widget.channel?.name ?? _currentTitle,
       streamUrl: url,
     );
     if (!mounted) return;
-    if (!accepted) {
-      _showTrackMessage(
-        RecordingService.status.value.error ?? 'Aufnahme konnte nicht gestartet werden.',
-      );
-    } else {
-      _showTrackMessage('Aufnahmestart angefordert. Bitte Status abwarten.');
-    }
+    _showTrackMessage(accepted
+        ? 'Aufnahmestart angefordert. REC erscheint bei aktiver Aufnahme.'
+        : (RecordingService.status.value.error ??
+            'Aufnahme konnte nicht gestartet werden.'));
   }
 
   String _fmt(Duration d) {
