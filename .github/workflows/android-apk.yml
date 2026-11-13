@@ -59,10 +59,11 @@ jobs:
             -keypass android > "$RUNNER_TEMP/streamia-keystore-info.txt"
           python3 - <<'PY'
           import os, re, sys
-          text = open(os.environ['RUNNER_TEMP'] + '/streamia-keystore-info.txt').read()
+          text = open(os.path.join(os.environ['RUNNER_TEMP'], 'streamia-keystore-info.txt'), encoding='utf-8').read()
           m = re.search(r'^\s*SHA256:\s*([0-9A-Fa-f:]+)\s*$', text, re.M)
-          expected = 'B2:2C:52:AB:21:AD:64:97:55:CF:DD:8F:23:02:C2:A9:CB:5D:AD:C1:34:09:B1:BD:37:3E:94:1C:9F:BB:F8:F2'
-          if not m or m.group(1).upper() != expected:
+          expected = 'B22C52AB21AD649755CFDD8F2302C2A9CB5DADC13409B1BD373E941C9FBBF8F2'
+          actual = re.sub(r'[^0-9A-Fa-f]', '', m.group(1)).upper() if m else None
+          if actual != expected:
               print('::error::Restored keystore fingerprint does not match the permanent Streamia key')
               sys.exit(1)
           print('Permanent Streamia signing key verified:', expected)
@@ -99,11 +100,12 @@ jobs:
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/streamia-apk-signature.txt"
           python3 - <<'PY'
           import os, re, sys
-          text = open(os.environ['RUNNER_TEMP'] + '/streamia-apk-signature.txt').read()
-          m = re.search(r'^Signer #1 certificate SHA-256 digest:\s*([0-9A-Fa-f]+)\s*$', text, re.M)
+          text = open(os.path.join(os.environ['RUNNER_TEMP'], 'streamia-apk-signature.txt'), encoding='utf-8').read()
           expected = 'B22C52AB21AD649755CFDD8F2302C2A9CB5DADC13409B1BD373E941C9FBBF8F2'
-          if not m or m.group(1).upper() != expected:
-              print('::error::APK was signed with the WRONG key. Check android/app/build.gradle(.kts) debug signingConfig.')
+          digests = re.findall(r'^\s*(?:Signer\s*#\d+|V\d+\s+Signer):\s*certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)\s*$', text, re.M | re.I)
+          actual = {re.sub(r'[^0-9A-Fa-f]', '', digest).upper() for digest in digests}
+          if actual != {expected}:
+              print('::error::APK signing certificate mismatch or certificate digest not found. Observed:', sorted(actual))
               sys.exit(1)
           print('APK signing certificate matches the permanent Streamia key.')
           PY
