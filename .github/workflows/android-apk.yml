@@ -1,3 +1,20 @@
+ebdave
+Search
+
+
+Code and config
+Dart viewer
+To open a Dart file, drop it in the box below. It opens straight away, even with no extension or the wrong one. Your browser opens it on your device: nothing is uploaded.
+
+android-debug-apk.yml
+YAML · 4.0 KB · 5 keys
+Another file
+View
+Text
+Bytes
+Details
+
+Wrap lines
 
 name: Streamia Player - Android Debug APK and checks
 
@@ -41,32 +58,33 @@ jobs:
           flutter --version
           flutter doctor -v
 
-      - name: Restore permanent debug signing key
+      - name: Restore and validate permanent debug signing key
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
         run: |
           set -euo pipefail
-
           if [ -z "$DEBUG_KEYSTORE_BASE64" ]; then
             echo "::error::Missing GitHub secret DEBUG_KEYSTORE_BASE64"
             exit 1
           fi
-
           mkdir -p "$HOME/.android"
-
-          printf '%s' "$DEBUG_KEYSTORE_BASE64" \
-            | base64 --decode \
-            > "$HOME/.android/debug.keystore"
-
+          printf '%s' "$DEBUG_KEYSTORE_BASE64" | base64 --decode > "$HOME/.android/debug.keystore"
           chmod 600 "$HOME/.android/debug.keystore"
-
-          keytool -list \
+          keytool -list -v \
             -keystore "$HOME/.android/debug.keystore" \
             -storepass android \
             -alias androiddebugkey \
-            -keypass android > /dev/null
-
-          echo "Permanent debug signing key restored."
+            -keypass android > "$RUNNER_TEMP/streamia-keystore-info.txt"
+          python3 - <<'PY'
+          import os, re, sys
+          text = open(os.environ['RUNNER_TEMP'] + '/streamia-keystore-info.txt').read()
+          m = re.search(r'^\s*SHA256:\s*([0-9A-Fa-f:]+)\s*$', text, re.M)
+          expected = 'B2:2C:52:AB:21:AD:64:97:55:CF:DD:8F:23:02:C2:A9:CB:5D:AD:C1:34:09:B1:BD:37:3E:94:1C:9F:BB:F8:F2'
+          if not m or m.group(1).upper() != expected:
+              print('::error::Restored keystore fingerprint does not match the permanent Streamia key')
+              sys.exit(1)
+          print('Permanent Streamia signing key verified:', expected)
+          PY
 
       - name: Validate Android project
         run: |
@@ -89,16 +107,25 @@ jobs:
             --debug \
             --build-number=${{ github.run_number }}
 
-      - name: Verify APK
+      - name: Verify APK signature matches permanent key
         run: |
-          test -s build/app/outputs/flutter-apk/app-debug.apk
-
-          ls -lh \
-            build/app/outputs/flutter-apk/app-debug.apk
-
-          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" \
-            verify --verbose \
-            build/app/outputs/flutter-apk/app-debug.apk
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-debug.apk
+          test -s "$APK"
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/streamia-apk-signature.txt"
+          python3 - <<'PY'
+          import os, re, sys
+          text = open(os.environ['RUNNER_TEMP'] + '/streamia-apk-signature.txt').read()
+          m = re.search(r'^Signer #1 certificate SHA-256 digest:\s*([0-9A-Fa-f]+)\s*$', text, re.M)
+          expected = 'B22C52AB21AD649755CFDD8F2302C2A9CB5DADC13409B1BD373E941C9FBBF8F2'
+          if not m or m.group(1).upper() != expected:
+              print('::error::APK was signed with the WRONG key. Check android/app/build.gradle(.kts) debug signingConfig.')
+              sys.exit(1)
+          print('APK signing certificate matches the permanent Streamia key.')
+          PY
+          ls -lh "$APK"
 
       - name: Upload Streamia Player APK
         uses: actions/upload-artifact@v4
