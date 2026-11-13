@@ -406,6 +406,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         return KeyEventResult.ignored;
       }
       if (_streamFailed || _reconnecting) return KeyEventResult.ignored;
+      // Live TV must never be paused by OK. Open its channel/category
+      // navigation instead; the recording control remains accessible.
+      if (widget.isLive) {
+        _openNavigationDrawer();
+        return KeyEventResult.handled;
+      }
       _playing ? _player.pause() : _player.play();
       setState(() => _showControls = true);
       _startHideTimer();
@@ -473,6 +479,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
           child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () {
+            // Touch opens the Live TV controls (channels, categories,
+            // recording). A second tap may hide them, but not a drawer.
+            if (_showDrawer || _showHistory) return;
             setState(() => _showControls = !_showControls);
             if (_showControls) _startHideTimer();
           },
