@@ -52,6 +52,7 @@ class AuthProvider extends ChangeNotifier {
 
   SupabaseClient? get _client => SupabaseConfig.isConfigured ? Supabase.instance.client : null;
   User? get user => _client?.auth.currentUser;
+  bool get isInitializing => _checkingConfirmation;
   bool get isLoggedIn => !_checkingConfirmation && !_emailConfirmationSuccess && user != null;
   bool get isBusy => _busy;
   bool get loadingDevices => _loadingDevices;
@@ -285,7 +286,7 @@ class AuthProvider extends ChangeNotifier {
 
   // Replace a previous active installation only after explicit user confirmation.
   // The server enforces account ownership, active entitlement, blocked-device
-  // protection and a 24-hour cooldown. Trial timestamps are never changed.
+  // protection. Trial timestamps are never changed.
   Future<void> replaceActiveDevice(String oldDeviceId) async {
     if (_busy) return;
     final client = _client;
