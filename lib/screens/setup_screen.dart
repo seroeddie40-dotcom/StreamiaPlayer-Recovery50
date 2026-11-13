@@ -23,7 +23,6 @@ import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
 import '../widgets/voice_input_field.dart';
 import '../widgets/tv_text_keyboard.dart';
-import 'dashboard_screen.dart';
 
 class SetupScreen extends StatefulWidget {
   final bool returnToPreviousOnSuccess;
@@ -317,10 +316,6 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       );
       if (widget.returnToPreviousOnSuccess) {
         Navigator.of(context).pop(true);
-      } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
-        );
       }
     } catch (e) {
       _showError(_copy('Die M3U-Datei konnte nicht gelesen oder gespeichert werden.',
@@ -392,10 +387,6 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       );
       if (widget.returnToPreviousOnSuccess) {
         Navigator.of(context).pop(true);
-      } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
-        );
       }
     } catch (e) {
       _showError(_copy('Fehler beim Laden oder Speichern der Playlist.',
@@ -468,10 +459,6 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       context.read<ContentProvider>().setLoaded(true);
       if (widget.returnToPreviousOnSuccess) {
         Navigator.of(context).pop(true);
-      } else {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const DashboardScreen()),
-        );
       }
     } catch (e) {
       if (mounted) {
