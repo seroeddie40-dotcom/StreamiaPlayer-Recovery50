@@ -50,27 +50,18 @@ class _SeriesScreenState extends State<SeriesScreen> {
   Widget build(BuildContext context) {
     final all = context.watch<ContentProvider>().series;
     final lang = context.watch<LocaleProvider>().locale.languageCode;
-    final genres = <String>{};
-    for (final item in all) {
-      final value = item.genre?.trim();
-      if (value != null && value.isNotEmpty) {
-        for (final part in value.split(RegExp(r'[,/|]'))) {
-          if (part.trim().isNotEmpty) genres.add(part.trim());
-        }
-      }
-    }
-    final categories = genres.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    // Keep Xtream category labels intact. Separators may be part of a name.
     final categoryCounts = <String, int>{};
     for (final item in all) {
-      for (final part in (item.genre ?? '').split(RegExp(r'[,/|]'))) {
-        final key = part.trim();
-        if (key.isNotEmpty) categoryCounts[key] = (categoryCounts[key] ?? 0) + 1;
+      final category = item.genre?.trim() ?? '';
+      if (category.isNotEmpty) {
+        categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
       }
     }
+    final categories = categoryCounts.keys.toList(growable: false);
     final selected = categories.contains(_category) ? _category : null;
     final filtered = all.where((item) {
-      final inCategory = selected == null ||
-          (item.genre ?? '').split(RegExp(r'[,/|]')).any((g) => g.trim() == selected);
+      final inCategory = selected == null || item.genre?.trim() == selected;
       return inCategory && item.title.toLowerCase().contains(_query.trim().toLowerCase());
     }).toList(growable: false);
     final width = MediaQuery.sizeOf(context).width;
@@ -91,7 +82,10 @@ class _SeriesScreenState extends State<SeriesScreen> {
         for (final category in categories)
           ListTile(
             selected: selected == category,
-            title: Tooltip(message: category, child: Text(category, maxLines: 1, overflow: TextOverflow.ellipsis)),
+            title: Tooltip(
+              message: category,
+              child: Text(category, softWrap: true),
+            ),
             trailing: Text('${categoryCounts[category] ?? 0}'),
             onTap: () {
               setState(() => _category = category);
