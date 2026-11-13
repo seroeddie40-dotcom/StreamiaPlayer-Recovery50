@@ -367,23 +367,20 @@ class _AccessStatusScreenState extends State<_AccessStatusScreen> {
     switch (widget.mode) {
       case _AccessStatusMode.pending:
         title = isTurkish
-            ? 'Cihaz onayı bekleniyor'
+            ? 'Cihaz erişimi kontrolü'
             : isGerman
-                ? 'Gerätefreigabe ausstehend'
-                : 'Device approval pending';
+                ? 'Geräteplatz prüfen'
+                : 'Checking device slot';
 
         description = isTurkish
-            ? 'Bu cihaz kaydedildi ancak henüz '
-              'onaylanmadı. Onaydan sonra tekrar '
-              'kontrol edin.'
+            ? 'Bu kurulum için henüz boş cihaz hakkı yok. '
+              'Limit doluysa aşağıdan eski cihazınızı değiştirebilirsiniz.'
             : isGerman
-                ? 'Dieses Gerät wurde registriert, '
-                  'ist aber noch nicht freigegeben. '
-                  'Nach der Freigabe kannst du den '
-                  'Status erneut prüfen.'
-                : 'This device is registered but '
-                  'not yet approved. Check again '
-                  'after approval.';
+                ? 'Für diese Installation ist noch kein Geräteplatz frei. '
+                  'Falls dein Kontingent bereits belegt ist, kannst du '
+                  'unten ein bisheriges Gerät ersetzen.'
+                : 'No device slot is available for this installation yet. '
+                  'If your limit is reached, you can replace an older device below.';
 
         symbol = Icons.hourglass_top_rounded;
         break;
@@ -468,35 +465,15 @@ class _AccessStatusScreenState extends State<_AccessStatusScreen> {
                     ),
                   ),
 
-                  if (auth.deviceId != null) ...[
-                    const SizedBox(height: 20),
-
-                    const Text(
-                      'Device ID',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-
-                    const SizedBox(height: 6),
-
-                    SelectableText(
-                      auth.deviceId!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-
                   if (widget.mode == _AccessStatusMode.pending &&
-                      auth.hasAccountAccess) ...[
+                      auth.hasAccountAccess && auth.maxDevices > 0 &&
+                      (auth.loadingDevices || auth.deviceListError != null ||
+                       auth.activeDevices.length >= auth.maxDevices)) ...[
                     const SizedBox(height: 24),
                     Text(
-                      isTurkish ? 'Kayıtlı cihazlarınız'
-                          : isGerman ? 'Deine aktiven Geräte'
-                          : 'Your active devices',
+                      isTurkish ? 'Hangi cihazı değiştirmek istiyorsunuz?'
+                          : isGerman ? 'Welches Gerät möchtest du ersetzen?'
+                          : 'Which device would you like to replace?',
                       style: const TextStyle(
                         fontSize: 18, fontWeight: FontWeight.bold),
                     ),
@@ -551,7 +528,7 @@ class _AccessStatusScreenState extends State<_AccessStatusScreen> {
                       isTurkish
                           ? 'Cihaz değişimi hesap sahibi tarafından onaylanır. 24 saatlik sınır geçerlidir.'
                           : isGerman
-                              ? 'Du entscheidest, welches Gerät ersetzt wird. Pro 24 Stunden ist ein Wechsel möglich.'
+                              ? 'Nur das ausgewählte Gerät wird abgemeldet. Ein weiterer Wechsel ist erst nach 24 Stunden möglich.'
                               : 'Choose which device to replace. One replacement is allowed every 24 hours.',
                       textAlign: TextAlign.center,
                     ),
