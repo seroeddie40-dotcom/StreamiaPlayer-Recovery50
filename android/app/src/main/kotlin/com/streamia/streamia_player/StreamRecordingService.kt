@@ -1,298 +1,259 @@
-import 'dart:async';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
+package com.streamia.streamia_player
 
-enum RecordingPhase { idle, starting, recording, stopping, failed }
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Intent
+import android.os.Build
+import android.os.IBinder
+import android.os.SystemClock
+import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.concurrent.atomic.AtomicBoolean
 
-class RecordingStatus {
-  final RecordingPhase phase;
-  final bool active;
-  final bool writing;
-  final int bytesWritten;
-  final Duration elapsed;
-  final String? outputPath;
-  final String? error;
+class StreamRecordingService : Service() {
 
-  const RecordingStatus({
-    required this.phase,
-    required this.active,
-    required this.writing,
-    required this.bytesWritten,
-    required this.elapsed,
-    this.outputPath,
-    this.error,
-  });
+    companion object {
+        const val ACTION_START = "com.streamia.recording.START"
+        const val ACTION_STOP = "com.streamia.recording.STOP"
+        const val EXTRA_URL = "streamUrl"
+        const val EXTRA_NAME = "channelName"
 
-  bool get isRecording => phase == RecordingPhase.recording;
-  bool get isBusy => active ||
-      phase == RecordingPhase.starting ||
-      phase == RecordingPhase.stopping;
-}
+        private const val NOTIFICATION_ID = 2401
+        private const val CHANNEL_ID = "streamia_recordings"
 
-class RecordingService {
-  static const MethodChannel _channel =
-      MethodChannel('com.streamia/recording');
-  static const Duration _startLimit = Duration(seconds: 50);
-  static const Duration _stopLimit = Duration(seconds: 40);
+        private val busy = AtomicBoolean(false)
+        private val writing = AtomicBoolean(false)
+        private val stopRequested = AtomicBoolean(false)
 
-  static final ValueNotifier<RecordingStatus> status =
-      ValueNotifier<RecordingStatus>(
-    const RecordingStatus(
-      phase: RecordingPhase.idle,
-      active: false,
-      writing: false,
-      bytesWritten: 0,
-      elapsed: Duration.zero,
-    ),
-  );
+        @Volatile var bytesWritten: Long = 0L
+            private set
+        @Volatile var startedAt: Long = 0L
+            private set
+        @Volatile var lastError: String? = null
+            private set
+        @Volatile var outputPath: String? = null
+            private set
 
-  static Timer? _statusTimer;
-  static DateTime? _startRequestedAt;
-  static DateTime? _stopRequestedAt;
-  static bool _requestInProgress = false;
-  static bool _pollInProgress = false;
-  static bool _awaitingNativeStart = false;
-  static bool _stopSent = false;
-
-  static bool get isActive => status.value.isBusy;
-
-  static Future<bool> start(
-    String channelName, {
-    required String streamUrl,
-  }) async {
-    if (_requestInProgress || status.value.isBusy) return false;
-    await refreshStatus();
-    if (_requestInProgress || status.value.isBusy) return false;
-    if (streamUrl.trim().isEmpty) {
-      _setFailure('Keine Stream-Adresse vorhanden.');
-      return false;
+        val isRecording: Boolean get() = busy.get()
+        val isWriting: Boolean get() = writing.get()
     }
 
-    _requestInProgress = true;
-    _awaitingNativeStart = true;
-    _stopSent = false;
-    _stopRequestedAt = null;
-    _startRequestedAt = DateTime.now();
-    status.value = const RecordingStatus(
-      phase: RecordingPhase.starting,
-      active: true,
-      writing: false,
-      bytesWritten: 0,
-      elapsed: Duration.zero,
-    );
+    @Volatile private var connection: HttpURLConnection? = null
+    @Volatile private var worker: Thread? = null
+    @Volatile private var latestStartId: Int = 0
 
-    try {
-      final accepted = await _channel.invokeMethod<bool>(
-        'startRecording',
-        {'streamUrl': streamUrl, 'channelName': channelName},
-      );
-      if (accepted != true) {
-        _awaitingNativeStart = false;
-        _startRequestedAt = null;
-        _setFailure('Android hat den Aufnahmestart abgelehnt.');
-        return false;
-      }
-      _startMonitoring();
-      return true;
-    } on PlatformException catch (error) {
-      _awaitingNativeStart = false;
-      _startRequestedAt = null;
-      if (error.code == 'ALREADY_RECORDING') {
-        await refreshStatus();
-      } else {
-        _setFailure('Der Aufnahmedienst konnte nicht gestartet werden.');
-      }
-      return false;
-    } on MissingPluginException {
-      _awaitingNativeStart = false;
-      _startRequestedAt = null;
-      _setFailure('Die native Aufnahmefunktion ist nicht verfügbar.');
-      return false;
-    } catch (_) {
-      _awaitingNativeStart = false;
-      _startRequestedAt = null;
-      _setFailure('Aufnahme konnte nicht gestartet werden.');
-      return false;
-    } finally {
-      _requestInProgress = false;
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
     }
-  }
 
-  static Future<void> stop() async {
-    if (_requestInProgress || _stopSent) return;
-    _requestInProgress = true;
-    _stopSent = true;
-    _awaitingNativeStart = false;
-    _startRequestedAt = null;
-    _stopRequestedAt = DateTime.now();
-    final previous = status.value;
-    status.value = RecordingStatus(
-      phase: RecordingPhase.stopping,
-      active: true,
-      writing: previous.writing,
-      bytesWritten: previous.bytesWritten,
-      elapsed: previous.elapsed,
-      outputPath: previous.outputPath,
-    );
-    try {
-      final accepted = await _channel.invokeMethod<bool>('stopRecording');
-      if (accepted != true) {
-        _stopSent = false;
-        _stopRequestedAt = null;
-        _setFailure('Android hat den Aufnahmestopp abgelehnt.');
-        return;
-      }
-      _startMonitoring();
-    } catch (_) {
-      _stopSent = false;
-      _stopRequestedAt = null;
-      _setFailure('Aufnahme konnte nicht gestoppt werden.');
-    } finally {
-      _requestInProgress = false;
-    }
-  }
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestStartId = startId
+        when (intent?.action) {
+            ACTION_STOP -> {
+                stopRequested.set(true)
+                connection?.disconnect()
+                worker?.interrupt()
+                if (!busy.get()) stopSelfResult(startId)
+                return START_NOT_STICKY
+            }
+            ACTION_START -> {
+                if (!busy.compareAndSet(false, true)) {
+                    // A duplicate start must never stop the existing recording.
+                    return START_NOT_STICKY
+                }
 
-  /// Opens Android's system file picker to save the last finished recording.
-  /// Returns the selected document URI, or null if the user cancels.
-  /// The original file is retained even if export fails.
-  static Future<String?> exportLastRecording() async {
-    final current = await refreshStatus();
-    if (current.isBusy) {
-      throw StateError('Bitte zuerst die Aufnahme vollständig stoppen.');
-    }
-    return _channel.invokeMethod<String>('exportRecording');
-  }
+                val url = intent.getStringExtra(EXTRA_URL)
+                val channelName = intent.getStringExtra(EXTRA_NAME) ?: "Live_TV"
+                stopRequested.set(false)
+                writing.set(false)
+                bytesWritten = 0L
+                startedAt = 0L
+                outputPath = null
+                lastError = null
 
-  static Future<RecordingStatus> refreshStatus() async {
-    if (_pollInProgress) return status.value;
-    _pollInProgress = true;
-    try {
-      final raw = await _channel.invokeMapMethod<String, dynamic>(
-        'getRecordingStatus',
-      );
-      if (raw == null) return status.value;
+                if (url.isNullOrBlank()) {
+                    lastError = "Keine Stream-Adresse vorhanden."
+                    busy.set(false)
+                    stopSelfResult(startId)
+                    return START_NOT_STICKY
+                }
 
-      final nativeActive = raw['active'] == true;
-      final writing = raw['writing'] == true;
-      final bytes = (raw['bytesWritten'] as num?)?.toInt() ?? 0;
-      final elapsedMs = (raw['elapsedMs'] as num?)?.toInt() ?? 0;
-      final path = raw['outputPath'] as String?;
-      final error = raw['error'] as String?;
-      final previous = status.value;
-      final now = DateTime.now();
+                try {
+                    startForeground(NOTIFICATION_ID, buildNotification(channelName))
+                } catch (_: Exception) {
+                    lastError = "Der Vordergrunddienst konnte nicht gestartet werden."
+                    busy.set(false)
+                    stopSelfResult(startId)
+                    return START_NOT_STICKY
+                }
 
-      if (_awaitingNativeStart && nativeActive) {
-        _awaitingNativeStart = false;
-      }
-      if (writing) _startRequestedAt = null;
-
-      // A start request is asynchronous. Wait briefly for Android to
-      // receive it, but never keep the UI in 'starting' forever.
-      final startTimedOut = _startRequestedAt != null &&
-          now.difference(_startRequestedAt!) >= _startLimit &&
-          !writing && !_stopSent;
-      if (startTimedOut) {
-        _awaitingNativeStart = false;
-        _startRequestedAt = null;
-        // Do not issue a second native start. Request cancellation.
-        if (!_requestInProgress) {
-          unawaited(stop());
+                val thread = Thread {
+                    try {
+                        recordStream(url, channelName)
+                    } finally {
+                        writing.set(false)
+                        busy.set(false)
+                        worker = null
+                        // Stop only after the output stream has been closed.
+                        // A stop command may have arrived while the worker ran.
+                        stopSelfResult(latestStartId)
+                    }
+                }
+                thread.name = "StreamiaRecorder"
+                worker = thread
+                thread.start()
+                return START_NOT_STICKY
+            }
         }
-      }
+        return START_NOT_STICKY
+    }
 
-      final stopTimedOut = _stopSent &&
-          _stopRequestedAt != null &&
-          now.difference(_stopRequestedAt!) >= _stopLimit;
+    private fun recordStream(streamUrl: String, channelName: String) {
+        var outputFile: File? = null
+        try {
+            val url = URL(streamUrl)
+            require(url.protocol == "http" || url.protocol == "https") {
+                "Nur HTTP(S)-Streams werden unterstützt."
+            }
+            require(!url.path.lowercase().endsWith(".m3u8")) {
+                "HLS-Aufnahmen werden noch nicht unterstützt."
+            }
+            if (stopRequested.get()) return
 
-      RecordingPhase phase;
-      String? displayedError = error;
-      bool active = nativeActive || _awaitingNativeStart;
+            val http = url.openConnection() as HttpURLConnection
+            connection = http
+            http.connectTimeout = 15000
+            http.readTimeout = 30000
+            http.instanceFollowRedirects = true
+            http.setRequestProperty("User-Agent", "StreamiaPlayer/1.0")
+            http.connect()
+            if (stopRequested.get()) return
+            require(http.responseCode in 200..299) {
+                "Der Stream konnte nicht geöffnet werden."
+            }
+            val contentType = http.contentType?.lowercase() ?: ""
+            require(!contentType.contains("mpegurl") &&
+                !contentType.contains("application/vnd.apple")) {
+                "HLS-Playlists werden noch nicht unterstützt."
+            }
 
-      if (stopTimedOut) {
-        phase = RecordingPhase.failed;
-        displayedError = 'Aufnahmestopp dauert zu lange. Bitte Android prüfen.';
-        // Do not claim the native service has stopped.
-        active = nativeActive;
-        _stopSent = false;
-        _stopRequestedAt = null;
-      } else if (_stopSent) {
-        if (nativeActive) {
-          phase = RecordingPhase.stopping;
-          active = true;
+            val directory = File(getExternalFilesDir(null) ?: filesDir, "recordings")
+            require(directory.exists() || directory.mkdirs()) {
+                "Aufnahmeordner konnte nicht erstellt werden."
+            }
+            val safeName = channelName
+                .replace(Regex("[^A-Za-z0-9_-]"), "_")
+                .take(60)
+                .ifBlank { "Live_TV" }
+            outputFile = File.createTempFile("${safeName}_", ".ts", directory)
+
+            http.inputStream.use { input ->
+                val header = ByteArray(188 * 3)
+                var received = 0
+                while (received < header.size && !stopRequested.get()) {
+                    val count = input.read(header, received, header.size - received)
+                    if (count < 0) break
+                    if (count == 0) continue
+                    received += count
+                }
+                if (stopRequested.get()) return
+                require(received >= 188 * 2) {
+                    "Zu wenige Streamdaten empfangen."
+                }
+                require(header[0] == 0x47.toByte() &&
+                    header[188] == 0x47.toByte()) {
+                    "Kein direktes MPEG-TS-Format erkannt."
+                }
+
+                outputFile.outputStream().buffered().use { output ->
+                    if (stopRequested.get()) return
+                    output.write(header, 0, received)
+                    bytesWritten = received.toLong()
+                    startedAt = SystemClock.elapsedRealtime()
+                    outputPath = outputFile.absolutePath
+                    writing.set(true)
+
+                    val buffer = ByteArray(64 * 1024)
+                    while (!stopRequested.get()) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        if (count == 0) continue
+                        output.write(buffer, 0, count)
+                        bytesWritten += count.toLong()
+                    }
+                    output.flush()
+                }
+            }
+            if (!stopRequested.get()) lastError = "Der Stream wurde beendet."
+        } catch (error: Exception) {
+            if (!stopRequested.get()) {
+                lastError = if (error is IllegalArgumentException) {
+                    error.message ?: "Streamformat nicht unterstützt."
+                } else {
+                    "Aufnahme durch Netzwerk- oder Speicherfehler beendet."
+                }
+            }
+        } finally {
+            writing.set(false)
+            connection?.disconnect()
+            connection = null
+            if (bytesWritten == 0L) {
+                outputFile?.delete()
+                outputPath = null
+            }
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID, "Streamia Aufnahmen", NotificationManager.IMPORTANCE_LOW
+            )
+            channel.description = "Status laufender Live-TV-Aufnahmen"
+            getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(channel)
+        }
+    }
+
+    private fun buildNotification(channelName: String): Notification {
+        val stopIntent = Intent(this, StreamRecordingService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val pendingFlags = PendingIntent.FLAG_UPDATE_CURRENT or
+            (if (Build.VERSION.SDK_INT >= 23) PendingIntent.FLAG_IMMUTABLE else 0)
+        val stopPendingIntent = PendingIntent.getService(
+            this, 0, stopIntent, pendingFlags
+        )
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, CHANNEL_ID)
         } else {
-          phase = (error != null && error.isNotEmpty)
-              ? RecordingPhase.failed
-              : RecordingPhase.idle;
-          _stopSent = false;
-          _stopRequestedAt = null;
-          active = false;
+            Notification.Builder(this)
         }
-      } else if (nativeActive) {
-        phase = writing ? RecordingPhase.recording : RecordingPhase.starting;
-      } else if (_awaitingNativeStart) {
-        phase = RecordingPhase.starting;
-      } else if (error != null && error.isNotEmpty) {
-        phase = RecordingPhase.failed;
-      } else {
-        phase = RecordingPhase.idle;
-      }
-
-      // Preserve an error until the next explicit start or a native
-      // recording is confirmed; do not silently erase failures.
-      if (previous.phase == RecordingPhase.failed &&
-          !nativeActive && !writing && displayedError == null) {
-        phase = RecordingPhase.failed;
-        displayedError = previous.error;
-      }
-
-      final updated = RecordingStatus(
-        phase: phase,
-        active: active,
-        writing: writing,
-        bytesWritten: bytes,
-        elapsed: Duration(milliseconds: elapsedMs < 0 ? 0 : elapsedMs),
-        outputPath: path,
-        error: displayedError,
-      );
-      status.value = updated;
-      if (!updated.isBusy) {
-        _statusTimer?.cancel();
-        _statusTimer = null;
-      }
-      return updated;
-    } catch (_) {
-      return status.value;
-    } finally {
-      _pollInProgress = false;
+        return builder
+            .setContentTitle("Streamia Player")
+            .setContentText("Live-TV-Aufnahme: $channelName")
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setOngoing(true)
+            .addAction(
+                android.R.drawable.ic_media_pause,
+                "Aufnahme stoppen",
+                stopPendingIntent
+            )
+            .build()
     }
-  }
 
-  static void _startMonitoring() {
-    _statusTimer?.cancel();
-    _statusTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => unawaited(refreshStatus()),
-    );
-  }
-
-  static void _setFailure(String message) {
-    _statusTimer?.cancel();
-    _statusTimer = null;
-    final previous = status.value;
-    status.value = RecordingStatus(
-      phase: RecordingPhase.failed,
-      active: false,
-      writing: false,
-      bytesWritten: previous.bytesWritten,
-      elapsed: previous.elapsed,
-      outputPath: previous.outputPath,
-      error: message,
-    );
-  }
-
-  static void disposeMonitoring() {
-    _statusTimer?.cancel();
-    _statusTimer = null;
-  }
+    override fun onDestroy() {
+        stopRequested.set(true)
+        connection?.disconnect()
+        worker?.interrupt()
+        super.onDestroy()
+    }
 }
