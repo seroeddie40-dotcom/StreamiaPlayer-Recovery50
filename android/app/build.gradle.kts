@@ -1,3 +1,4 @@
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -22,12 +23,43 @@ android {
         versionName = flutter.versionName
     }
 
-    // Release-Signatur niemals stillschweigend durch den Debug-Schlüssel ersetzen.
-    val signingVars = listOf("KEYSTORE_PASSWORD", "KEY_ALIAS", "KEY_PASSWORD")
-    val hasReleaseSigning = signingVars.all { !System.getenv(it).isNullOrBlank() } &&
-        file("upload-keystore.jks").isFile
+    // Permanent debug key restored by GitHub Actions.
+    val permanentDebugKeystore = file(
+        "${System.getProperty("user.home")}/.android/debug.keystore"
+    )
+
+    val isDebugBuildRequested =
+        gradle.startParameter.taskNames.any { task ->
+            task.contains("debug", ignoreCase = true)
+        }
+
+    if (isDebugBuildRequested) {
+        require(permanentDebugKeystore.isFile) {
+            "Permanent debug keystore missing: $permanentDebugKeystore. " +
+                "Restore the Streamia signing key before building a debug APK."
+        }
+    }
+
+    // Keep release signing strictly separate.
+    val signingVars = listOf(
+        "KEYSTORE_PASSWORD",
+        "KEY_ALIAS",
+        "KEY_PASSWORD"
+    )
+
+    val hasReleaseSigning =
+        signingVars.all {
+            !System.getenv(it).isNullOrBlank()
+        } && file("upload-keystore.jks").isFile
 
     signingConfigs {
+        getByName("debug") {
+            storeFile = permanentDebugKeystore
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = file("upload-keystore.jks")
@@ -39,12 +71,16 @@ android {
     }
 
     buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs.getByName("debug")
+        }
+
         release {
-            // Ohne konfigurierte Signatur bleibt der Release-Build UNSIGNIERT.
-            // Für lokale Installation: `flutter build apk --debug` verwenden.
             if (hasReleaseSigning) {
-                signingConfig = signingConfigs.getByName("release")
+                signingConfig =
+                    signingConfigs.getByName("release")
             }
+
             isMinifyEnabled = false
             isShrinkResources = false
         }
@@ -53,7 +89,9 @@ android {
 
 kotlin {
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        jvmTarget.set(
+            org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        )
     }
 }
 
