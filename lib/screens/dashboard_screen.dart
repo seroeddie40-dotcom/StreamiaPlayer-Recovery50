@@ -472,8 +472,6 @@ class _PremiumTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final dark = Theme.of(context).brightness == Brightness.dark;
-
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -483,12 +481,10 @@ class _PremiumTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         child: Ink(
           decoration: BoxDecoration(
-            color: dark
-                ? AppTheme.darkSurface
-                : AppTheme.lightSurface,
+            color: AppTheme.darkSurface,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: AppTheme.electricBlue.withOpacity(0.25),
+              color: AppTheme.electricBlue.withOpacity(0.45),
             ),
           ),
           child: Padding(
@@ -519,12 +515,14 @@ class _PremiumTile extends StatelessWidget {
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
+                          color: Colors.white,
                         ),
                       ),
                     ),
                     const SizedBox(width: 6),
                     const Icon(
                       Icons.arrow_forward_ios_rounded,
+                      color: Colors.white,
                       size: 14,
                     ),
                   ],
