@@ -268,23 +268,23 @@ class _AccessStatusScreenState extends State<_AccessStatusScreen> {
   bool _replacing = false;
   String? _replacementError;
 
-  String _deviceErrorMessage(Object error, String language) {
+  String _replacementMessage(Object error, String language) {
     final raw = error.toString().toLowerCase();
     if (raw.contains('once per 24 hours') ||
-        raw.contains('replacement') && raw.contains('24 hour')) {
+        raw.contains('device_replacement_cooldown')) {
       const messages = <String, String>{
-        'de': 'Du hast innerhalb der letzten 24 Stunden bereits ein Gerät ersetzt. Bitte versuche es später erneut. Deine Testzeit bleibt unverändert.',
-        'tr': 'Son 24 saat içinde bir cihaz değiştirdiniz. Lütfen daha sonra tekrar deneyin. Deneme süreniz değişmez.',
-        'en': 'A device was already replaced within the last 24 hours. Please try again later. Your trial period is unchanged.',
+        'de': 'Ein Gerätewechsel wurde innerhalb der letzten 24 Stunden durchgeführt. Bitte versuche es später erneut. Deine Testzeit bleibt unverändert.',
+        'tr': 'Son 24 saat içinde bir cihaz değiştirildi. Lütfen daha sonra tekrar deneyin. Deneme süreniz değişmez.',
+        'en': 'A device was replaced within the last 24 hours. Please try again later. Your trial period is unchanged.',
         'ru': 'За последние 24 часа устройство уже заменяли. Повторите попытку позже. Пробный период не изменится.',
-        'pl': 'Urządzenie zostało już wymienione w ciągu ostatnich 24 godzin. Spróbuj ponownie później. Okres próbny nie ulegnie zmianie.',
+        'pl': 'W ciągu ostatnich 24 godzin wymieniono już urządzenie. Spróbuj ponownie później. Okres próbny nie ulegnie zmianie.',
         'es': 'Ya se sustituyó un dispositivo en las últimas 24 horas. Inténtalo más tarde. Tu periodo de prueba no cambia.',
         'fr': 'Un appareil a déjà été remplacé au cours des dernières 24 heures. Réessayez plus tard. Votre période d’essai reste inchangée.',
         'ar': 'تم استبدال جهاز خلال آخر 24 ساعة. يُرجى المحاولة لاحقًا. لن تتغير فترة التجربة.',
       };
       return messages[language] ?? messages['en']!;
     }
-    const generic = <String, String>{
+    const messages = <String, String>{
       'de': 'Der Gerätewechsel konnte nicht abgeschlossen werden. Bitte aktualisiere die Geräteliste und versuche es erneut.',
       'tr': 'Cihaz değişimi tamamlanamadı. Lütfen cihaz listesini yenileyip tekrar deneyin.',
       'en': 'Device replacement could not be completed. Refresh the device list and try again.',
@@ -294,7 +294,7 @@ class _AccessStatusScreenState extends State<_AccessStatusScreen> {
       'fr': 'Impossible de remplacer l’appareil. Actualisez la liste et réessayez.',
       'ar': 'تعذر استبدال الجهاز. حدّث قائمة الأجهزة وحاول مرة أخرى.',
     };
-    return generic[language] ?? generic['en']!;
+    return messages[language] ?? messages['en']!;
   }
 
   Future<void> _confirmReplacement(Map<String, dynamic> device) async {
@@ -332,7 +332,7 @@ class _AccessStatusScreenState extends State<_AccessStatusScreen> {
     try {
       await context.read<AuthProvider>().replaceActiveDevice(device['device_id'].toString());
     } catch (e) {
-      if (mounted) setState(() => _replacementError = _deviceErrorMessage(e, language));
+      if (mounted) setState(() => _replacementError = _replacementMessage(e, context.read<LocaleProvider>().locale.languageCode));
     } finally {
       if (mounted) setState(() => _replacing = false);
     }
@@ -373,9 +373,9 @@ class _AccessStatusScreenState extends State<_AccessStatusScreen> {
                 : 'Device replacement required';
 
         description = isTurkish
-            ? 'Bu hesapta cihaz sınırına ulaşıldı. Önceki cihazınızı seçerek bu kuruluma geçebilirsiniz.'
+            ? 'Bu hesapta cihaz sınırına ulaşıldı. Önceki cihazınızı seçerek bu kurulumu etkinleştirebilirsiniz.'
             : isGerman
-                ? 'Für dieses Konto sind alle Geräteplätze belegt. Wähle dein bisheriges Gerät aus, um diese Installation zu aktivieren.'
+                ? 'Alle Geräteplätze dieses Kontos sind belegt. Wähle dein bisheriges Gerät aus, um diese Installation zu aktivieren.'
                 : 'All device slots for this account are occupied. Select your previous device to activate this installation.';
 
         symbol = Icons.hourglass_top_rounded;
@@ -497,7 +497,7 @@ class _AccessStatusScreenState extends State<_AccessStatusScreen> {
                     if (auth.loadingDevices)
                       const CircularProgressIndicator()
                     else if (auth.deviceListError != null)
-                      SelectableText(_deviceErrorMessage(auth.deviceListError!, language),
+                      SelectableText(_replacementMessage(auth.deviceListError!, language),
                         textAlign: TextAlign.center)
                     else if (auth.activeDevices.isEmpty)
                       Text(isTurkish ? 'Aktif cihaz bulunamadı.'
