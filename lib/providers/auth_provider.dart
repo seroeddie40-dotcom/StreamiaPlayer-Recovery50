@@ -28,6 +28,9 @@ class AuthProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _activeDevices = const [];
   bool _accessChecked = false;
   bool _checkingConfirmation = true;
+  Future<void>? _sessionInspection;
+  Future<void>? _accessRefresh;
+  bool _disposed = false;
   bool _emailConfirmationSuccess = false;
   String? _error;
   bool _registrationSubmitted = false;
@@ -37,18 +40,24 @@ class AuthProvider extends ChangeNotifier {
     _installationId = _prefs.getString(_installKey);
     if (SupabaseConfig.isConfigured) {
       _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((event) {
-        if (event.event == AuthChangeEvent.signedOut) _clearAccess();
-        if (event.event == AuthChangeEvent.signedIn ||
+        if (event.event == AuthChangeEvent.signedOut) {
+          _clearAccess();
+          _checkingConfirmation = false;
+        } else if (event.event == AuthChangeEvent.signedIn ||
             event.event == AuthChangeEvent.initialSession) {
+          // Single-flight: the constructor and Supabase may report the same
+          // restored session. Never start two competing registration RPCs.
           unawaited(_inspectConfirmationAndAccess());
         }
-        notifyListeners();
+        _notify();
       });
       unawaited(_inspectConfirmationAndAccess());
     } else {
       _checkingConfirmation = false;
     }
   }
+
+  void _notify() { if (!_disposed) notifyListeners(); }
 
   SupabaseClient? get _client => SupabaseConfig.isConfigured ? Supabase.instance.client : null;
   User? get user => _client?.auth.currentUser;
@@ -84,11 +93,17 @@ class AuthProvider extends ChangeNotifier {
 
   // The confirmation is tied to the email registered on this installation.
   // Never treat an arbitrary sign-in as a confirmation without a confirmed email.
-  Future<void> _inspectConfirmationAndAccess() async {
+  Future<void> _inspectConfirmationAndAccess() {
+    return _sessionInspection ??= _performSessionInspection().whenComplete(() {
+      _sessionInspection = null;
+    });
+  }
+
+  Future<void> _performSessionInspection() async {
     final client = _client;
     if (client == null) return;
     _checkingConfirmation = true;
-    notifyListeners();
+    _notify();
     try {
       final current = client.auth.currentUser;
       final prefs = await SharedPreferences.getInstance();
@@ -109,13 +124,13 @@ class AuthProvider extends ChangeNotifier {
       _error = _friendlyError(e);
     } finally {
       _checkingConfirmation = false;
-      notifyListeners();
+      _notify();
     }
   }
 
   void dismissEmailConfirmationSuccess() {
     _emailConfirmationSuccess = false;
-    notifyListeners();
+    _notify();
   }
 
   void _clearAccess() {
@@ -190,7 +205,7 @@ class AuthProvider extends ChangeNotifier {
       if (client == null) throw Exception('Supabase ist nicht konfiguriert.');
       _clearAccess();
       await client.auth.signInWithPassword(email: email.trim(), password: password);
-      await refreshDeviceAndAccess();
+      await _inspectConfirmationAndAccess();
     });
   }
 
@@ -217,15 +232,21 @@ class AuthProvider extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString(_pendingEmailKey, normalizedEmail.toLowerCase());
       }
-      if (response.session != null) await refreshDeviceAndAccess();
+      if (response.session != null) await _inspectConfirmationAndAccess();
     });
   }
 
-  Future<void> refreshDeviceAndAccess() async {
+  Future<void> refreshDeviceAndAccess() {
+    return _accessRefresh ??= _performAccessRefresh().whenComplete(() {
+      _accessRefresh = null;
+    });
+  }
+
+  Future<void> _performAccessRefresh() async {
     final client = _client;
     if (client == null || client.auth.currentUser == null) {
       _clearAccess();
-      notifyListeners();
+      _notify();
       return;
     }
     _accessChecked = false;
@@ -234,7 +255,7 @@ class AuthProvider extends ChangeNotifier {
     _deviceStatus = null;
     _activeDevices = const [];
     _deviceListError = null;
-    notifyListeners();
+    _notify();
     try {
       // Check account access before registering the device. The server is the
       // authority for trial eligibility, expiration, and administrative grants.
@@ -281,7 +302,7 @@ class AuthProvider extends ChangeNotifier {
       _accessChecked = true;
       _error = _friendlyError(e);
     }
-    notifyListeners();
+    _notify();
   }
 
   // Replace a previous active installation only after explicit user confirmation.
@@ -296,7 +317,7 @@ class AuthProvider extends ChangeNotifier {
     }
     _busy = true;
     _deviceListError = null;
-    notifyListeners();
+    _notify();
     try {
       final installationId = await _getInstallationId();
       final response = await client.rpc('replace_my_device_v2', params: {
@@ -317,7 +338,7 @@ class AuthProvider extends ChangeNotifier {
       rethrow;
     } finally {
       _busy = false;
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -328,12 +349,12 @@ class AuthProvider extends ChangeNotifier {
         !devicePending || !hasAccountAccess) {
       _activeDevices = const [];
       _deviceListError = null;
-      notifyListeners();
+      _notify();
       return;
     }
     _loadingDevices = true;
     _deviceListError = null;
-    notifyListeners();
+    _notify();
     try {
       final result = await client.rpc('list_my_active_devices');
       if (result is! List) {
@@ -349,7 +370,7 @@ class AuthProvider extends ChangeNotifier {
       _deviceListError = _friendlyError(e);
     } finally {
       _loadingDevices = false;
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -365,7 +386,7 @@ class AuthProvider extends ChangeNotifier {
     if (_busy) return;
     _busy = true;
     _error = null;
-    notifyListeners();
+    _notify();
     try {
       await action();
     } catch (e) {
@@ -375,7 +396,7 @@ class AuthProvider extends ChangeNotifier {
       _accessChecked = true;
     } finally {
       _busy = false;
-      notifyListeners();
+      _notify();
     }
   }
 
@@ -407,11 +428,12 @@ class AuthProvider extends ChangeNotifier {
     _registrationNeedsConfirmation = false;
     _emailConfirmationSuccess = false;
     _clearAccess();
-    notifyListeners();
+    _notify();
   }
 
   @override
   void dispose() {
+    _disposed = true;
     _authSubscription?.cancel();
     super.dispose();
   }
