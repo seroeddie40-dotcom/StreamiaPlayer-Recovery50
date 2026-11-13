@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -36,7 +37,7 @@ class MainActivity : FlutterActivity() {
         getSharedPreferences(STORAGE_PREFS, MODE_PRIVATE)
     }
 
-    private val exportExecutor =
+    private val ioExecutor =
         Executors.newSingleThreadExecutor()
 
     private var pendingExport: MethodChannel.Result? = null
@@ -87,7 +88,7 @@ class MainActivity : FlutterActivity() {
                 contentResolver.query(
                     uri,
                     arrayOf(
-                        android.provider.OpenableColumns.DISPLAY_NAME
+                        OpenableColumns.DISPLAY_NAME
                     ),
                     null,
                     null,
@@ -95,11 +96,12 @@ class MainActivity : FlutterActivity() {
                 )?.use { cursor ->
                     if (cursor.moveToFirst()) {
                         val index = cursor.getColumnIndex(
-                            android.provider.OpenableColumns.DISPLAY_NAME
+                            OpenableColumns.DISPLAY_NAME
                         )
 
                         if (index >= 0) {
                             val name = cursor.getString(index)
+
                             if (!name.isNullOrBlank()) {
                                 return name
                             }
@@ -140,6 +142,314 @@ class MainActivity : FlutterActivity() {
         pendingExportFile = null
     }
 
+    private fun folderDocumentUris(): List<Uri> {
+        val folderString =
+            selectedFolder() ?: return emptyList()
+
+        val treeUri = Uri.parse(folderString)
+
+        val treeDocumentId =
+            DocumentsContract.getTreeDocumentId(treeUri)
+
+        val childrenUri =
+            DocumentsContract.buildChildDocumentsUriUsingTree(
+                treeUri,
+                treeDocumentId
+            )
+
+        val documentUris = mutableListOf<Uri>()
+
+        contentResolver.query(
+            childrenUri,
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            ),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            val idIndex = cursor.getColumnIndexOrThrow(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID
+            )
+
+            val nameIndex = cursor.getColumnIndexOrThrow(
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME
+            )
+
+            val mimeIndex = cursor.getColumnIndexOrThrow(
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            )
+
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(nameIndex) ?: ""
+                val mime = cursor.getString(mimeIndex) ?: ""
+
+                if (
+                    !name.lowercase().endsWith(".ts") &&
+                    mime != "video/mp2t"
+                ) {
+                    continue
+                }
+
+                val documentId = cursor.getString(idIndex)
+
+                documentUris.add(
+                    DocumentsContract.buildDocumentUriUsingTree(
+                        treeUri,
+                        documentId
+                    )
+                )
+            }
+        }
+
+        return documentUris
+    }
+
+    private fun requireKnownUsbRecording(
+        rawUri: String
+    ): Uri {
+        val requested = Uri.parse(rawUri)
+
+        require(requested.scheme == "content") {
+            "Ungültige Aufnahmeadresse."
+        }
+
+        val known = folderDocumentUris().firstOrNull {
+            it == requested
+        }
+
+        return known ?: throw SecurityException(
+            "Die Aufnahme gehört nicht zum freigegebenen Aufnahmeordner."
+        )
+    }
+
+    private fun listUsbRecordings():
+        List<Map<String, Any?>> {
+
+        val folderString =
+            selectedFolder() ?: return emptyList()
+
+        val treeUri = Uri.parse(folderString)
+
+        val treeDocumentId =
+            DocumentsContract.getTreeDocumentId(treeUri)
+
+        val childrenUri =
+            DocumentsContract.buildChildDocumentsUriUsingTree(
+                treeUri,
+                treeDocumentId
+            )
+
+        val recordings =
+            mutableListOf<Map<String, Any?>>()
+
+        contentResolver.query(
+            childrenUri,
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED
+            ),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+
+            val idIndex = cursor.getColumnIndexOrThrow(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID
+            )
+
+            val nameIndex = cursor.getColumnIndexOrThrow(
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME
+            )
+
+            val mimeIndex = cursor.getColumnIndexOrThrow(
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            )
+
+            val sizeIndex = cursor.getColumnIndex(
+                DocumentsContract.Document.COLUMN_SIZE
+            )
+
+            val modifiedIndex = cursor.getColumnIndex(
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED
+            )
+
+            while (cursor.moveToNext()) {
+                val name =
+                    cursor.getString(nameIndex) ?: ""
+
+                val mime =
+                    cursor.getString(mimeIndex) ?: ""
+
+                if (
+                    !name.lowercase().endsWith(".ts") &&
+                    mime != "video/mp2t"
+                ) {
+                    continue
+                }
+
+                val documentId =
+                    cursor.getString(idIndex)
+
+                val documentUri =
+                    DocumentsContract.buildDocumentUriUsingTree(
+                        treeUri,
+                        documentId
+                    )
+
+                val size =
+                    if (
+                        sizeIndex >= 0 &&
+                        !cursor.isNull(sizeIndex)
+                    ) {
+                        cursor.getLong(sizeIndex)
+                    } else {
+                        0L
+                    }
+
+                val modified =
+                    if (
+                        modifiedIndex >= 0 &&
+                        !cursor.isNull(modifiedIndex)
+                    ) {
+                        cursor.getLong(modifiedIndex)
+                    } else {
+                        0L
+                    }
+
+                recordings.add(
+                    mapOf(
+                        "name" to name,
+                        "uri" to documentUri.toString(),
+                        "size" to size,
+                        "modified" to modified
+                    )
+                )
+            }
+        }
+
+        return recordings
+    }
+
+    private fun prepareUsbPlayback(
+        rawUri: String
+    ): String {
+        val sourceUri =
+            requireKnownUsbRecording(rawUri)
+
+        if (
+            StreamRecordingService.isRecording &&
+            StreamRecordingService.outputPath ==
+                sourceUri.toString()
+        ) {
+            throw IllegalStateException(
+                "Eine laufende Aufnahme kann noch nicht abgespielt werden."
+            )
+        }
+
+        val sourceName =
+            recordingName(sourceUri, null)
+
+        val safeName = sourceName
+            .replace(
+                Regex("[^A-Za-z0-9._-]"),
+                "_"
+            )
+            .take(80)
+            .ifBlank { "Aufnahme.ts" }
+
+        val cacheDirectory =
+            File(cacheDir, "recording_playback")
+
+        require(
+            cacheDirectory.exists() ||
+                cacheDirectory.mkdirs()
+        ) {
+            "Wiedergabe-Cache konnte nicht erstellt werden."
+        }
+
+        val size = contentResolver.query(
+            sourceUri,
+            arrayOf(OpenableColumns.SIZE),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            val index = cursor.getColumnIndex(
+                OpenableColumns.SIZE
+            )
+
+            if (
+                cursor.moveToFirst() &&
+                index >= 0 &&
+                !cursor.isNull(index)
+            ) {
+                cursor.getLong(index)
+            } else {
+                -1L
+            }
+        } ?: -1L
+
+        if (
+            size > 0 &&
+            size > cacheDirectory.usableSpace
+        ) {
+            throw IllegalStateException(
+                "Nicht genügend freier Gerätespeicher für die Wiedergabe."
+            )
+        }
+
+        val target = File.createTempFile(
+            "streamia_",
+            "_$safeName",
+            cacheDirectory
+        )
+
+        try {
+            val input =
+                contentResolver.openInputStream(
+                    sourceUri
+                ) ?: throw IllegalStateException(
+                    "USB-Aufnahme konnte nicht geöffnet werden."
+                )
+
+            input.use { source ->
+                target.outputStream().buffered().use { output ->
+                    val buffer = ByteArray(128 * 1024)
+
+                    while (true) {
+                        val count = source.read(buffer)
+
+                        if (count < 0) break
+                        if (count == 0) continue
+
+                        output.write(
+                            buffer,
+                            0,
+                            count
+                        )
+                    }
+
+                    output.flush()
+                }
+            }
+
+            require(target.length() > 0L) {
+                "Die Aufnahme enthält keine Daten."
+            }
+
+            return target.absolutePath
+        } catch (error: Exception) {
+            target.delete()
+            throw error
+        }
+    }
+
     override fun onActivityResult(
         requestCode: Int,
         resultCode: Int,
@@ -174,7 +484,7 @@ class MainActivity : FlutterActivity() {
                     (data?.flags ?: 0) and (
                         Intent.FLAG_GRANT_READ_URI_PERMISSION or
                             Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                        )
+                    )
 
                 require(
                     flags and
@@ -258,7 +568,7 @@ class MainActivity : FlutterActivity() {
             return
         }
 
-        exportExecutor.execute {
+        ioExecutor.execute {
             try {
                 val input =
                     if (sourceUri != null) {
@@ -285,6 +595,7 @@ class MainActivity : FlutterActivity() {
                             target,
                             128 * 1024
                         )
+
                         target.flush()
                     }
                 }
@@ -298,7 +609,7 @@ class MainActivity : FlutterActivity() {
                 runOnUiThread {
                     callback.error(
                         "EXPORT_FAILED",
-                        "Aufnahme konnte nicht exportiert werden. " +
+                        "Export fehlgeschlagen. " +
                             "Die Originalaufnahme bleibt erhalten. " +
                             (error.message ?: ""),
                         null
@@ -350,14 +661,11 @@ class MainActivity : FlutterActivity() {
 
                 "startRecording" -> {
                     val streamUrl =
-                        call.argument<String>(
-                            "streamUrl"
-                        )
+                        call.argument<String>("streamUrl")
 
                     val channelName =
-                        call.argument<String>(
-                            "channelName"
-                        ) ?: "Live_TV"
+                        call.argument<String>("channelName")
+                            ?: "Live_TV"
 
                     if (streamUrl.isNullOrBlank()) {
                         result.error(
@@ -368,9 +676,7 @@ class MainActivity : FlutterActivity() {
                         return@setMethodCallHandler
                     }
 
-                    if (
-                        StreamRecordingService.isRecording
-                    ) {
+                    if (StreamRecordingService.isRecording) {
                         result.error(
                             "ALREADY_RECORDING",
                             "Es läuft bereits eine Aufnahme.",
@@ -398,9 +704,7 @@ class MainActivity : FlutterActivity() {
                             )
                         }
 
-                        if (
-                            Build.VERSION.SDK_INT >= 26
-                        ) {
+                        if (Build.VERSION.SDK_INT >= 26) {
                             startForegroundService(intent)
                         } else {
                             startService(intent)
@@ -513,9 +817,7 @@ class MainActivity : FlutterActivity() {
                 }
 
                 "getRecordingFolder" -> {
-                    result.success(
-                        selectedFolder()
-                    )
+                    result.success(selectedFolder())
                 }
 
                 "clearRecordingFolder" -> {
@@ -556,9 +858,7 @@ class MainActivity : FlutterActivity() {
                         return@setMethodCallHandler
                     }
 
-                    if (
-                        StreamRecordingService.isRecording
-                    ) {
+                    if (StreamRecordingService.isRecording) {
                         result.error(
                             "RECORDING_ACTIVE",
                             "Bitte zuerst die Aufnahme stoppen.",
@@ -590,8 +890,7 @@ class MainActivity : FlutterActivity() {
                     ) {
                         result.error(
                             "SOURCE_UNAVAILABLE",
-                            "Die Aufnahme ist nicht mehr lesbar. " +
-                                "Bitte Speichermedium prüfen.",
+                            "Aufnahme ist nicht mehr lesbar.",
                             null
                         )
                         return@setMethodCallHandler
@@ -639,13 +938,119 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "listUsbRecordings" -> {
+                    ioExecutor.execute {
+                        try {
+                            val recordings =
+                                listUsbRecordings()
+
+                            runOnUiThread {
+                                result.success(recordings)
+                            }
+                        } catch (error: Exception) {
+                            runOnUiThread {
+                                result.error(
+                                    "USB_LIST_FAILED",
+                                    error.message
+                                        ?: "USB-Aufnahmen konnten nicht gelesen werden.",
+                                    null
+                                )
+                            }
+                        }
+                    }
+                }
+
+                "deleteUsbRecording" -> {
+                    val rawUri =
+                        call.argument<String>("uri")
+
+                    if (rawUri.isNullOrBlank()) {
+                        result.error(
+                            "INVALID_URI",
+                            "Keine Aufnahme ausgewählt.",
+                            null
+                        )
+                        return@setMethodCallHandler
+                    }
+
+                    ioExecutor.execute {
+                        try {
+                            val uri =
+                                requireKnownUsbRecording(rawUri)
+
+                            if (
+                                StreamRecordingService.isRecording &&
+                                StreamRecordingService.outputPath ==
+                                    uri.toString()
+                            ) {
+                                throw IllegalStateException(
+                                    "Eine laufende Aufnahme darf nicht gelöscht werden."
+                                )
+                            }
+
+                            val deleted =
+                                DocumentsContract.deleteDocument(
+                                    contentResolver,
+                                    uri
+                                )
+
+                            runOnUiThread {
+                                result.success(deleted)
+                            }
+                        } catch (error: Exception) {
+                            runOnUiThread {
+                                result.error(
+                                    "USB_DELETE_FAILED",
+                                    error.message
+                                        ?: "USB-Aufnahme konnte nicht gelöscht werden.",
+                                    null
+                                )
+                            }
+                        }
+                    }
+                }
+
+                "prepareUsbRecordingPlayback" -> {
+                    val rawUri =
+                        call.argument<String>("uri")
+
+                    if (rawUri.isNullOrBlank()) {
+                        result.error(
+                            "INVALID_URI",
+                            "Keine Aufnahme ausgewählt.",
+                            null
+                        )
+                        return@setMethodCallHandler
+                    }
+
+                    ioExecutor.execute {
+                        try {
+                            val path =
+                                prepareUsbPlayback(rawUri)
+
+                            runOnUiThread {
+                                result.success(path)
+                            }
+                        } catch (error: Exception) {
+                            runOnUiThread {
+                                result.error(
+                                    "USB_PLAYBACK_FAILED",
+                                    error.message
+                                        ?: "USB-Aufnahme konnte nicht geöffnet werden.",
+                                    null
+                                )
+                            }
+                        }
+                    }
+                }
+
                 else -> result.notImplemented()
             }
         }
     }
 
     override fun onDestroy() {
-        exportExecutor.shutdown()
+        ioExecutor.shutdown()
         super.onDestroy()
     }
 }
