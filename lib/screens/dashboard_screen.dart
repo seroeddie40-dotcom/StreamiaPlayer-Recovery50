@@ -9,6 +9,7 @@ import '../providers/theme_provider.dart';
 import 'live_tv_screen.dart';
 import 'master_search_screen.dart';
 import 'paywall_screen.dart';
+import 'recordings_screen.dart';
 import 'series_screen.dart';
 import 'settings_screen.dart';
 import 'vod_screen.dart';
@@ -31,6 +32,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (language == 'de') return de;
     if (language == 'tr') return tr;
     return en;
+  }
+
+  String _recordingsLabel(BuildContext context) {
+    switch (Localizations.localeOf(context).languageCode) {
+      case 'de': return 'Aufnahmen';
+      case 'tr': return 'Kayıtlar';
+      case 'ru': return 'Записи';
+      case 'pl': return 'Nagrania';
+      case 'es': return 'Grabaciones';
+      case 'fr': return 'Enregistrements';
+      case 'ar': return 'التسجيلات';
+      default: return 'Recordings';
+    }
   }
 
   // All trial dates are issued by Supabase, never by the device.
@@ -105,6 +119,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Icons.video_library_outlined,
         l10n.t('nav_series'),
         () => _open(const SeriesScreen()),
+      ),
+      _HomeEntry(
+        Icons.fiber_manual_record_rounded,
+        _recordingsLabel(context),
+        () => _open(const RecordingsScreen()),
       ),
     ];
 
