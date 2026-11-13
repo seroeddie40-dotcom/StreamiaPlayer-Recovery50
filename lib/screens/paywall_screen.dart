@@ -296,6 +296,19 @@ class _PaywallScreenState extends State<PaywallScreen> {
         key;
   }
 
+  String _features(String code) {
+    switch (code) {
+      case 'de': return 'Alle Player-Funktionen enthalten\nLive-TV, Filme und Serien\nM3U- und Xtream-Playlists\nFavoriten und Wiedergabeverlauf\nAndroid TV und Fernbedienung';
+      case 'tr': return 'Tüm oynatıcı özellikleri dahil\nCanlı TV, film ve diziler\nM3U ve Xtream listeleri\nFavoriler ve izleme geçmişi\nAndroid TV ve kumanda';
+      case 'ru': return 'Все функции плеера\nТВ, фильмы и сериалы\nM3U и Xtream\nИзбранное и история\nAndroid TV и пульт';
+      case 'pl': return 'Wszystkie funkcje odtwarzacza\nTV, filmy i seriale\nM3U i Xtream\nUlubione i historia\nAndroid TV i pilot';
+      case 'es': return 'Todas las funciones del reproductor\nTV, películas y series\nM3U y Xtream\nFavoritos e historial\nAndroid TV y mando';
+      case 'fr': return 'Toutes les fonctions du lecteur\nTV, films et séries\nM3U et Xtream\nFavoris et historique\nAndroid TV et télécommande';
+      case 'ar': return 'جميع ميزات المشغل\nالتلفزيون والأفلام والمسلسلات\nقوائم M3U و Xtream\nالمفضلة والسجل\nAndroid TV والتحكم عن بعد';
+      default: return 'All player features included\nLive TV, movies and series\nM3U and Xtream playlists\nFavorites and watch history\nAndroid TV and remote control';
+    }
+  }
+
   String _price(int period, int tier) {
     return _prices[period][tier].toStringAsFixed(2);
   }
@@ -467,6 +480,9 @@ class _PaywallScreenState extends State<PaywallScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
+                    Text(_features(languageCode), textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 12, height: 1.4)),
+                    const SizedBox(height: 8),
                     Text(
                       '${_price(_selectedPeriod, index)} €*',
                       style: TextStyle(
@@ -510,6 +526,8 @@ class _PaywallScreenState extends State<PaywallScreen> {
                               fontWeight: FontWeight.bold,
                             ),
                           ),
+                          const SizedBox(height: 8),
+                          Text(_features(languageCode), style: const TextStyle(fontSize: 12, height: 1.4)),
                           if (index == 1) ...[
                             const SizedBox(height: 5),
                             Align(
@@ -579,6 +597,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: true,
         title: Text(_t(languageCode, 'title')),
         actions: [
           IconButton(
@@ -700,7 +719,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                             for (var i = 0; i < 3; i++) ...[
                               Expanded(
                                 child: SizedBox(
-                                  height: 255,
+                                  height: 335,
                                   child: _tierCard(
                                     i,
                                     languageCode,
