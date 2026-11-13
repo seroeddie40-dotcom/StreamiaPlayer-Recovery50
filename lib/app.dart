@@ -265,43 +265,48 @@ class _AccessStatusScreen extends StatefulWidget {
 
 class _AccessStatusScreenState extends State<_AccessStatusScreen> {
   String? _selectedDeviceId;
+  bool _replacing = false;
+  String? _replacementError;
 
-  Future<void> _showReplacementPreview(Map<String, dynamic> device) async {
+  Future<void> _confirmReplacement(Map<String, dynamic> device) async {
+    if (_replacing) return;
     final language = context.read<LocaleProvider>().locale.languageCode;
-    final name = (device['device_name']?.toString().trim().isNotEmpty ?? false)
+    final name = device['device_name']?.toString().trim().isNotEmpty == true
         ? device['device_name'].toString()
-        : (language == 'tr' ? 'İsimsiz cihaz'
-            : language == 'de' ? 'Unbenanntes Gerät' : 'Unnamed device');
-    await showDialog<void>(
+        : language == 'tr' ? 'Önceki cihaz' : language == 'de' ? 'Bisheriges Gerät' : 'Previous device';
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text(language == 'tr' ? 'Cihazı değiştirmeyi onayla'
-            : language == 'de' ? 'Gerätewechsel bestätigen'
-            : 'Confirm device replacement'),
+        title: Text(language == 'tr' ? 'Cihaz değişimini onayla'
+            : language == 'de' ? 'Gerätewechsel bestätigen' : 'Confirm device replacement'),
         content: Text(language == 'tr'
-            ? '$name cihazının erişimi kaldırılacak ve mevcut kurulum etkinleştirilecek. '
-              'Güvenlik denetimi henüz tamamlanmadığı için işlem şu anda devre dışıdır.'
+            ? '“$name” cihazının erişimi kaldırılacak ve bu kurulum etkinleştirilecek. Deneme süreniz değişmez. Güvenlik nedeniyle 24 saatte yalnızca bir değişiklik yapılabilir.'
             : language == 'de'
-                ? 'Die bisherige Installation „$name“ würde deaktiviert und die aktuelle '
-                  'Installation aktiviert. Der Wechsel ist noch gesperrt, bis die '
-                  'serverseitige Sicherheitsprüfung abgeschlossen ist.'
-                : 'The previous installation “$name” would be deactivated and the '
-                  'current installation activated. Replacement is unavailable until '
-                  'server-side security verification is complete.'),
+                ? 'Der Zugang von „$name“ wird deaktiviert und diese Installation aktiviert. Die Testzeit bleibt unverändert. Aus Sicherheitsgründen ist nur ein Wechsel in 24 Stunden möglich.'
+                : 'Access for “$name” will be disabled and this installation activated. Your trial period stays unchanged. Only one replacement is allowed per 24 hours.'),
         actions: [
           TextButton(
             autofocus: true,
-            onPressed: () => Navigator.of(dialogContext).pop(),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
             child: Text(language == 'tr' ? 'İptal' : language == 'de' ? 'Abbrechen' : 'Cancel'),
           ),
           FilledButton(
-            onPressed: null,
+            onPressed: () => Navigator.of(dialogContext).pop(true),
             child: Text(language == 'tr' ? 'Cihazı değiştir'
                 : language == 'de' ? 'Gerät ersetzen' : 'Replace device'),
           ),
         ],
       ),
     );
+    if (confirmed != true || !mounted) return;
+    setState(() { _replacing = true; _replacementError = null; });
+    try {
+      await context.read<AuthProvider>().replaceActiveDevice(device['device_id'].toString());
+    } catch (e) {
+      if (mounted) setState(() => _replacementError = e.toString());
+    } finally {
+      if (mounted) setState(() => _replacing = false);
+    }
   }
 
   @override
@@ -499,26 +504,31 @@ class _AccessStatusScreenState extends State<_AccessStatusScreen> {
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
-                          onPressed: _selectedDeviceId == null ? null : () {
+                          onPressed: _selectedDeviceId == null || _replacing ? null : () {
                             final matches = auth.activeDevices.where(
                               (device) => device['device_id']?.toString() == _selectedDeviceId,
                             );
-                            if (matches.isNotEmpty) _showReplacementPreview(matches.first);
+                            if (matches.isNotEmpty) _confirmReplacement(matches.first);
                           },
                           icon: const Icon(Icons.swap_horiz),
-                          label: Text(isTurkish ? 'Seçilen cihazı değiştir (önizleme)'
-                              : isGerman ? 'Ausgewähltes Gerät ersetzen (Vorschau)'
-                              : 'Replace selected device (preview)'),
+                          label: Text(isTurkish ? 'Seçilen cihazı değiştir'
+                              : isGerman ? 'Ausgewähltes Gerät ersetzen'
+                              : 'Replace selected device'),
                         ),
                       ),
                     ],
                     const SizedBox(height: 12),
+                    if (_replacing) const CircularProgressIndicator(),
+                    if (_replacementError != null)
+                      SelectableText(_replacementError!,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Theme.of(context).colorScheme.error)),
                     Text(
                       isTurkish
-                          ? 'Cihaz değiştirme, güvenlik kontrolü tamamlanınca açılacak.'
+                          ? 'Mevcut cihazı seçip değiştirerek bu kurulumu etkinleştirebilirsiniz. Deneme süresi sıfırlanmaz.'
                           : isGerman
-                              ? 'Der Gerätewechsel wird nach Abschluss der Sicherheitsprüfung freigeschaltet.'
-                              : 'Device replacement will be enabled after security verification.',
+                              ? 'Wähle dein bisheriges Gerät und ersetze es durch diese Installation. Die Testzeit wird nicht zurückgesetzt.'
+                              : 'Select your previous device to activate this installation. Your trial period will not reset.',
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 12),
