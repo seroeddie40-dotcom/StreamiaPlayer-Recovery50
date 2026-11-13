@@ -16,7 +16,7 @@ import '../services/xtream_service.dart';
 import '../utils/xtream_input_validator.dart';
 import '../services/tv_server.dart';
 import '../services/playlist_profile_store.dart';
-import '../services/playlist_source_store.dart';
+import '../services/playlist_management_service.dart';
 import '../models/playlist_source_config.dart';
 import '../models/playlist_profile.dart';
 import '../core/localization/app_localizations.dart';
@@ -186,6 +186,71 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     }
   }
 
+  bool get _isTrialAccount => PlaylistManagementService.isTrialAccess(
+    context.read<AuthProvider>().access,
+  );
+
+  Future<bool?> _confirmTrialReplacement() async {
+    final auth = context.read<AuthProvider>();
+    if (!auth.hasAccess) {
+      _showError(_copy('Kein aktiver Zugang. Bitte zuerst dein Konto prüfen.',
+        'Aktif erişim yok. Lütfen önce hesabınızı kontrol edin.',
+        'No active access. Please check your account first.'));
+      return null;
+    }
+    if (!_isTrialAccount) return false;
+    final profiles = await PlaylistProfileStore().load();
+    if (!mounted) return null;
+    if (profiles.isEmpty) return false;
+    if (profiles.length > 1) {
+      _showError(_copy('Mehrere Playlists vorhanden. Bitte zuerst in der Playlist-Verwaltung bereinigen.',
+        'Birden fazla liste mevcut. Önce liste yönetiminde düzenleyin.',
+        'Multiple playlists exist. Please resolve them in playlist management.'));
+      return null;
+    }
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(_copy('Playlist ersetzen?', 'Oynatma listesi değiştirilsin mi?', 'Replace playlist?')),
+        content: Text(_copy(
+          'Während der Testphase ist nur eine Playlist erlaubt. Nach erfolgreichem Import wird die bisherige Playlist ersetzt. Deine Testzeit und Geräte bleiben unverändert.',
+          'Deneme süresince yalnızca bir listeye izin verilir. Yeni liste başarıyla yüklendikten sonra eski liste değiştirilir. Deneme süreniz ve cihazlarınız değişmez.',
+          'Only one playlist is allowed during the trial. The old playlist will be replaced after a successful import. Trial time and devices stay unchanged.',
+        )),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text(_copy('Abbrechen', 'İptal', 'Cancel'))),
+          FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(_copy('Ersetzen', 'Değiştir', 'Replace'))),
+        ],
+      ),
+    );
+    if (!mounted || accepted != true) return null;
+    return true;
+  }
+
+  Future<void> _persistImportedPlaylist({
+    required PlaylistSourceConfig source,
+    required String name,
+    required String type,
+    required bool replaceTrial,
+  }) async {
+    await PlaylistManagementService().saveImportedPlaylist(
+      source: source,
+      profile: PlaylistProfile(
+        sourceKey: source.sourceKey,
+        displayName: name.trim().isEmpty ? (type == 'xtream' ? 'Xtream Playlist' : 'M3U Playlist') : name.trim(),
+        type: type,
+        folderName: '',
+        isVisible: true,
+        isActive: true,
+        createdAt: DateTime.now(),
+      ),
+      isTrial: _isTrialAccount,
+      replaceExistingTrialPlaylist: replaceTrial,
+    );
+  }
+
   Future<void> _startM3uImport() async {
     if (_isLoading) return;
     final path = _selectedM3uPath;
@@ -200,6 +265,8 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       await _processPlaylist(value);
       return;
     }
+    final replaceTrial = await _confirmTrialReplacement();
+    if (replaceTrial == null || !mounted) return;
     setState(() {
       _isLoading = true;
       _importError = null;
@@ -223,16 +290,14 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       if (file.absolute.path != File(localPath).absolute.path) {
         await file.copy(localPath);
       }
-      await PlaylistSourceStore().save(PlaylistSourceConfig(
-        sourceKey: contentProvider.sourceKey, type: 'm3u', localFilePath: localPath,
-      ));
-      await PlaylistProfileStore().upsert(PlaylistProfile(
-        sourceKey: contentProvider.sourceKey,
-        displayName: _m3uNameController.text.trim().isEmpty
-            ? 'M3U Playlist' : _m3uNameController.text.trim(),
-        type: 'm3u', folderName: '', isVisible: true, isActive: true,
-        createdAt: DateTime.now(),
-      ));
+      await _persistImportedPlaylist(
+        source: PlaylistSourceConfig(
+          sourceKey: contentProvider.sourceKey, type: 'm3u', localFilePath: localPath,
+        ),
+        name: _m3uNameController.text,
+        type: 'm3u',
+        replaceTrial: replaceTrial,
+      );
       contentProvider.setLoaded(true);
       if (!mounted) return;
       if (widget.returnToPreviousOnSuccess) {
@@ -251,37 +316,36 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   }
 
   Future<void> _processPlaylist(String input) async {
-    if (input.isEmpty || !mounted) return;
+    if (input.isEmpty || !mounted || _isLoading) return;
+    final replaceTrial = await _confirmTrialReplacement();
+    if (replaceTrial == null || !mounted) return;
     setState(() { _isLoading = true; _importError = null; _loadingMessage = _copy('Playlist wird verarbeitet…', 'Oynatma listesi işleniyor…', 'Processing playlist…'); });
     try {
       final contentProvider = context.read<ContentProvider>();
       await PlaylistParser.parseAndLoad(input, contentProvider)
           .timeout(const Duration(seconds: 90));
+      PlaylistSourceConfig source;
       if (input.trim().startsWith('http://') || input.trim().startsWith('https://')) {
-        await PlaylistSourceStore().save(PlaylistSourceConfig(
+        source = PlaylistSourceConfig(
           sourceKey: contentProvider.sourceKey, type: 'm3u', m3uUrl: input.trim(),
-        ));
+        );
       } else {
-        // Persist imported local playlists in the app-private documents directory.
         final directory = await getApplicationDocumentsDirectory();
         final playlistDirectory = Directory('${directory.path}/streamia_playlists');
-        if (!await playlistDirectory.exists()) await playlistDirectory.create(recursive: true);
+        await playlistDirectory.create(recursive: true);
         final safeKey = contentProvider.sourceKey.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
         final localPath = '${playlistDirectory.path}/$safeKey.m3u';
         await File(localPath).writeAsString(input, flush: true);
-        await PlaylistSourceStore().save(PlaylistSourceConfig(
+        source = PlaylistSourceConfig(
           sourceKey: contentProvider.sourceKey, type: 'm3u', localFilePath: localPath,
-        ));
+        );
       }
-      await PlaylistProfileStore().upsert(PlaylistProfile(
-        sourceKey: contentProvider.sourceKey,
-        displayName: _m3uNameController.text.trim().isEmpty ? 'M3U Playlist' : _m3uNameController.text.trim(),
+      await _persistImportedPlaylist(
+        source: source,
+        name: _m3uNameController.text,
         type: 'm3u',
-        folderName: '',
-        isVisible: true,
-        isActive: true,
-        createdAt: DateTime.now(),
-      ));
+        replaceTrial: replaceTrial,
+      );
       contentProvider.setLoaded(true);
       
       if (mounted) {
@@ -320,6 +384,9 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       return;
     }
 
+    final replaceTrial = await _confirmTrialReplacement();
+    if (replaceTrial == null || !mounted) return;
+
     setState(() { _isLoading = true; _importError = null; _loadingMessage = null; });
     XtreamService? service;
     try {
@@ -346,19 +413,15 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         sourceKey: sourceKey,
         sourceLabel: Uri.tryParse(server)?.host ?? 'Xtream',
       );
-      await PlaylistSourceStore().save(PlaylistSourceConfig(
-        sourceKey: sourceKey, type: 'xtream', serverUrl: server.trim(),
-        username: user.trim(), password: pass,
-      ));
-      await PlaylistProfileStore().upsert(PlaylistProfile(
-        sourceKey: sourceKey,
-        displayName: _xtreamNameController.text.trim().isEmpty ? 'Xtream Playlist' : _xtreamNameController.text.trim(),
+      await _persistImportedPlaylist(
+        source: PlaylistSourceConfig(
+          sourceKey: sourceKey, type: 'xtream', serverUrl: server.trim(),
+          username: user.trim(), password: pass,
+        ),
+        name: _xtreamNameController.text,
         type: 'xtream',
-        folderName: '',
-        isVisible: true,
-        isActive: true,
-        createdAt: DateTime.now(),
-      ));
+        replaceTrial: replaceTrial,
+      );
       context.read<ContentProvider>().setLoaded(true);
       if (widget.returnToPreviousOnSuccess) {
         Navigator.of(context).pop(true);
