@@ -67,7 +67,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       } else if (widget.channel != null && _channelListScroll.hasClients) {
         final channels = context.read<ContentProvider>().channels;
         final visible = _selectedLiveCategory == null ? channels : channels
-            .where((c) => (c.category ?? '').trim() == _selectedLiveCategory).toList();
+            .where((c) => (c.category ?? '') == _selectedLiveCategory).toList();
         final index = visible.indexWhere((c) => c.id == widget.channel!.id);
         if (index >= 0) _jumpToNavigationIndex(_channelListScroll, index);
       }
@@ -427,7 +427,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   void _startHideTimer() {
     _hideTimer?.cancel();
-    _hideTimer = Timer(const Duration(seconds: 4), () {
+    _hideTimer = Timer(const Duration(seconds: 8), () {
       if (!mounted || _streamFailed || _reconnecting) return;
       // Preserve remote focus: hiding a focused control can strand the D-pad.
       if (_showControls && !_playerSurfaceFocus.hasPrimaryFocus) return;
@@ -482,12 +482,32 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
             // Touch opens the Live TV controls (channels, categories,
             // recording). A second tap may hide them, but not a drawer.
             if (_showDrawer || _showHistory) return;
-            setState(() => _showControls = !_showControls);
-            if (_showControls) _startHideTimer();
+            // Always restore the complete controls on touch. Never hide
+            // the recording/channel navigation with a second tap.
+            setState(() => _showControls = true);
+            _startHideTimer();
           },
           child: Stack(
             children: [
-              Center(child: Video(controller: _videoController, fit: _videoFits[_videoFitIndex])),
+              Center(child: Video(
+                controller: _videoController,
+                fit: _videoFits[_videoFitIndex],
+                // The package's built-in controls are the unwanted seek bar
+                // seen after our Live TV overlay disappears.
+                controls: widget.isLive ? NoVideoControls : null,
+              )),
+              // A full-surface touch target remains above the video widget,
+              // so taps restore our own navigation even when it is hidden.
+              if (widget.isLive && !_showDrawer && !_showHistory)
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: () {
+                      setState(() => _showControls = true);
+                      _startHideTimer();
+                    },
+                  ),
+                ),
               if (_showControls) ExcludeFocus(
                 excluding: _showDrawer || _showHistory || _streamFailed || _reconnecting,
                 child: FocusTraversalGroup(child: _buildControls())),
@@ -619,13 +639,14 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                     child: const Icon(Icons.skip_previous, color: Colors.white, size: 40),
                   ),
                 if (widget.episodes != null) const SizedBox(width: 32),
-                InkWell(
-                  focusColor: AppTheme.electricBlue.withOpacity(0.38),
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () => _playing ? _player.pause() : _player.play(),
-                  child: Icon(_playing ? Icons.pause_circle : Icons.play_circle,
-                      color: Colors.white, size: 72),
-                ),
+                if (!widget.isLive)
+                  InkWell(
+                    focusColor: AppTheme.electricBlue.withOpacity(0.38),
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _playing ? _player.pause() : _player.play(),
+                    child: Icon(_playing ? Icons.pause_circle : Icons.play_circle,
+                        color: Colors.white, size: 72),
+                  ),
                 if (widget.episodes != null) const SizedBox(width: 32),
                 if (widget.episodes != null)
                   InkWell(
@@ -1227,11 +1248,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   Widget _buildLiveNavigationDrawer() {
     final channels = context.watch<ContentProvider>().channels;
-    final categories = channels.map((c) => (c.category ?? '').trim())
+    final categories = channels.map((c) => c.category ?? '')
         .where((c) => c.isNotEmpty).toSet().toList()..sort();
     final visible = _selectedLiveCategory == null
         ? channels
-        : channels.where((c) => (c.category ?? '').trim() == _selectedLiveCategory).toList();
+        : channels.where((c) => (c.category ?? '') == _selectedLiveCategory).toList();
     return Positioned(
       left: 0, top: 0, bottom: 0,
       child: ClipRRect(
