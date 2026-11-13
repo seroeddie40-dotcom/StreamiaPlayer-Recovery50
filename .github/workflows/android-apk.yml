@@ -40,6 +40,37 @@ jobs:
           flutter --version
           flutter doctor -v
 
+      # Flutter includes its own Gradle build. Give that included build Maven Central
+      # as well as the plugin portal for Kotlin compiler artifacts.
+      - name: Configure Gradle repositories for included Flutter build
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.gradle/init.d"
+          cat > "$HOME/.gradle/init.d/streamia-repositories.gradle" <<'GRADLE'
+          gradle.beforeSettings { settings ->
+              settings.pluginManagement.repositories {
+                  mavenCentral()
+                  google()
+                  gradlePluginPortal()
+              }
+          }
+          gradle.settingsEvaluated { settings ->
+              settings.pluginManagement.repositories {
+                  mavenCentral()
+                  google()
+                  gradlePluginPortal()
+              }
+          }
+          gradle.beforeProject { project ->
+              project.buildscript.repositories {
+                  mavenCentral()
+                  google()
+                  gradlePluginPortal()
+              }
+          }
+          GRADLE
+          echo "Configured Gradle init script for all builds, including Flutter's included build."
+
       - name: Restore and validate permanent debug signing key
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
