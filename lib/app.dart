@@ -14,6 +14,7 @@ import 'providers/locale_provider.dart';
 import 'providers/content_provider.dart';
 import 'providers/auth_provider.dart';
 import 'services/playlist_profile_store.dart';
+import 'services/playlist_switch_service.dart';
 
 import 'screens/login_screen.dart';
 import 'screens/language_selection_screen.dart';
@@ -137,8 +138,8 @@ class StreamiaApp extends StatelessWidget {
 }
 
 
-/// Localized recovery-first startup. The saved catalog is never loaded
-/// automatically, so a broken playlist cannot block access to setup.
+/// Automatically routes returning users to their library or playlist setup.
+/// A temporary source failure never deletes stored playlist profiles.
 class _LibraryStartupGate extends StatefulWidget {
   const _LibraryStartupGate();
 
@@ -147,45 +148,49 @@ class _LibraryStartupGate extends StatefulWidget {
 }
 
 class _LibraryStartupGateState extends State<_LibraryStartupGate> {
-  bool _loading = false;
-  String? _error;
-
-  static const Map<String, List<String>> _translations = {
-    'de': ['Sicherer Start', 'Die gespeicherte Mediathek wird nicht automatisch geladen. So kannst du die Einrichtung öffnen, auch wenn die letzte Playlist beim Laden Probleme verursacht hat. Deine gespeicherten Daten werden nicht gelöscht.', 'Playlist einrichten', 'Gespeicherte Mediathek laden', 'Keine gespeicherte Playlist gefunden.', 'Keine gespeicherte Mediathek gefunden.', 'Wiederherstellung fehlgeschlagen'],
-    'tr': ['Güvenli Başlangıç', 'Kayıtlı medya kitaplığı otomatik olarak yüklenmez. Böylece son oynatma listesi yüklenirken sorun yaşansa bile kurulumu açabilirsin. Kayıtlı verilerin silinmez.', 'Oynatma listesi ekle', 'Kayıtlı medya kitaplığını yükle', 'Kayıtlı oynatma listesi bulunamadı.', 'Kayıtlı medya kitaplığı bulunamadı.', 'Geri yükleme başarısız'],
-    'en': ['Safe Start', 'The saved media library is not loaded automatically. You can open setup even if the last playlist caused loading problems. Your saved data will not be deleted.', 'Set up playlist', 'Load saved media library', 'No saved playlist found.', 'No saved media library found.', 'Restore failed'],
-    'ru': ['Безопасный запуск', 'Сохранённая медиатека не загружается автоматически. Вы можете открыть настройки, даже если последняя загрузка плейлиста вызвала ошибку. Ваши данные не будут удалены.', 'Настроить плейлист', 'Загрузить сохранённую медиатеку', 'Сохранённый плейлист не найден.', 'Сохранённая медиатека не найдена.', 'Ошибка восстановления'],
-    'pl': ['Bezpieczny start', 'Zapisana biblioteka multimediów nie jest ładowana automatycznie. Możesz otworzyć konfigurację, nawet jeśli ostatnia lista odtwarzania powodowała problemy. Twoje dane nie zostaną usunięte.', 'Skonfiguruj playlistę', 'Wczytaj zapisaną bibliotekę', 'Nie znaleziono zapisanej playlisty.', 'Nie znaleziono zapisanej biblioteki.', 'Przywracanie nie powiodło się'],
-    'es': ['Inicio seguro', 'La biblioteca guardada no se carga automáticamente. Puedes abrir la configuración aunque la última lista haya causado problemas. Tus datos guardados no se eliminarán.', 'Configurar lista', 'Cargar biblioteca guardada', 'No se encontró ninguna lista guardada.', 'No se encontró ninguna biblioteca guardada.', 'Error al restaurar'],
-    'fr': ['Démarrage sécurisé', 'La médiathèque enregistrée ne se charge pas automatiquement. Vous pouvez accéder à la configuration même si la dernière playlist a posé problème. Vos données ne seront pas supprimées.', 'Configurer une playlist', 'Charger la médiathèque', 'Aucune playlist enregistrée.', 'Aucune médiathèque enregistrée.', 'Échec de la restauration'],
-    'ar': ['بدء آمن', 'لن يتم تحميل مكتبة الوسائط المحفوظة تلقائيًا. يمكنك فتح الإعداد حتى إذا تسببت قائمة التشغيل الأخيرة في مشكلة أثناء التحميل. لن تُحذف بياناتك المحفوظة.', 'إعداد قائمة التشغيل', 'تحميل مكتبة الوسائط المحفوظة', 'لم يتم العثور على قائمة تشغيل محفوظة.', 'لم يتم العثور على مكتبة وسائط محفوظة.', 'فشلت الاستعادة'],
-  };
-
-  String _t(BuildContext context, int index) {
-    final code = Localizations.localeOf(context).languageCode;
-    return (_translations[code] ?? _translations['en']!)[index];
+  bool _loading = true;
+  bool _hasProfiles = false;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadLibrary());
   }
 
-  Future<void> _restoreOnDemand() async {
-    if (_loading) return;
-    setState(() { _loading = true; _error = null; });
+  Future<void> _loadLibrary() async {
+    if (!mounted) return;
+    setState(() { _loading = true; });
     try {
       final profiles = await PlaylistProfileStore().load();
       if (!mounted) return;
       if (profiles.isEmpty) {
-        setState(() => _error = _t(context, 4));
+        setState(() { _hasProfiles = false; _loading = false; });
         return;
       }
+      _hasProfiles = true;
       final active = profiles.where((p) => p.isActive).firstOrNull ?? profiles.first;
-      final restored = await context.read<ContentProvider>()
-          .restoreStoredLibrary(active.sourceKey);
+      final content = context.read<ContentProvider>();
+      // Prefer the encrypted offline catalog, so opening the app does not
+      // depend on the playlist server being reachable.
+      final restored = await content.restoreStoredLibrary(
+        active.sourceKey, sourceLabel: active.displayName,
+      );
+      if (!restored && !content.isLoaded) {
+        // No cached catalog: use the already saved secure source credentials.
+        await PlaylistSwitchService().activate(active, content);
+      }
       if (!mounted) return;
-      if (!restored) setState(() => _error = _t(context, 5));
+      if (!content.isLoaded) {
+        setState(() { _loading = false; });
+      }
     } catch (error) {
-      if (mounted) setState(() => _error = '${_t(context, 6)}: $error');
-    } finally {
-      if (mounted) setState(() => _loading = false);
+      debugPrint('Streamia startup library load failed: ${error.runtimeType}');
+      if (mounted) setState(() { _loading = false; });
     }
+  }
+
+  String _copy(BuildContext context, String de, String tr, String en) {
+    final language = Localizations.localeOf(context).languageCode;
+    return language == 'de' ? de : language == 'tr' ? tr : en;
   }
 
   @override
@@ -193,51 +198,51 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
     if (context.watch<ContentProvider>().isLoaded) {
       return const DashboardScreen();
     }
+    if (!_loading && !_hasProfiles) {
+      return const SetupScreen();
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('Streamia Player')),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 460),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Icon(Icons.shield_outlined, size: 56),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_loading) ...[
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 18),
+                  Text(_copy(context, 'Mediathek wird geladen…',
+                      'Medya kitaplığı yükleniyor…', 'Loading your library…')),
+                ] else ...[
+                  const Icon(Icons.cloud_off_outlined, size: 48),
                   const SizedBox(height: 16),
-                  Text(_t(context, 0),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  Text(_t(context, 1), textAlign: TextAlign.center),
-                  const SizedBox(height: 24),
+                  Text(_copy(context,
+                    'Die gespeicherte Playlist konnte gerade nicht geladen werden. Deine Daten bleiben erhalten.',
+                    'Kayıtlı oynatma listesi şu anda yüklenemiyor. Verileriniz korunur.',
+                    'Your saved playlist could not be loaded. Your data is safe.'),
+                    textAlign: TextAlign.center),
+                  const SizedBox(height: 18),
                   FilledButton.icon(
-                    onPressed: _loading ? null : () => Navigator.of(context).push(
+                    onPressed: _loadLibrary,
+                    icon: const Icon(Icons.refresh),
+                    label: Text(_copy(context, 'Erneut versuchen', 'Tekrar dene', 'Retry')),
+                  ),
+                ],
+                if (_hasProfiles) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () => Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const SetupScreen()),
                     ),
                     icon: const Icon(Icons.playlist_add),
-                    label: Text(_t(context, 2)),
+                    label: Text(_copy(context, 'Playlist bearbeiten',
+                        'Oynatma listesini düzenle', 'Edit playlist')),
                   ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: _loading ? null : _restoreOnDemand,
-                    icon: const Icon(Icons.restore),
-                    label: Text(_t(context, 3)),
-                  ),
-                  if (_loading) ...[
-                    const SizedBox(height: 16),
-                    const Center(child: CircularProgressIndicator()),
-                  ],
-                  if (_error != null) ...[
-                    const SizedBox(height: 16),
-                    Text(_error!, style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    )),
-                  ],
                 ],
-              ),
+              ],
             ),
           ),
         ),
@@ -309,10 +314,10 @@ class _AccessStatusScreenState extends State<_AccessStatusScreen> {
         title: Text(language == 'tr' ? 'Cihaz değişimini onayla'
             : language == 'de' ? 'Gerätewechsel bestätigen' : 'Confirm device replacement'),
         content: Text(language == 'tr'
-            ? '“$name” cihazının erişimi kaldırılacak ve bu kurulum etkinleştirilecek. Deneme süreniz değişmez. Güvenlik nedeniyle 24 saatte yalnızca bir değişiklik yapılabilir.'
+            ? '“$name” cihazının erişimi kaldırılacak ve bu kurulum etkinleştirilecek. Deneme süreniz değişmez.'
             : language == 'de'
-                ? 'Der Zugang von „$name“ wird deaktiviert und diese Installation aktiviert. Die Testzeit bleibt unverändert. Aus Sicherheitsgründen ist nur ein Wechsel in 24 Stunden möglich.'
-                : 'Access for “$name” will be disabled and this installation activated. Your trial period stays unchanged. Only one replacement is allowed per 24 hours.'),
+                ? 'Der Zugang von „$name“ wird deaktiviert und diese Installation aktiviert. Die Testzeit bleibt unverändert.'
+                : 'Access for “$name” will be disabled and this installation activated. Your trial period stays unchanged.'),
         actions: [
           TextButton(
             autofocus: true,
