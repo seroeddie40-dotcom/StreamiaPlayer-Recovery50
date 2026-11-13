@@ -82,6 +82,11 @@ class StreamiaApp extends StatelessWidget {
       return const LanguageSelectionScreen();
     }
 
+    // Do not flash the login screen while restoring a persisted session.
+    if (auth.isInitializing) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     if (!auth.isLoggedIn) {
       return const LoginScreen();
     }
@@ -113,9 +118,7 @@ class StreamiaApp extends StatelessWidget {
     }
 
     if (auth.devicePending || !auth.deviceApproved) {
-      return const _AccessStatusScreen(
-        mode: _AccessStatusMode.pending,
-      );
+      return const _DeviceActivationGate();
     }
 
     if (!auth.hasAccess) {
@@ -252,362 +255,205 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
 }
 
 enum _AccessStatusMode {
-  pending,
   blocked,
   error,
 }
 
-class _AccessStatusScreen extends StatefulWidget {
-  final _AccessStatusMode mode;
-
-  const _AccessStatusScreen({
-    required this.mode,
-  });
+/// Only shown when the server has no free slot for this installation.
+/// No standalone device-replacement page: a one-time, explicit-choice dialog
+/// sits over the startup loading surface. The dashboard remains access-gated.
+class _DeviceActivationGate extends StatefulWidget {
+  const _DeviceActivationGate();
 
   @override
-  State<_AccessStatusScreen> createState() => _AccessStatusScreenState();
+  State<_DeviceActivationGate> createState() => _DeviceActivationGateState();
 }
 
-class _AccessStatusScreenState extends State<_AccessStatusScreen> {
-  String? _selectedDeviceId;
-  bool _replacing = false;
-  String? _replacementError;
+class _DeviceActivationGateState extends State<_DeviceActivationGate> {
+  String? _selected;
+  String? _error;
+  bool _working = false;
+  bool _dialogOpen = false;
 
-  String _replacementMessage(Object error, String language) {
-    final raw = error.toString().toLowerCase();
-    if (raw.contains('once per 24 hours') ||
-        raw.contains('device_replacement_cooldown')) {
-      const messages = <String, String>{
-        'de': 'Ein Gerätewechsel wurde innerhalb der letzten 24 Stunden durchgeführt. Bitte versuche es später erneut. Deine Testzeit bleibt unverändert.',
-        'tr': 'Son 24 saat içinde bir cihaz değiştirildi. Lütfen daha sonra tekrar deneyin. Deneme süreniz değişmez.',
-        'en': 'A device was replaced within the last 24 hours. Please try again later. Your trial period is unchanged.',
-        'ru': 'За последние 24 часа устройство уже заменяли. Повторите попытку позже. Пробный период не изменится.',
-        'pl': 'W ciągu ostatnich 24 godzin wymieniono już urządzenie. Spróbuj ponownie później. Okres próbny nie ulegnie zmianie.',
-        'es': 'Ya se sustituyó un dispositivo en las últimas 24 horas. Inténtalo más tarde. Tu periodo de prueba no cambia.',
-        'fr': 'Un appareil a déjà été remplacé au cours des dernières 24 heures. Réessayez plus tard. Votre période d’essai reste inchangée.',
-        'ar': 'تم استبدال جهاز خلال آخر 24 ساعة. يُرجى المحاولة لاحقًا. لن تتغير فترة التجربة.',
-      };
-      return messages[language] ?? messages['en']!;
-    }
-    const messages = <String, String>{
-      'de': 'Der Gerätewechsel konnte nicht abgeschlossen werden. Bitte aktualisiere die Geräteliste und versuche es erneut.',
-      'tr': 'Cihaz değişimi tamamlanamadı. Lütfen cihaz listesini yenileyip tekrar deneyin.',
-      'en': 'Device replacement could not be completed. Refresh the device list and try again.',
-      'ru': 'Не удалось заменить устройство. Обновите список устройств и попробуйте снова.',
-      'pl': 'Nie udało się wymienić urządzenia. Odśwież listę urządzeń i spróbuj ponownie.',
-      'es': 'No se pudo sustituir el dispositivo. Actualiza la lista e inténtalo de nuevo.',
-      'fr': 'Impossible de remplacer l’appareil. Actualisez la liste et réessayez.',
-      'ar': 'تعذر استبدال الجهاز. حدّث قائمة الأجهزة وحاول مرة أخرى.',
-    };
-    return messages[language] ?? messages['en']!;
-  }
-
-  Future<void> _confirmReplacement(Map<String, dynamic> device) async {
-    if (_replacing) return;
+  String _tr(String de, String tr, String en) {
     final language = context.read<LocaleProvider>().locale.languageCode;
-    final name = device['device_name']?.toString().trim().isNotEmpty == true
-        ? device['device_name'].toString()
-        : language == 'tr' ? 'Önceki cihaz' : language == 'de' ? 'Bisheriges Gerät' : 'Previous device';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(language == 'tr' ? 'Cihaz değişimini onayla'
-            : language == 'de' ? 'Gerätewechsel bestätigen' : 'Confirm device replacement'),
-        content: Text(language == 'tr'
-            ? '“$name” cihazının erişimi kaldırılacak ve bu kurulum etkinleştirilecek. Deneme süreniz değişmez.'
-            : language == 'de'
-                ? 'Der Zugang von „$name“ wird deaktiviert und diese Installation aktiviert. Die Testzeit bleibt unverändert.'
-                : 'Access for “$name” will be disabled and this installation activated. Your trial period stays unchanged.'),
-        actions: [
-          TextButton(
-            autofocus: true,
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(language == 'tr' ? 'İptal' : language == 'de' ? 'Abbrechen' : 'Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(language == 'tr' ? 'Cihazı değiştir'
-                : language == 'de' ? 'Gerät ersetzen' : 'Replace device'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    setState(() { _replacing = true; _replacementError = null; });
-    try {
-      await context.read<AuthProvider>().replaceActiveDevice(device['device_id'].toString());
-    } catch (e) {
-      if (mounted) setState(() => _replacementError = _replacementMessage(e, context.read<LocaleProvider>().locale.languageCode));
-    } finally {
-      if (mounted) setState(() => _replacing = false);
-    }
+    return language == 'de' ? de : language == 'tr' ? tr : en;
   }
 
   @override
   void initState() {
     super.initState();
-    if (widget.mode == _AccessStatusMode.pending) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) context.read<AuthProvider>().loadActiveDevices();
-      });
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _open());
+  }
+
+  Future<void> _open() async {
+    if (!mounted || _dialogOpen) return;
+    _dialogOpen = true;
+    final auth = context.read<AuthProvider>();
+    await auth.loadActiveDevices();
+    if (!mounted || !auth.devicePending) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, updateDialog) => Consumer<AuthProvider>(
+          builder: (dialogContext, current, _) {
+            final devices = current.activeDevices;
+            return AlertDialog(
+              title: Text(_tr('Geräteplatz belegt', 'Cihaz sınırına ulaşıldı', 'Device limit reached')),
+              content: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_tr(
+                        'Wähle ein bisheriges Gerät, das du durch dieses Gerät ersetzen möchtest.',
+                        'Bu cihazla değiştirmek istediğiniz eski cihazı seçin.',
+                        'Choose an existing device to replace with this one.',
+                      )),
+                      const SizedBox(height: 12),
+                      if (current.loadingDevices) const Center(child: CircularProgressIndicator()),
+                      if (!current.loadingDevices && devices.isEmpty)
+                        Text(_tr('Keine ersetzbaren Geräte gefunden. Bitte erneut prüfen.',
+                          'Değiştirilebilecek cihaz bulunamadı. Lütfen tekrar kontrol edin.',
+                          'No replaceable devices found. Please check again.')),
+                      for (final device in devices)
+                        RadioListTile<String>(
+                          contentPadding: EdgeInsets.zero,
+                          title: Text(device['device_name']?.toString() ?? _tr('Gerät', 'Cihaz', 'Device')),
+                          subtitle: Text(device['platform']?.toString() ?? ''),
+                          value: device['device_id'].toString(),
+                          groupValue: _selected,
+                          onChanged: _working ? null : (id) => updateDialog(() => _selected = id),
+                        ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 10),
+                        Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                      ],
+                      if (_working) const Center(child: CircularProgressIndicator()),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: _working ? null : () async {
+                    Navigator.of(dialogContext).pop();
+                    await context.read<AuthProvider>().logout();
+                  },
+                  child: Text(_tr('Abmelden', 'Çıkış yap', 'Log out')),
+                ),
+                TextButton(
+                  onPressed: _working ? null : () async {
+                    updateDialog(() => _error = null);
+                    await current.loadActiveDevices();
+                  },
+                  child: Text(_tr('Aktualisieren', 'Yenile', 'Refresh')),
+                ),
+                FilledButton(
+                  onPressed: _working || _selected == null ? null : () async {
+                    final id = _selected!;
+                    final selectedDevice = devices.where((d) => d['device_id'].toString() == id);
+                    if (selectedDevice.isEmpty) return;
+                    final name = selectedDevice.first['device_name']?.toString() ?? id;
+                    final confirmed = await showDialog<bool>(
+                      context: dialogContext,
+                      builder: (confirmationContext) => AlertDialog(
+                        title: Text(_tr('Gerät ersetzen?', 'Cihaz değiştirilsin mi?', 'Replace device?')),
+                        content: Text(_tr(
+                          '„$name“ wird abgemeldet. Die Testzeit bleibt unverändert.',
+                          '“$name” cihazının erişimi kaldırılacak. Deneme süresi değişmez.',
+                          '“$name” will lose access. Your trial period is unchanged.',
+                        )),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(confirmationContext, false),
+                            child: Text(_tr('Abbrechen', 'İptal', 'Cancel'))),
+                          FilledButton(onPressed: () => Navigator.pop(confirmationContext, true),
+                            child: Text(_tr('Ersetzen', 'Değiştir', 'Replace'))),
+                        ],
+                      ),
+                    );
+                    if (confirmed != true || !mounted) return;
+                    updateDialog(() { _working = true; _error = null; });
+                    try {
+                      await current.replaceActiveDevice(id);
+                      if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+                    } catch (_) {
+                      if (dialogContext.mounted) updateDialog(() {
+                        _error = _tr('Gerätewechsel nicht möglich. Bitte erneut versuchen.',
+                          'Cihaz değiştirilemedi. Lütfen tekrar deneyin.',
+                          'Device replacement failed. Please try again.');
+                      });
+                    } finally {
+                      if (dialogContext.mounted) updateDialog(() => _working = false);
+                    }
+                  },
+                  child: Text(_tr('Gerät ersetzen', 'Cihazı değiştir', 'Replace device')),
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    );
+    _dialogOpen = false;
   }
 
   @override
   Widget build(BuildContext context) {
+    return const Scaffold(body: Center(child: CircularProgressIndicator()));
+  }
+}
+
+/// Only hard blocks and access errors use a dedicated page.
+/// A pending replacement is handled by _DeviceActivationGate as a dialog.
+class _AccessStatusScreen extends StatelessWidget {
+  final _AccessStatusMode mode;
+  const _AccessStatusScreen({required this.mode});
+
+  @override
+  Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-
-    final language = context
-        .watch<LocaleProvider>()
-        .locale
-        .languageCode;
-
-    final isTurkish = language == 'tr';
-    final isGerman = language == 'de';
-
-    String title;
-    String description;
-    IconData symbol;
-
-    switch (widget.mode) {
-      case _AccessStatusMode.pending:
-        title = isTurkish
-            ? 'Cihaz değişimi gerekiyor'
-            : isGerman
-                ? 'Gerätewechsel erforderlich'
-                : 'Device replacement required';
-
-        description = isTurkish
-            ? 'Bu hesapta cihaz sınırına ulaşıldı. Önceki cihazınızı seçerek bu kurulumu etkinleştirebilirsiniz.'
-            : isGerman
-                ? 'Alle Geräteplätze dieses Kontos sind belegt. Wähle dein bisheriges Gerät aus, um diese Installation zu aktivieren.'
-                : 'All device slots for this account are occupied. Select your previous device to activate this installation.';
-
-        symbol = Icons.hourglass_top_rounded;
-        break;
-
-      case _AccessStatusMode.blocked:
-        title = isTurkish
-            ? 'Cihaz erişimi engellendi'
-            : isGerman
-                ? 'Gerät nicht freigegeben'
-                : 'Device access blocked';
-
-        description = isTurkish
-            ? 'Bu cihaz engellendi veya reddedildi.'
-            : isGerman
-                ? 'Dieses Gerät wurde gesperrt '
-                  'oder abgelehnt.'
-                : 'This device has been blocked '
-                  'or rejected.';
-
-        symbol = Icons.block_rounded;
-        break;
-
-      case _AccessStatusMode.error:
-        title = isTurkish
-            ? 'Erişim kontrolü başarısız'
-            : isGerman
-                ? 'Zugangsprüfung fehlgeschlagen'
-                : 'Access verification failed';
-
-        description = auth.error ??
-            (isTurkish
-                ? 'Lütfen tekrar deneyin.'
-                : isGerman
-                    ? 'Bitte versuche es erneut.'
-                    : 'Please try again.');
-
-        symbol = Icons.error_outline_rounded;
-        break;
-    }
-
+    final lang = context.watch<LocaleProvider>().locale.languageCode;
+    String copy(String de, String tr, String en) =>
+        lang == 'de' ? de : lang == 'tr' ? tr : en;
+    final blocked = mode == _AccessStatusMode.blocked;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Streamia Player'),
-      ),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: 480,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    symbol,
-                    size: 56,
-                    color: Theme.of(context)
-                        .colorScheme
-                        .primary,
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  Text(
-                    title,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 23,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  SelectableText(
-                    description,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 15,
-                    ),
-                  ),
-
-                  if (auth.deviceId != null) ...[
-                    const SizedBox(height: 20),
-
-                    const Text(
-                      'Device ID',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-
-                    const SizedBox(height: 6),
-
-                    SelectableText(
-                      auth.deviceId!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-
-                  if (widget.mode == _AccessStatusMode.pending &&
-                      auth.hasAccountAccess) ...[
-                    const SizedBox(height: 24),
-                    Text(
-                      isTurkish ? 'Kayıtlı cihazlarınız'
-                          : isGerman ? 'Deine aktiven Geräte'
-                          : 'Your active devices',
-                      style: const TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 12),
-                    if (auth.loadingDevices)
-                      const CircularProgressIndicator()
-                    else if (auth.deviceListError != null)
-                      SelectableText(_replacementMessage(auth.deviceListError!, language),
-                        textAlign: TextAlign.center)
-                    else if (auth.activeDevices.isEmpty)
-                      Text(isTurkish ? 'Aktif cihaz bulunamadı.'
-                          : isGerman ? 'Keine aktiven Geräte gefunden.'
-                          : 'No active devices found.')
-                    else
-                      ...auth.activeDevices.map((device) {
-                        final id = device['device_id']?.toString() ?? '';
-                        final name = (device['device_name']?.toString().trim().isNotEmpty ?? false)
-                            ? device['device_name'].toString()
-                            : (isTurkish ? 'İsimsiz cihaz'
-                                : isGerman ? 'Unbenanntes Gerät' : 'Unnamed device');
-                        return Card(
-                          child: RadioListTile<String>(
-                            value: id,
-                            groupValue: _selectedDeviceId,
-                            onChanged: (value) => setState(() => _selectedDeviceId = value),
-                            title: Text(name),
-                            subtitle: Text(device['platform']?.toString() ?? ''),
-                            secondary: const Icon(Icons.devices),
-                          ),
-                        );
-                      }),
-                    if (auth.activeDevices.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _selectedDeviceId == null || _replacing ? null : () {
-                            final matches = auth.activeDevices.where(
-                              (device) => device['device_id']?.toString() == _selectedDeviceId,
-                            );
-                            if (matches.isNotEmpty) _confirmReplacement(matches.first);
-                          },
-                          icon: const Icon(Icons.swap_horiz),
-                          label: Text(isTurkish ? 'Seçilen cihazı değiştir'
-                              : isGerman ? 'Ausgewähltes Gerät ersetzen'
-                              : 'Replace selected device'),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    if (_replacing) const CircularProgressIndicator(),
-                    if (_replacementError != null)
-                      SelectableText(_replacementError!,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                    Text(
-                      isTurkish
-                          ? 'Mevcut cihazı seçip değiştirerek bu kurulumu etkinleştirebilirsiniz. Deneme süresi sıfırlanmaz.'
-                          : isGerman
-                              ? 'Wähle dein bisheriges Gerät und ersetze es durch diese Installation. Die Testzeit wird nicht zurückgesetzt.'
-                              : 'Select your previous device to activate this installation. Your trial period will not reset.',
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: auth.loadingDevices ? null
-                          : () => auth.loadActiveDevices(),
-                      icon: const Icon(Icons.devices),
-                      label: Text(isTurkish ? 'Listeyi yenile'
-                          : isGerman ? 'Geräteliste aktualisieren'
-                          : 'Refresh device list'),
-                    ),
-                  ],
-
-                  const SizedBox(height: 28),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: auth.isBusy
-                          ? null
-                          : () {
-                              auth.refreshDeviceAndAccess();
-                            },
-                      icon: const Icon(Icons.refresh),
-                      label: Text(
-                        isTurkish
-                            ? 'Tekrar kontrol et'
-                            : isGerman
-                                ? 'Erneut prüfen'
-                                : 'Check again',
-                      ),
-                    ),
-                  ),
-
+      appBar: AppBar(title: const Text('Streamia Player')),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(blocked ? Icons.block : Icons.error_outline,
+                    size: 48, color: Theme.of(context).colorScheme.error),
+                const SizedBox(height: 16),
+                Text(blocked
+                    ? copy('Dieses Gerät wurde gesperrt.', 'Bu cihaz engellendi.',
+                        'This device has been blocked.')
+                    : copy('Die Zugangsprüfung ist fehlgeschlagen.',
+                        'Erişim kontrolü başarısız.', 'Access verification failed.'),
+                    textAlign: TextAlign.center),
+                if (!blocked && auth.error != null) ...[
                   const SizedBox(height: 12),
-
-                  TextButton(
-                    onPressed: auth.isBusy
-                        ? null
-                        : () {
-                            auth.logout();
-                          },
-                    child: Text(
-                      isTurkish
-                          ? 'Çıkış yap'
-                          : isGerman
-                              ? 'Abmelden'
-                              : 'Log out',
-                    ),
-                  ),
+                  Text(copy('Bitte versuche es erneut.', 'Lütfen tekrar deneyin.',
+                      'Please try again.'), textAlign: TextAlign.center),
                 ],
-              ),
+                const SizedBox(height: 20),
+                FilledButton(
+                  onPressed: auth.isBusy ? null : auth.refreshDeviceAndAccess,
+                  child: Text(copy('Erneut prüfen', 'Tekrar kontrol et', 'Check again')),
+                ),
+                TextButton(
+                  onPressed: auth.isBusy ? null : auth.logout,
+                  child: Text(copy('Abmelden', 'Çıkış yap', 'Log out')),
+                ),
+              ],
             ),
           ),
         ),
