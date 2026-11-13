@@ -29,9 +29,19 @@ class StreamRecordingService : Service() {
         const val EXTRA_URL = "streamUrl"
         const val EXTRA_NAME = "channelName"
 
-        private const val NOTIFICATION_ID = 2401
         private const val CHANNEL_ID = "streamia_recordings"
+        private const val NOTIFICATION_ID = 2401
         private const val MIME_TS = "video/mp2t"
+
+        // 3.8 GiB per file, below the FAT32 4 GiB limit.
+        private const val MAX_PART_BYTES =
+            3_800L * 1024L * 1024L
+
+        // Reserve 128 MiB for local app storage.
+        private const val LOCAL_RESERVE_BYTES =
+            128L * 1024L * 1024L
+
+        private const val BUFFER_SIZE = 64 * 1024
 
         private val busy = AtomicBoolean(false)
         private val writing = AtomicBoolean(false)
@@ -60,6 +70,14 @@ class StreamRecordingService : Service() {
             get() = writing.get()
     }
 
+    private data class RecordingTarget(
+        val output: OutputStream,
+        val location: String,
+        val localFile: File?,
+        val documentUri: Uri?,
+        val localDirectory: File?
+    )
+
     @Volatile
     private var connection: HttpURLConnection? = null
 
@@ -67,7 +85,7 @@ class StreamRecordingService : Service() {
     private var worker: Thread? = null
 
     @Volatile
-    private var latestStartId: Int = 0
+    private var latestStartId = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -84,6 +102,7 @@ class StreamRecordingService : Service() {
         latestStartId = startId
 
         when (intent?.action) {
+
             ACTION_STOP -> {
                 stopRequested.set(true)
                 connection?.disconnect()
@@ -110,11 +129,10 @@ class StreamRecordingService : Service() {
 
                 stopRequested.set(false)
                 writing.set(false)
-
                 bytesWritten = 0L
                 startedAt = 0L
-                outputPath = null
                 lastError = null
+                outputPath = null
 
                 if (streamUrl.isNullOrBlank()) {
                     lastError =
@@ -162,7 +180,7 @@ class StreamRecordingService : Service() {
         return START_NOT_STICKY
     }
 
-    private fun recordingFolderUri(): Uri? {
+    private fun selectedRecordingFolder(): Uri? {
         val preferences = getSharedPreferences(
             "streamia_recording_storage",
             MODE_PRIVATE
@@ -175,51 +193,53 @@ class StreamRecordingService : Service() {
 
         val uri = Uri.parse(stored)
 
-        val permissionAvailable =
+        val permitted =
             contentResolver.persistedUriPermissions.any {
-                it.uri == uri && it.isWritePermission
+                it.uri == uri &&
+                    it.isWritePermission
             }
 
-        require(permissionAvailable) {
-            "Keine gültige Schreibberechtigung für den Aufnahmeordner."
+        require(permitted) {
+            "Schreibberechtigung für den Aufnahmeordner fehlt."
         }
 
         return uri
     }
 
-    private fun createRecordingName(
+    private fun safeChannelName(
         channelName: String
     ): String {
-        val safeName = channelName
+        return channelName
             .replace(
                 Regex("[^A-Za-z0-9_-]"),
                 "_"
             )
             .take(60)
             .ifBlank { "Live_TV" }
+    }
 
+    private fun recordingBaseName(
+        channelName: String
+    ): String {
         val timestamp = SimpleDateFormat(
             "yyyyMMdd_HHmmss_SSS",
             Locale.US
         ).format(Date())
 
-        return "${safeName}_${timestamp}.ts"
+        return "${safeChannelName(channelName)}_$timestamp"
     }
 
-    private data class RecordingTarget(
-        val stream: OutputStream,
-        val location: String,
-        val localFile: File?,
-        val documentUri: Uri?
-    )
-
-    private fun createRecordingTarget(
-        channelName: String
+    private fun createTarget(
+        baseName: String,
+        partNumber: Int,
+        folderUri: Uri?
     ): RecordingTarget {
-        val fileName =
-            createRecordingName(channelName)
+        val part = partNumber
+            .toString()
+            .padStart(3, '0')
 
-        val folderUri = recordingFolderUri()
+        val fileName =
+            "${baseName}_part${part}.ts"
 
         if (folderUri != null) {
             val documentUri =
@@ -229,23 +249,24 @@ class StreamRecordingService : Service() {
                     MIME_TS,
                     fileName
                 ) ?: throw IllegalStateException(
-                    "Aufnahmedatei konnte auf dem Speichermedium nicht erstellt werden."
+                    "Aufnahmedatei konnte nicht erstellt werden."
                 )
 
             try {
-                val stream =
+                val output =
                     contentResolver.openOutputStream(
                         documentUri,
                         "w"
                     ) ?: throw IllegalStateException(
-                        "Speichermedium ist nicht beschreibbar."
+                        "Aufnahmeordner ist nicht beschreibbar."
                     )
 
                 return RecordingTarget(
-                    stream = stream.buffered(),
+                    output = output.buffered(),
                     location = documentUri.toString(),
                     localFile = null,
-                    documentUri = documentUri
+                    documentUri = documentUri,
+                    localDirectory = null
                 )
             } catch (error: Exception) {
                 try {
@@ -271,21 +292,26 @@ class StreamRecordingService : Service() {
             "Lokaler Aufnahmeordner konnte nicht erstellt werden."
         }
 
+        require(
+            directory.usableSpace > LOCAL_RESERVE_BYTES
+        ) {
+            "Nicht genügend freier Gerätespeicher."
+        }
+
         val file = File(directory, fileName)
 
         return RecordingTarget(
-            stream = file.outputStream().buffered(),
+            output = file.outputStream().buffered(),
             location = file.absolutePath,
             localFile = file,
-            documentUri = null
+            documentUri = null,
+            localDirectory = directory
         )
     }
 
     private fun deleteEmptyTarget(
-        target: RecordingTarget?
+        target: RecordingTarget
     ) {
-        if (target == null) return
-
         try {
             if (target.localFile != null) {
                 target.localFile.delete()
@@ -299,11 +325,29 @@ class StreamRecordingService : Service() {
         }
     }
 
+    private fun verifyLocalSpace(
+        target: RecordingTarget
+    ) {
+        val directory =
+            target.localDirectory ?: return
+
+        if (
+            directory.usableSpace <=
+            LOCAL_RESERVE_BYTES
+        ) {
+            throw IllegalStateException(
+                "Aufnahme gestoppt: Gerätespeicher fast voll."
+            )
+        }
+    }
+
     private fun recordStream(
         streamUrl: String,
         channelName: String
     ) {
         var target: RecordingTarget? = null
+        var partBytes = 0L
+        var partNumber = 0
 
         try {
             val url = URL(streamUrl)
@@ -316,8 +360,7 @@ class StreamRecordingService : Service() {
             }
 
             require(
-                !url.path.lowercase()
-                    .endsWith(".m3u8")
+                !url.path.lowercase().endsWith(".m3u8")
             ) {
                 "HLS-Aufnahmen werden noch nicht unterstützt."
             }
@@ -328,7 +371,6 @@ class StreamRecordingService : Service() {
                 url.openConnection() as HttpURLConnection
 
             connection = http
-
             http.connectTimeout = 15000
             http.readTimeout = 30000
             http.instanceFollowRedirects = true
@@ -360,7 +402,14 @@ class StreamRecordingService : Service() {
                 "HLS-Playlists werden noch nicht unterstützt."
             }
 
+            val folderUri =
+                selectedRecordingFolder()
+
+            val baseName =
+                recordingBaseName(channelName)
+
             http.inputStream.use { input ->
+
                 val header = ByteArray(188 * 3)
                 var received = 0
 
@@ -393,62 +442,116 @@ class StreamRecordingService : Service() {
                     "Kein direktes MPEG-TS-Format erkannt."
                 }
 
-                if (stopRequested.get()) return
+                val buffer = ByteArray(BUFFER_SIZE)
 
-                target = createRecordingTarget(
-                    channelName
-                )
+                fun openNextPart() {
+                    if (stopRequested.get()) return
 
-                val destination = target!!
+                    partNumber++
 
-                destination.stream.use { output ->
-                    if (!stopRequested.get()) {
-                        output.write(
-                            header,
-                            0,
-                            received
+                    target = createTarget(
+                        baseName,
+                        partNumber,
+                        folderUri
+                    )
+
+                    partBytes = 0L
+                }
+
+                fun writeData(
+                    source: ByteArray,
+                    offset: Int,
+                    length: Int
+                ) {
+                    var position = offset
+                    var remaining = length
+
+                    while (
+                        remaining > 0 &&
+                        !stopRequested.get()
+                    ) {
+                        if (target == null) {
+                            openNextPart()
+                        }
+
+                        val current =
+                            target ?: break
+
+                        if (
+                            partBytes >= MAX_PART_BYTES
+                        ) {
+                            current.output.flush()
+                            current.output.close()
+
+                            target = null
+                            openNextPart()
+                            continue
+                        }
+
+                        verifyLocalSpace(current)
+
+                        val available =
+                            MAX_PART_BYTES - partBytes
+
+                        val writeCount = minOf(
+                            remaining.toLong(),
+                            available
+                        ).toInt()
+
+                        current.output.write(
+                            source,
+                            position,
+                            writeCount
                         )
 
-                        bytesWritten =
-                            received.toLong()
+                        partBytes +=
+                            writeCount.toLong()
 
-                        startedAt =
-                            SystemClock.elapsedRealtime()
+                        bytesWritten +=
+                            writeCount.toLong()
+
+                        if (startedAt == 0L) {
+                            startedAt =
+                                SystemClock.elapsedRealtime()
+                        }
 
                         outputPath =
-                            destination.location
+                            current.location
 
                         writing.set(true)
 
-                        val buffer =
-                            ByteArray(64 * 1024)
-
-                        while (!stopRequested.get()) {
-                            val count =
-                                input.read(buffer)
-
-                            if (count < 0) break
-                            if (count == 0) continue
-
-                            output.write(
-                                buffer,
-                                0,
-                                count
-                            )
-
-                            bytesWritten +=
-                                count.toLong()
-                        }
-
-                        output.flush()
+                        position += writeCount
+                        remaining -= writeCount
                     }
                 }
+
+                writeData(
+                    header,
+                    0,
+                    received
+                )
+
+                while (!stopRequested.get()) {
+                    val count = input.read(buffer)
+
+                    if (count < 0) break
+                    if (count == 0) continue
+
+                    writeData(
+                        buffer,
+                        0,
+                        count
+                    )
+                }
+
+                target?.output?.flush()
             }
 
             if (!stopRequested.get()) {
                 lastError =
                     "Der Stream wurde beendet."
             }
+
         } catch (error: Exception) {
             if (!stopRequested.get()) {
                 lastError = when (error) {
@@ -457,23 +560,40 @@ class StreamRecordingService : Service() {
                             ?: "Streamformat nicht unterstützt."
 
                     is SecurityException ->
-                        "Kein Schreibzugriff auf den Aufnahmeordner."
+                        "Keine Berechtigung für den Aufnahmeordner."
+
+                    is IllegalStateException ->
+                        error.message
+                            ?: "Aufnahme konnte nicht fortgesetzt werden."
 
                     else ->
                         "Aufnahme durch Netzwerk- oder Speicherfehler beendet: " +
-                            (error.message ?: "Unbekannter Fehler")
+                            (error.message
+                                ?: "Unbekannter Fehler")
                 }
             }
         } finally {
             writing.set(false)
 
+            try {
+                target?.output?.close()
+            } catch (error: Exception) {
+                if (!stopRequested.get() &&
+                    lastError == null
+                ) {
+                    lastError =
+                        "Aufnahmedatei konnte nicht vollständig geschlossen werden."
+                }
+            }
+
+            if (partBytes == 0L) {
+                target?.let {
+                    deleteEmptyTarget(it)
+                }
+            }
+
             connection?.disconnect()
             connection = null
-
-            if (bytesWritten == 0L) {
-                deleteEmptyTarget(target)
-                outputPath = null
-            }
         }
     }
 
