@@ -128,12 +128,44 @@ class AuthProvider extends ChangeNotifier {
     _error = null;
   }
 
+  // Android 8+: ANDROID_ID is scoped to app signing key, Android user and device.
+  // It generally survives uninstall/reinstall with the SAME signing key.
+  // It is not an IMEI, cannot be treated as unforgeable proof of hardware,
+  // and may change after a factory reset, signing-key change or user switch.
   Future<String> _getInstallationId() async {
-    if (_installationId != null && _installationId!.isNotEmpty) return _installationId!;
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final id = (await _deviceChannel.invokeMethod<String>('getAndroidId'))
+            ?.trim().toLowerCase();
+        if (id != null && RegExp(r'^[0-9a-f]{16}$').hasMatch(id) &&
+            id != '9774d56d682e549c' && id != '0000000000000000') {
+          final stableId = 'android-v1-$id';
+          _installationId = stableId;
+          return stableId;
+        }
+      } on PlatformException catch (error) {
+        debugPrint('Android device identity unavailable: ${error.code}');
+      } on MissingPluginException {
+        debugPrint('Android device identity channel unavailable');
+      }
+    }
+
+    // For other platforms or devices without an accessible Android ID,
+    // retain the existing installation-scoped random identifier.
+    if (_installationId != null && _installationId!.isNotEmpty &&
+        !_installationId!.startsWith('android-v1-')) {
+      return _installationId!;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final saved = prefs.getString(_installKey);
+    if (saved != null && saved.isNotEmpty &&
+        !saved.startsWith('android-v1-')) {
+      _installationId = saved;
+      return saved;
+    }
     final random = Random.secure();
     final bytes = List<int>.generate(32, (_) => random.nextInt(256));
     _installationId = base64Url.encode(bytes).replaceAll('=', '');
-    final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_installKey, _installationId!);
     return _installationId!;
   }
@@ -358,7 +390,13 @@ class AuthProvider extends ChangeNotifier {
       if (message.contains('registration returned no user')) return 'registration_failed';
       return 'auth_unavailable';
     }
-    if (error is PostgrestException) return error.message;
+    if (error is PostgrestException) {
+      final message = error.message.toLowerCase();
+      if (message.contains('once per 24 hours')) {
+        return 'device_replacement_cooldown';
+      }
+      return 'device_request_failed';
+    }
     return error.toString().replaceFirst('Exception: ', '');
   }
 
