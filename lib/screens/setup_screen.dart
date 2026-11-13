@@ -273,33 +273,48 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       _loadingMessage = _copy('Lokale M3U-Datei wird gelesen…',
         'Yerel M3U dosyası okunuyor…', 'Reading local M3U file…');
     });
+    final staged = ContentProvider();
+    String? newlyCopiedPath;
+    bool committed = false;
     try {
       final file = File(path);
       if (!await file.exists()) {
         throw const FileSystemException('Selected playlist is no longer available.');
       }
-      final contentProvider = context.read<ContentProvider>();
-      await PlaylistParser.parseAndLoadFile(path, contentProvider);
+      // Parse into an isolated provider. The active library is not touched
+      // until source credentials and playlist metadata have been committed.
+      await PlaylistParser.parseAndLoadFile(path, staged);
       if (!mounted) return;
-      // Keep a private copy so reactivation does not depend on the picker cache.
+      final sourceKey = staged.sourceKey;
+      if (sourceKey.isEmpty || sourceKey == 'legacy:default') {
+        throw StateError('The imported playlist has no valid source identity.');
+      }
       final directory = await getApplicationDocumentsDirectory();
       final playlistDirectory = Directory('${directory.path}/streamia_playlists');
       await playlistDirectory.create(recursive: true);
-      final safeKey = contentProvider.sourceKey.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-      final localPath = '${playlistDirectory.path}/$safeKey.m3u';
-      if (file.absolute.path != File(localPath).absolute.path) {
-        await file.copy(localPath);
-      }
+      final safeKey = sourceKey.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+      // Use a unique path: never overwrite the previous working local file
+      // before the new profile and source have been saved.
+      final localPath = '${playlistDirectory.path}/${safeKey}_${DateTime.now().microsecondsSinceEpoch}.m3u';
+      await file.copy(localPath);
+      newlyCopiedPath = localPath;
       await _persistImportedPlaylist(
         source: PlaylistSourceConfig(
-          sourceKey: contentProvider.sourceKey, type: 'm3u', localFilePath: localPath,
+          sourceKey: sourceKey, type: 'm3u', localFilePath: localPath,
         ),
         name: _m3uNameController.text,
         type: 'm3u',
         replaceTrial: replaceTrial,
       );
-      contentProvider.setLoaded(true);
+      committed = true;
       if (!mounted) return;
+      context.read<ContentProvider>().replaceLibrary(
+        channels: staged.channels,
+        vod: staged.vodItems,
+        series: staged.series,
+        sourceKey: sourceKey,
+        sourceLabel: _m3uNameController.text.trim(),
+      );
       if (widget.returnToPreviousOnSuccess) {
         Navigator.of(context).pop(true);
       } else {
@@ -307,10 +322,16 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
           MaterialPageRoute(builder: (_) => const DashboardScreen()),
         );
       }
-    } catch (_) {
-      _showError(_copy('Die M3U-Datei konnte nicht gelesen werden.',
-        'M3U dosyası okunamadı.', 'Could not read the M3U file.'));
+    } catch (e) {
+      _showError(_copy('Die M3U-Datei konnte nicht gelesen oder gespeichert werden.',
+        'M3U dosyası okunamadı veya kaydedilemedi.',
+        'Could not read or save the M3U file.'));
     } finally {
+      if (!committed && newlyCopiedPath != null) {
+        try { await File(newlyCopiedPath).delete(); } catch (_) {}
+      }
+      await staged.waitForCatalogWrites();
+      staged.dispose();
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -319,25 +340,39 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     if (input.isEmpty || !mounted || _isLoading) return;
     final replaceTrial = await _confirmTrialReplacement();
     if (replaceTrial == null || !mounted) return;
-    setState(() { _isLoading = true; _importError = null; _loadingMessage = _copy('Playlist wird verarbeitet…', 'Oynatma listesi işleniyor…', 'Processing playlist…'); });
+    setState(() {
+      _isLoading = true;
+      _importError = null;
+      _loadingMessage = _copy('Playlist wird verarbeitet…',
+        'Oynatma listesi işleniyor…', 'Processing playlist…');
+    });
+    final staged = ContentProvider();
+    String? newlyWrittenPath;
+    bool committed = false;
     try {
-      final contentProvider = context.read<ContentProvider>();
-      await PlaylistParser.parseAndLoad(input, contentProvider)
+      await PlaylistParser.parseAndLoad(input, staged)
           .timeout(const Duration(seconds: 90));
+      if (!mounted) return;
+      final sourceKey = staged.sourceKey;
+      if (sourceKey.isEmpty || sourceKey == 'legacy:default') {
+        throw StateError('The imported playlist has no valid source identity.');
+      }
       PlaylistSourceConfig source;
-      if (input.trim().startsWith('http://') || input.trim().startsWith('https://')) {
+      if (input.trim().startsWith('http://') ||
+          input.trim().startsWith('https://')) {
         source = PlaylistSourceConfig(
-          sourceKey: contentProvider.sourceKey, type: 'm3u', m3uUrl: input.trim(),
+          sourceKey: sourceKey, type: 'm3u', m3uUrl: input.trim(),
         );
       } else {
         final directory = await getApplicationDocumentsDirectory();
         final playlistDirectory = Directory('${directory.path}/streamia_playlists');
         await playlistDirectory.create(recursive: true);
-        final safeKey = contentProvider.sourceKey.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
-        final localPath = '${playlistDirectory.path}/$safeKey.m3u';
+        final safeKey = sourceKey.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+        final localPath = '${playlistDirectory.path}/${safeKey}_${DateTime.now().microsecondsSinceEpoch}.m3u';
         await File(localPath).writeAsString(input, flush: true);
+        newlyWrittenPath = localPath;
         source = PlaylistSourceConfig(
-          sourceKey: contentProvider.sourceKey, type: 'm3u', localFilePath: localPath,
+          sourceKey: sourceKey, type: 'm3u', localFilePath: localPath,
         );
       }
       await _persistImportedPlaylist(
@@ -346,24 +381,32 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         type: 'm3u',
         replaceTrial: replaceTrial,
       );
-      contentProvider.setLoaded(true);
-      
-      if (mounted) {
-        if (widget.returnToPreviousOnSuccess) {
-          Navigator.of(context).pop(true);
-        } else {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const DashboardScreen()),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Fehler beim Laden: $e')),
+      committed = true;
+      if (!mounted) return;
+      context.read<ContentProvider>().replaceLibrary(
+        channels: staged.channels,
+        vod: staged.vodItems,
+        series: staged.series,
+        sourceKey: sourceKey,
+        sourceLabel: _m3uNameController.text.trim(),
+      );
+      if (widget.returnToPreviousOnSuccess) {
+        Navigator.of(context).pop(true);
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const DashboardScreen()),
         );
       }
+    } catch (e) {
+      _showError(_copy('Fehler beim Laden oder Speichern der Playlist.',
+        'Oynatma listesi yüklenirken veya kaydedilirken hata oluştu.',
+        'Could not load or save the playlist.'));
     } finally {
+      if (!committed && newlyWrittenPath != null) {
+        try { await File(newlyWrittenPath).delete(); } catch (_) {}
+      }
+      await staged.waitForCatalogWrites();
+      staged.dispose();
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -406,13 +449,6 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       // be included in a value later hashed or exported.
       final sourceIdentity = 'xtream:v2:${server.trim().replaceFirst(RegExp(r'/+$'), '').toLowerCase()}|${user.trim()}';
       final sourceKey = 'src:v1:${sha256.convert(utf8.encode(sourceIdentity)).toString()}';
-      context.read<ContentProvider>().replaceLibrary(
-        channels: live,
-        vod: vod,
-        series: series,
-        sourceKey: sourceKey,
-        sourceLabel: Uri.tryParse(server)?.host ?? 'Xtream',
-      );
       await _persistImportedPlaylist(
         source: PlaylistSourceConfig(
           sourceKey: sourceKey, type: 'xtream', serverUrl: server.trim(),
@@ -421,6 +457,13 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         name: _xtreamNameController.text,
         type: 'xtream',
         replaceTrial: replaceTrial,
+      );
+      context.read<ContentProvider>().replaceLibrary(
+        channels: live,
+        vod: vod,
+        series: series,
+        sourceKey: sourceKey,
+        sourceLabel: Uri.tryParse(server)?.host ?? 'Xtream',
       );
       context.read<ContentProvider>().setLoaded(true);
       if (widget.returnToPreviousOnSuccess) {
