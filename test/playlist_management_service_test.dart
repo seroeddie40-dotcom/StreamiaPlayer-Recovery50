@@ -1,11 +1,11 @@
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:streamia_player/models/playlist_profile.dart';
-import 'package:streamia_player/models/playlist_source_config.dart';
-import 'package:streamia_player/services/playlist_management_service.dart';
-import 'package:streamia_player/services/playlist_profile_store.dart';
-import 'package:streamia_player/services/playlist_source_store.dart';
+import '../lib/models/playlist_profile.dart';
+import '../lib/models/playlist_source_config.dart';
+import '../lib/services/playlist_management_service.dart';
+import '../lib/services/playlist_profile_store.dart';
+import '../lib/services/playlist_source_store.dart';
 
 class FakeProfileStore extends PlaylistProfileStore {
   List<PlaylistProfile> profiles = [];
@@ -17,7 +17,9 @@ class FakeProfileStore extends PlaylistProfileStore {
   }
 
   @override
-  Future<void> saveAll(List<PlaylistProfile> value) async {
+  Future<void> saveAll(
+    List<PlaylistProfile> value,
+  ) async {
     if (failNextSave) {
       failNextSave = false;
       throw StateError('Simulated metadata failure');
@@ -31,17 +33,23 @@ class FakeSourceStore extends PlaylistSourceStore {
   final Map<String, PlaylistSourceConfig> sources = {};
 
   @override
-  Future<void> save(PlaylistSourceConfig config) async {
+  Future<void> save(
+    PlaylistSourceConfig config,
+  ) async {
     sources[config.sourceKey] = config;
   }
 
   @override
-  Future<PlaylistSourceConfig?> read(String sourceKey) async {
+  Future<PlaylistSourceConfig?> read(
+    String sourceKey,
+  ) async {
     return sources[sourceKey];
   }
 
   @override
-  Future<void> delete(String sourceKey) async {
+  Future<void> delete(
+    String sourceKey,
+  ) async {
     sources.remove(sourceKey);
   }
 }
@@ -67,8 +75,8 @@ PlaylistSourceConfig makeSource(String key) {
 }
 
 void main() {
-  group('Trial entitlement detection', () {
-    test('recognizes an active trial', () {
+  group('Entitlement detection', () {
+    test('active trial is recognized', () {
       expect(
         PlaylistManagementService.isTrialAccess({
           'has_access': true,
@@ -79,7 +87,7 @@ void main() {
       );
     });
 
-    test('does not mistake Starter Pro for a trial', () {
+    test('Starter Pro is not a trial', () {
       expect(
         PlaylistManagementService.isTrialAccess({
           'has_access': true,
@@ -91,7 +99,7 @@ void main() {
       );
     });
 
-    test('does not mistake an admin grant for a trial', () {
+    test('admin grant is not a trial', () {
       expect(
         PlaylistManagementService.isTrialAccess({
           'has_access': true,
@@ -102,13 +110,20 @@ void main() {
       );
     });
 
-    test('does not accept an expired trial', () {
+    test('expired trial is not active', () {
       expect(
         PlaylistManagementService.isTrialAccess({
           'has_access': false,
           'access_status': 'trial',
           'entitlement_source': 'trial',
         }),
+        isFalse,
+      );
+    });
+
+    test('missing entitlement is not a trial', () {
+      expect(
+        PlaylistManagementService.isTrialAccess(null),
         isFalse,
       );
     });
@@ -129,31 +144,32 @@ void main() {
       );
     });
 
-    test('allows the first trial playlist', () async {
-      await service.saveImportedPlaylist(
-        profile: makeProfile('first'),
-        source: makeSource('first'),
-        isTrial: true,
+    Future<void> add(
+      String key, {
+      bool isTrial = true,
+      bool replace = false,
+    }) {
+      return service.saveImportedPlaylist(
+        profile: makeProfile(key),
+        source: makeSource(key),
+        isTrial: isTrial,
+        replaceExistingTrialPlaylist: replace,
       );
+    }
+
+    test('first trial playlist is allowed', () async {
+      await add('first');
 
       expect(profiles.profiles.length, 1);
       expect(profiles.profiles.single.sourceKey, 'first');
       expect(sources.sources.containsKey('first'), isTrue);
     });
 
-    test('rejects a second trial playlist', () async {
-      await service.saveImportedPlaylist(
-        profile: makeProfile('first'),
-        source: makeSource('first'),
-        isTrial: true,
-      );
+    test('second trial playlist is rejected', () async {
+      await add('first');
 
       await expectLater(
-        service.saveImportedPlaylist(
-          profile: makeProfile('second'),
-          source: makeSource('second'),
-          isTrial: true,
-        ),
+        add('second'),
         throwsStateError,
       );
 
@@ -162,19 +178,29 @@ void main() {
       expect(sources.sources.containsKey('second'), isFalse);
     });
 
-    test('allows a confirmed trial replacement', () async {
-      await service.saveImportedPlaylist(
-        profile: makeProfile('first'),
-        source: makeSource('first'),
-        isTrial: true,
+    test('trial replacement requires confirmation', () async {
+      await add('first');
+
+      expect(
+        await service.requiresReplacementConfirmation(
+          sourceKey: 'second',
+          isTrial: true,
+        ),
+        isTrue,
       );
 
-      await service.saveImportedPlaylist(
-        profile: makeProfile('second'),
-        source: makeSource('second'),
-        isTrial: true,
-        replaceExistingTrialPlaylist: true,
+      expect(
+        await service.requiresReplacementConfirmation(
+          sourceKey: 'first',
+          isTrial: true,
+        ),
+        isFalse,
       );
+    });
+
+    test('confirmed trial replacement works', () async {
+      await add('first');
+      await add('second', replace: true);
 
       expect(profiles.profiles.length, 1);
       expect(profiles.profiles.single.sourceKey, 'second');
@@ -182,39 +208,29 @@ void main() {
       expect(sources.sources.containsKey('second'), isTrue);
     });
 
-    test('allows multiple paid playlists', () async {
-      await service.saveImportedPlaylist(
-        profile: makeProfile('first'),
-        source: makeSource('first'),
-        isTrial: false,
-      );
+    test('same trial playlist can be updated', () async {
+      await add('first');
+      await add('first');
 
-      await service.saveImportedPlaylist(
-        profile: makeProfile('second'),
-        source: makeSource('second'),
-        isTrial: false,
-      );
+      expect(profiles.profiles.length, 1);
+      expect(sources.sources.length, 1);
+    });
+
+    test('paid accounts can store multiple playlists', () async {
+      await add('first', isTrial: false);
+      await add('second', isTrial: false);
 
       expect(profiles.profiles.length, 2);
       expect(sources.sources.length, 2);
     });
 
-    test('keeps old playlist when metadata save fails', () async {
-      await service.saveImportedPlaylist(
-        profile: makeProfile('first'),
-        source: makeSource('first'),
-        isTrial: true,
-      );
+    test('old playlist survives metadata failure', () async {
+      await add('first');
 
       profiles.failNextSave = true;
 
       await expectLater(
-        service.saveImportedPlaylist(
-          profile: makeProfile('second'),
-          source: makeSource('second'),
-          isTrial: true,
-          replaceExistingTrialPlaylist: true,
-        ),
+        add('second', replace: true),
         throwsStateError,
       );
 
@@ -224,17 +240,30 @@ void main() {
       expect(sources.sources.containsKey('second'), isFalse);
     });
 
-    test('deletes metadata and credentials', () async {
-      await service.saveImportedPlaylist(
-        profile: makeProfile('first'),
-        source: makeSource('first'),
-        isTrial: true,
-      );
+    test('playlist deletion removes credentials', () async {
+      await add('first');
 
       await service.deletePlaylist('first');
 
       expect(profiles.profiles, isEmpty);
       expect(sources.sources.containsKey('first'), isFalse);
+    });
+
+    test('concurrent trial additions cannot exceed limit', () async {
+      final results = await Future.wait([
+        add('first').then(
+          (_) => true,
+          onError: (Object _) => false,
+        ),
+        add('second').then(
+          (_) => true,
+          onError: (Object _) => false,
+        ),
+      ]);
+
+      expect(results.where((success) => success).length, 1);
+      expect(profiles.profiles.length, 1);
+      expect(sources.sources.length, 1);
     });
   });
 }
