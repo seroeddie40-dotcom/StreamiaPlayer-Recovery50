@@ -1,28 +1,10 @@
-ebdave
-Search
-
-
-Code and config
-Dart viewer
-To open a Dart file, drop it in the box below. It opens straight away, even with no extension or the wrong one. Your browser opens it on your device: nothing is uploaded.
-
-android-debug-apk.yml
-YAML · 4.0 KB · 5 keys
-Another file
-View
-Text
-Bytes
-Details
-
-Wrap lines
-
 name: Streamia Player - Android Debug APK and checks
 
-on:
+"on":
   push:
     branches:
       - main
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   contents: read
