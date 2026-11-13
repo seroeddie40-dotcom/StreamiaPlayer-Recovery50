@@ -409,7 +409,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       // Live TV must never be paused by OK. Open its channel/category
       // navigation instead; the recording control remains accessible.
       if (widget.isLive) {
-        _openNavigationDrawer();
+        _toggleLiveControls();
         return KeyEventResult.handled;
       }
       _playing ? _player.pause() : _player.play();
@@ -425,8 +425,16 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     return KeyEventResult.ignored;
   }
 
+  void _toggleLiveControls() {
+    if (!mounted || _showDrawer || _showHistory) return;
+    _hideTimer?.cancel();
+    setState(() => _showControls = !_showControls);
+    if (!_showControls) _restorePlayerFocus();
+  }
+
   void _startHideTimer() {
     _hideTimer?.cancel();
+    if (widget.isLive) return;
     _hideTimer = Timer(const Duration(seconds: 8), () {
       if (!mounted || _streamFailed || _reconnecting) return;
       // Preserve remote focus: hiding a focused control can strand the D-pad.
@@ -479,13 +487,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
           child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: () {
-            // Touch opens the Live TV controls (channels, categories,
-            // recording). A second tap may hide them, but not a drawer.
             if (_showDrawer || _showHistory) return;
-            // Always restore the complete controls on touch. Never hide
-            // the recording/channel navigation with a second tap.
-            setState(() => _showControls = true);
-            _startHideTimer();
+            if (widget.isLive) {
+              _toggleLiveControls();
+            } else {
+              setState(() => _showControls = true);
+              _startHideTimer();
+            }
           },
           child: Stack(
             children: [
@@ -502,10 +510,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                 Positioned.fill(
                   child: GestureDetector(
                     behavior: HitTestBehavior.translucent,
-                    onTap: () {
-                      setState(() => _showControls = true);
-                      _startHideTimer();
-                    },
+                    onTap: _toggleLiveControls,
                   ),
                 ),
               if (_showControls) ExcludeFocus(
