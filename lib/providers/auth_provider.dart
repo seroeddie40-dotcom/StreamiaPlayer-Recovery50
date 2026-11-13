@@ -25,8 +25,6 @@ class AuthProvider extends ChangeNotifier {
   bool _busy = false;
   bool _loadingDevices = false;
   String? _deviceListError;
-  String? _replacementError;
-  bool _replacingDevice = false;
   List<Map<String, dynamic>> _activeDevices = const [];
   bool _accessChecked = false;
   bool _checkingConfirmation = true;
@@ -58,8 +56,6 @@ class AuthProvider extends ChangeNotifier {
   bool get isBusy => _busy;
   bool get loadingDevices => _loadingDevices;
   String? get deviceListError => _deviceListError;
-  String? get replacementError => _replacementError;
-  bool get replacingDevice => _replacingDevice;
   List<Map<String, dynamic>> get activeDevices =>
       List.unmodifiable(_activeDevices);
   bool get accessChecked => _accessChecked;
@@ -126,8 +122,6 @@ class AuthProvider extends ChangeNotifier {
     _deviceStatus = null;
     _activeDevices = const [];
     _deviceListError = null;
-    _replacementError = null;
-    _replacingDevice = false;
     _loadingDevices = false;
     _access = null;
     _accessChecked = false;
@@ -257,8 +251,43 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Read-only. Never calls replace_my_device while its server-side
-  // installation verification is still being designed.
+  // Replace a previous active installation only after explicit user confirmation.
+  // The server enforces account ownership, active entitlement, blocked-device
+  // protection and a 24-hour cooldown. Trial timestamps are never changed.
+  Future<void> replaceActiveDevice(String oldDeviceId) async {
+    if (_busy) return;
+    final client = _client;
+    if (client == null || client.auth.currentUser == null ||
+        !devicePending || !hasAccountAccess) {
+      throw StateError('Gerätewechsel ist derzeit nicht möglich.');
+    }
+    _busy = true;
+    _deviceListError = null;
+    notifyListeners();
+    try {
+      final installationId = await _getInstallationId();
+      final response = await client.rpc('replace_my_device_v2', params: {
+        'p_old_device_id': oldDeviceId,
+        'p_new_installation_id': installationId,
+      });
+      final row = _firstRow(response);
+      if (row == null || row['device_status']?.toString() != 'active') {
+        throw StateError('Der Server hat den Gerätewechsel nicht bestätigt.');
+      }
+      await refreshDeviceAndAccess();
+      if (!hasAccess) {
+        throw StateError('Gerätewechsel bestätigt, aber Zugriff noch nicht aktiv. Bitte erneut prüfen.');
+      }
+      _activeDevices = const [];
+    } catch (e) {
+      _deviceListError = _friendlyError(e);
+      rethrow;
+    } finally {
+      _busy = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> loadActiveDevices() async {
     if (_loadingDevices) return;
     final client = _client;
@@ -287,55 +316,6 @@ class AuthProvider extends ChangeNotifier {
       _deviceListError = _friendlyError(e);
     } finally {
       _loadingDevices = false;
-      notifyListeners();
-    }
-  }
-
-  // Explicit account-owner action. The server must enforce ownership,
-  // entitlement, quotas and the 24-hour replacement limit atomically.
-  // Installation IDs are NOT proof of physical device identity.
-  Future<bool> replaceSelectedDevice(String oldDeviceId) async {
-    if (_busy || _replacingDevice) return false;
-    final client = _client;
-    if (client == null || client.auth.currentUser == null ||
-        !devicePending || !hasAccountAccess || _deviceId == null ||
-        !_activeDevices.any((d) => d['device_id']?.toString() == oldDeviceId)) {
-      _replacementError = 'Bitte ein aktives Gerät auswählen und erneut versuchen.';
-      notifyListeners();
-      return false;
-    }
-
-    _replacingDevice = true;
-    _replacementError = null;
-    notifyListeners();
-    try {
-      final installationId = await _getInstallationId();
-      final response = _firstRow(await client.rpc(
-        'replace_my_device_v2',
-        params: {
-          'p_old_device_id': oldDeviceId,
-          'p_new_installation_id': installationId,
-        },
-      ));
-      if (response == null ||
-          response['device_id']?.toString() != _deviceId ||
-          response['device_status']?.toString().toLowerCase() != 'active') {
-        throw StateError('Die Gerätefreigabe wurde nicht bestätigt.');
-      }
-      await refreshDeviceAndAccess();
-      if (!hasAccess) {
-        throw StateError('Gerät gewechselt, aber die Zugangsprüfung ist noch nicht erfolgreich. Bitte erneut prüfen.');
-      }
-      return true;
-    } catch (e) {
-      final message = _friendlyError(e);
-      _replacementError = message.contains('once per 24 hours')
-          ? 'Ein Gerätewechsel ist nur einmal innerhalb von 24 Stunden möglich.'
-          : message;
-      notifyListeners();
-      return false;
-    } finally {
-      _replacingDevice = false;
       notifyListeners();
     }
   }
