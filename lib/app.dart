@@ -290,8 +290,17 @@ class _DeviceActivationGateState extends State<_DeviceActivationGate> {
     if (!mounted || _dialogOpen) return;
     _dialogOpen = true;
     final auth = context.read<AuthProvider>();
+    // Re-read server state before asking the user to replace a device.
+    // An installation may have been approved since the previous check.
+    await auth.refreshDeviceAndAccess();
+    if (!mounted || !auth.devicePending || auth.deviceApproved ||
+        !auth.hasAccountAccess || auth.error != null) {
+      _dialogOpen = false;
+      return;
+    }
     await auth.loadActiveDevices();
-    if (!mounted || !auth.devicePending || auth.deviceApproved) {
+    if (!mounted || !auth.devicePending || auth.deviceApproved ||
+        !auth.hasAccountAccess || auth.error != null) {
       _dialogOpen = false;
       return;
     }
@@ -361,7 +370,11 @@ class _DeviceActivationGateState extends State<_DeviceActivationGate> {
                 TextButton(
                   onPressed: _working ? null : () async {
                     updateDialog(() => _error = null);
-                    await current.loadActiveDevices();
+                    await current.refreshDeviceAndAccess();
+                    if (dialogContext.mounted && current.devicePending &&
+                        current.hasAccountAccess && current.error == null) {
+                      await current.loadActiveDevices();
+                    }
                   },
                   child: Text(_tr('Aktualisieren', 'Yenile', 'Refresh')),
                 ),
