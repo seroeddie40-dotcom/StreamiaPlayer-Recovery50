@@ -91,7 +91,7 @@ class StreamiaApp extends StatelessWidget {
       return const LoginScreen();
     }
 
-    if (!auth.accessChecked) {
+    if (!auth.accessChecked || auth.isBusy) {
       return const Scaffold(
         body: Center(
           child: CircularProgressIndicator(),
@@ -291,7 +291,10 @@ class _DeviceActivationGateState extends State<_DeviceActivationGate> {
     _dialogOpen = true;
     final auth = context.read<AuthProvider>();
     await auth.loadActiveDevices();
-    if (!mounted || !auth.devicePending) return;
+    if (!mounted || !auth.devicePending || auth.deviceApproved) {
+      _dialogOpen = false;
+      return;
+    }
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
@@ -299,6 +302,16 @@ class _DeviceActivationGateState extends State<_DeviceActivationGate> {
         builder: (dialogContext, updateDialog) => Consumer<AuthProvider>(
           builder: (dialogContext, current, _) {
             final devices = current.activeDevices;
+            // A refresh may have approved this installation while the dialog
+            // was loading. Close the obsolete dialog instead of showing it.
+            if (current.deviceApproved || !current.devicePending) {
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (dialogContext.mounted && Navigator.of(dialogContext).canPop()) {
+                  Navigator.of(dialogContext).pop();
+                }
+              });
+              return const SizedBox.shrink();
+            }
             return AlertDialog(
               title: Text(_tr('Geräteplatz belegt', 'Cihaz sınırına ulaşıldı', 'Device limit reached')),
               content: SizedBox(
