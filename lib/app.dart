@@ -260,40 +260,80 @@ class _AccessStatusScreen extends StatefulWidget {
 class _AccessStatusScreenState extends State<_AccessStatusScreen> {
   String? _selectedDeviceId;
 
-  Future<void> _showReplacementPreview(Map<String, dynamic> device) async {
+  Future<void> _confirmReplacement(Map<String, dynamic> device) async {
     final language = context.read<LocaleProvider>().locale.languageCode;
     final name = (device['device_name']?.toString().trim().isNotEmpty ?? false)
         ? device['device_name'].toString()
         : (language == 'tr' ? 'İsimsiz cihaz'
             : language == 'de' ? 'Unbenanntes Gerät' : 'Unnamed device');
+    final id = device['device_id']?.toString();
+    if (id == null || id.isEmpty) return;
+    bool submitting = false;
+    String? dialogError;
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(language == 'tr' ? 'Cihazı değiştirmeyi onayla'
-            : language == 'de' ? 'Gerätewechsel bestätigen'
-            : 'Confirm device replacement'),
-        content: Text(language == 'tr'
-            ? '$name cihazının erişimi kaldırılacak ve mevcut kurulum etkinleştirilecek. '
-              'Güvenlik denetimi henüz tamamlanmadığı için işlem şu anda devre dışıdır.'
-            : language == 'de'
-                ? 'Die bisherige Installation „$name“ würde deaktiviert und die aktuelle '
-                  'Installation aktiviert. Der Wechsel ist noch gesperrt, bis die '
-                  'serverseitige Sicherheitsprüfung abgeschlossen ist.'
-                : 'The previous installation “$name” would be deactivated and the '
-                  'current installation activated. Replacement is unavailable until '
-                  'server-side security verification is complete.'),
-        actions: [
-          TextButton(
-            autofocus: true,
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text(language == 'tr' ? 'İptal' : language == 'de' ? 'Abbrechen' : 'Cancel'),
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, updateDialog) => AlertDialog(
+          title: Text(language == 'tr' ? 'Cihazı değiştirmeyi onayla'
+              : language == 'de' ? 'Gerätewechsel bestätigen'
+              : 'Confirm device replacement'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(language == 'tr'
+                  ? '“$name” cihazının erişimi kaldırılacak ve bu kurulum etkinleştirilecek. '
+                    '24 saat içinde yalnızca bir cihaz değişikliği yapabilirsiniz.'
+                  : language == 'de'
+                      ? 'Die bisherige Installation „$name“ wird deaktiviert und diese '
+                        'Installation freigeschaltet. Ein weiterer Wechsel ist erst '
+                        'nach 24 Stunden möglich.'
+                      : 'The previous installation “$name” will be deactivated and '
+                        'this installation activated. Only one replacement is '
+                        'allowed every 24 hours.'),
+              if (submitting) ...[
+                const SizedBox(height: 16),
+                const Center(child: CircularProgressIndicator()),
+              ],
+              if (dialogError != null) ...[
+                const SizedBox(height: 12),
+                SelectableText(dialogError!,
+                  style: TextStyle(color: Theme.of(dialogContext).colorScheme.error)),
+              ],
+            ],
           ),
-          FilledButton(
-            onPressed: null,
-            child: Text(language == 'tr' ? 'Cihazı değiştir'
-                : language == 'de' ? 'Gerät ersetzen' : 'Replace device'),
-          ),
-        ],
+          actions: [
+            TextButton(
+              autofocus: true,
+              onPressed: submitting ? null : () => Navigator.of(dialogContext).pop(),
+              child: Text(language == 'tr' ? 'İptal'
+                  : language == 'de' ? 'Abbrechen' : 'Cancel'),
+            ),
+            FilledButton(
+              onPressed: submitting ? null : () async {
+                updateDialog(() {
+                  submitting = true;
+                  dialogError = null;
+                });
+                final auth = context.read<AuthProvider>();
+                final success = await auth.replaceSelectedDevice(id);
+                if (!dialogContext.mounted) return;
+                if (success) {
+                  Navigator.of(dialogContext).pop();
+                } else {
+                  updateDialog(() {
+                    submitting = false;
+                    dialogError = auth.replacementError ??
+                        'Der Gerätewechsel konnte nicht abgeschlossen werden.';
+                  });
+                }
+              },
+              child: Text(language == 'tr' ? 'Cihazı değiştir'
+                  : language == 'de' ? 'Gerät ersetzen' : 'Replace device'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -497,22 +537,22 @@ class _AccessStatusScreenState extends State<_AccessStatusScreen> {
                             final matches = auth.activeDevices.where(
                               (device) => device['device_id']?.toString() == _selectedDeviceId,
                             );
-                            if (matches.isNotEmpty) _showReplacementPreview(matches.first);
+                            if (matches.isNotEmpty) _confirmReplacement(matches.first);
                           },
                           icon: const Icon(Icons.swap_horiz),
-                          label: Text(isTurkish ? 'Seçilen cihazı değiştir (önizleme)'
-                              : isGerman ? 'Ausgewähltes Gerät ersetzen (Vorschau)'
-                              : 'Replace selected device (preview)'),
+                          label: Text(isTurkish ? 'Seçilen cihazı değiştir'
+                              : isGerman ? 'Ausgewähltes Gerät ersetzen'
+                              : 'Replace selected device'),
                         ),
                       ),
                     ],
                     const SizedBox(height: 12),
                     Text(
                       isTurkish
-                          ? 'Cihaz değiştirme, güvenlik kontrolü tamamlanınca açılacak.'
+                          ? 'Cihaz değişimi hesap sahibi tarafından onaylanır. 24 saatlik sınır geçerlidir.'
                           : isGerman
-                              ? 'Der Gerätewechsel wird nach Abschluss der Sicherheitsprüfung freigeschaltet.'
-                              : 'Device replacement will be enabled after security verification.',
+                              ? 'Du entscheidest, welches Gerät ersetzt wird. Pro 24 Stunden ist ein Wechsel möglich.'
+                              : 'Choose which device to replace. One replacement is allowed every 24 hours.',
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 12),
