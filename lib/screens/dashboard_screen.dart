@@ -1,667 +1,539 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
-import 'core/theme/app_theme.dart';
-import 'core/localization/app_localizations.dart';
-import 'core/storage/prefs_service.dart';
+import '../core/focus_navigation.dart';
+import '../core/localization/app_localizations.dart';
+import '../core/theme/app_theme.dart';
+import '../providers/auth_provider.dart';
+import '../providers/theme_provider.dart';
+import 'live_tv_screen.dart';
+import 'master_search_screen.dart';
+import 'paywall_screen.dart';
+import 'series_screen.dart';
+import 'settings_screen.dart';
+import 'vod_screen.dart';
 
-import 'providers/theme_provider.dart';
-import 'providers/locale_provider.dart';
-import 'providers/content_provider.dart';
-import 'providers/auth_provider.dart';
-import 'services/playlist_profile_store.dart';
-
-import 'screens/login_screen.dart';
-import 'screens/language_selection_screen.dart';
-import 'screens/setup_screen.dart';
-import 'screens/dashboard_screen.dart';
-import 'screens/paywall_screen.dart';
-import 'screens/splash_screen.dart';
-import 'screens/legal_disclaimer_screen.dart';
-
-class StreamiaApp extends StatelessWidget {
-  final PrefsService prefsService;
-
-  const StreamiaApp({
-    super.key,
-    required this.prefsService,
-  });
+class DashboardScreen extends StatefulWidget {
+  const DashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final themeProvider = context.watch<ThemeProvider>();
-    final localeProvider = context.watch<LocaleProvider>();
-    final contentProvider = context.watch<ContentProvider>();
-    final authProvider = context.watch<AuthProvider>();
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
 
-    return MaterialApp(
-      title: 'Streamia Player',
-      debugShowCheckedModeBanner: false,
-
-      theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
-      themeMode: themeProvider.themeMode,
-
-      locale: localeProvider.locale,
-      supportedLocales: AppLocalizations.supportedLocales,
-
-      localizationsDelegates: const [
-        AppLocalizationsDelegate(),
-        GlobalMaterialLocalizations.delegate,
-        GlobalWidgetsLocalizations.delegate,
-        GlobalCupertinoLocalizations.delegate,
-      ],
-
-      // IMPORTANT:
-      // No custom MaterialApp.builder overlay.
-      // Flutter Navigator and Overlay remain intact.
-
-      home: StartupGate(
-        prefsService: prefsService,
-        localeProvider: localeProvider,
-        destination: _resolveHome(
-          localeProvider,
-          contentProvider,
-          authProvider,
-        ),
-      ),
-    );
-  }
-
-  Widget _resolveHome(
-    LocaleProvider locale,
-    ContentProvider content,
-    AuthProvider auth,
+class _DashboardScreenState extends State<DashboardScreen> {
+  String _label(
+    BuildContext context,
+    String de,
+    String tr,
+    String en,
   ) {
-    if (!locale.hasSelectedLanguage) {
-      return const LanguageSelectionScreen();
-    }
-
-    if (!auth.isLoggedIn) {
-      return const LoginScreen();
-    }
-
-    if (!auth.accessChecked) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
-    // Technical errors must not redirect to payment.
-    if (auth.error != null) {
-      return const _AccessStatusScreen(
-        mode: _AccessStatusMode.error,
-      );
-    }
-
-    if (auth.deviceBlocked) {
-      return const _AccessStatusScreen(
-        mode: _AccessStatusMode.blocked,
-      );
-    }
-
-    // Account entitlement takes precedence over a pending device.
-    if (auth.requiresPayment) {
-      return const PaywallScreen();
-    }
-
-    if (auth.devicePending || !auth.deviceApproved) {
-      return const _AccessStatusScreen(
-        mode: _AccessStatusMode.pending,
-      );
-    }
-
-    if (!auth.hasAccess) {
-      return const _AccessStatusScreen(
-        mode: _AccessStatusMode.error,
-      );
-    }
-
-    if (!content.isLoaded) {
-      return const _LibraryStartupGate();
-    }
-
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-
-    return const DashboardScreen();
+    final language = Localizations.localeOf(context).languageCode;
+    if (language == 'de') return de;
+    if (language == 'tr') return tr;
+    return en;
   }
-}
 
+  // All trial dates are issued by Supabase, never by the device.
+  DateTime? _trialExpiry(AuthProvider auth) {
+    final raw = auth.access?['trial_ends_at']?.toString();
+    if (raw == null || raw.isEmpty) return null;
+    return DateTime.tryParse(raw)?.toUtc();
+  }
 
-/// Localized recovery-first startup. The saved catalog is never loaded
-/// automatically, so a broken playlist cannot block access to setup.
-class _LibraryStartupGate extends StatefulWidget {
-  const _LibraryStartupGate();
-
-  @override
-  State<_LibraryStartupGate> createState() => _LibraryStartupGateState();
-}
-
-class _LibraryStartupGateState extends State<_LibraryStartupGate> {
-  bool _loading = false;
-  String? _error;
-
-  static const Map<String, List<String>> _translations = {
-    'de': ['Sicherer Start', 'Die gespeicherte Mediathek wird nicht automatisch geladen. So kannst du die Einrichtung öffnen, auch wenn die letzte Playlist beim Laden Probleme verursacht hat. Deine gespeicherten Daten werden nicht gelöscht.', 'Playlist einrichten', 'Gespeicherte Mediathek laden', 'Keine gespeicherte Playlist gefunden.', 'Keine gespeicherte Mediathek gefunden.', 'Wiederherstellung fehlgeschlagen'],
-    'tr': ['Güvenli Başlangıç', 'Kayıtlı medya kitaplığı otomatik olarak yüklenmez. Böylece son oynatma listesi yüklenirken sorun yaşansa bile kurulumu açabilirsin. Kayıtlı verilerin silinmez.', 'Oynatma listesi ekle', 'Kayıtlı medya kitaplığını yükle', 'Kayıtlı oynatma listesi bulunamadı.', 'Kayıtlı medya kitaplığı bulunamadı.', 'Geri yükleme başarısız'],
-    'en': ['Safe Start', 'The saved media library is not loaded automatically. You can open setup even if the last playlist caused loading problems. Your saved data will not be deleted.', 'Set up playlist', 'Load saved media library', 'No saved playlist found.', 'No saved media library found.', 'Restore failed'],
-    'ru': ['Безопасный запуск', 'Сохранённая медиатека не загружается автоматически. Вы можете открыть настройки, даже если последняя загрузка плейлиста вызвала ошибку. Ваши данные не будут удалены.', 'Настроить плейлист', 'Загрузить сохранённую медиатеку', 'Сохранённый плейлист не найден.', 'Сохранённая медиатека не найдена.', 'Ошибка восстановления'],
-    'pl': ['Bezpieczny start', 'Zapisana biblioteka multimediów nie jest ładowana automatycznie. Możesz otworzyć konfigurację, nawet jeśli ostatnia lista odtwarzania powodowała problemy. Twoje dane nie zostaną usunięte.', 'Skonfiguruj playlistę', 'Wczytaj zapisaną bibliotekę', 'Nie znaleziono zapisanej playlisty.', 'Nie znaleziono zapisanej biblioteki.', 'Przywracanie nie powiodło się'],
-    'es': ['Inicio seguro', 'La biblioteca guardada no se carga automáticamente. Puedes abrir la configuración aunque la última lista haya causado problemas. Tus datos guardados no se eliminarán.', 'Configurar lista', 'Cargar biblioteca guardada', 'No se encontró ninguna lista guardada.', 'No se encontró ninguna biblioteca guardada.', 'Error al restaurar'],
-    'fr': ['Démarrage sécurisé', 'La médiathèque enregistrée ne se charge pas automatiquement. Vous pouvez accéder à la configuration même si la dernière playlist a posé problème. Vos données ne seront pas supprimées.', 'Configurer une playlist', 'Charger la médiathèque', 'Aucune playlist enregistrée.', 'Aucune médiathèque enregistrée.', 'Échec de la restauration'],
-    'ar': ['بدء آمن', 'لن يتم تحميل مكتبة الوسائط المحفوظة تلقائيًا. يمكنك فتح الإعداد حتى إذا تسببت قائمة التشغيل الأخيرة في مشكلة أثناء التحميل. لن تُحذف بياناتك المحفوظة.', 'إعداد قائمة التشغيل', 'تحميل مكتبة الوسائط المحفوظة', 'لم يتم العثور على قائمة تشغيل محفوظة.', 'لم يتم العثور على مكتبة وسائط محفوظة.', 'فشلت الاستعادة'],
-  };
-
-  String _t(BuildContext context, int index) {
+  String _trialText(BuildContext context, int days) {
     final code = Localizations.localeOf(context).languageCode;
-    return (_translations[code] ?? _translations['en']!)[index];
-  }
-
-  Future<void> _restoreOnDemand() async {
-    if (_loading) return;
-    setState(() { _loading = true; _error = null; });
-    try {
-      final profiles = await PlaylistProfileStore().load();
-      if (!mounted) return;
-      if (profiles.isEmpty) {
-        setState(() => _error = _t(context, 4));
-        return;
-      }
-      final active = profiles.where((p) => p.isActive).firstOrNull ?? profiles.first;
-      final restored = await context.read<ContentProvider>()
-          .restoreStoredLibrary(active.sourceKey);
-      if (!mounted) return;
-      if (!restored) setState(() => _error = _t(context, 5));
-    } catch (error) {
-      if (mounted) setState(() => _error = '${_t(context, 6)}: $error');
-    } finally {
-      if (mounted) setState(() => _loading = false);
+    final remaining = days < 1 ? 1 : days;
+    switch (code) {
+      case 'de': return 'Noch $remaining ${remaining == 1 ? 'Tag' : 'Tage'} Testphase';
+      case 'tr': return 'Deneme süresinde $remaining gün kaldı';
+      case 'ru': return 'Пробный период: осталось $remaining дн.';
+      case 'pl': return 'Pozostało $remaining dni okresu próbnego';
+      case 'es': return 'Quedan $remaining días de prueba';
+      case 'fr': return 'Essai : encore $remaining jours';
+      case 'ar': return 'متبقٍ $remaining يوم من الفترة التجريبية';
+      default: return '$remaining ${remaining == 1 ? 'day' : 'days'} left in trial';
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (context.watch<ContentProvider>().isLoaded) {
-      return const DashboardScreen();
-    }
-    return Scaffold(
-      appBar: AppBar(title: const Text('Streamia Player')),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 460),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Icon(Icons.shield_outlined, size: 56),
-                  const SizedBox(height: 16),
-                  Text(_t(context, 0),
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 12),
-                  Text(_t(context, 1), textAlign: TextAlign.center),
-                  const SizedBox(height: 24),
-                  FilledButton.icon(
-                    onPressed: _loading ? null : () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const SetupScreen()),
-                    ),
-                    icon: const Icon(Icons.playlist_add),
-                    label: Text(_t(context, 2)),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: _loading ? null : _restoreOnDemand,
-                    icon: const Icon(Icons.restore),
-                    label: Text(_t(context, 3)),
-                  ),
-                  if (_loading) ...[
-                    const SizedBox(height: 16),
-                    const Center(child: CircularProgressIndicator()),
-                  ],
-                  if (_error != null) ...[
-                    const SizedBox(height: 16),
-                    Text(_error!, style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    )),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-enum _AccessStatusMode {
-  pending,
-  blocked,
-  error,
-}
-
-class _AccessStatusScreen extends StatefulWidget {
-  final _AccessStatusMode mode;
-
-  const _AccessStatusScreen({
-    required this.mode,
-  });
-
-  @override
-  State<_AccessStatusScreen> createState() => _AccessStatusScreenState();
-}
-
-class _AccessStatusScreenState extends State<_AccessStatusScreen> {
-  String? _selectedDeviceId;
-
-  Future<void> _showReplacementPreview(Map<String, dynamic> device) async {
-    final language = context.read<LocaleProvider>().locale.languageCode;
-    final name = (device['device_name']?.toString().trim().isNotEmpty ?? false)
-        ? device['device_name'].toString()
-        : (language == 'tr' ? 'İsimsiz cihaz'
-            : language == 'de' ? 'Unbenanntes Gerät' : 'Unnamed device');
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(language == 'tr' ? 'Cihazı değiştirmeyi onayla'
-            : language == 'de' ? 'Gerätewechsel bestätigen'
-            : 'Confirm device replacement'),
-        content: Text(language == 'tr'
-            ? '$name cihazının erişimi kaldırılacak ve mevcut kurulum etkinleştirilecek. '
-              'Güvenlik denetimi henüz tamamlanmadığı için işlem şu anda devre dışıdır.'
-            : language == 'de'
-                ? 'Die bisherige Installation „$name“ würde deaktiviert und die aktuelle '
-                  'Installation aktiviert. Der Wechsel ist noch gesperrt, bis die '
-                  'serverseitige Sicherheitsprüfung abgeschlossen ist.'
-                : 'The previous installation “$name” would be deactivated and the '
-                  'current installation activated. Replacement is unavailable until '
-                  'server-side security verification is complete.'),
-        actions: [
-          TextButton(
-            autofocus: true,
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text(language == 'tr' ? 'İptal' : language == 'de' ? 'Abbrechen' : 'Cancel'),
-          ),
-          FilledButton(
-            onPressed: null,
-            child: Text(language == 'tr' ? 'Cihazı değiştir'
-                : language == 'de' ? 'Gerät ersetzen' : 'Replace device'),
-          ),
-        ],
+  void _open(Widget screen) {
+    pushWithFocusRestore(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => screen,
       ),
     );
   }
 
   @override
-  void initState() {
-    super.initState();
-    if (widget.mode == _AccessStatusMode.pending) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) context.read<AuthProvider>().loadActiveDevices();
-      });
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
     final auth = context.watch<AuthProvider>();
+    final trialExpiry = _trialExpiry(auth);
+    final now = DateTime.now().toUtc();
+    final trialActive = auth.hasAccountAccess &&
+        auth.access?['access_status'] == 'trial' &&
+        auth.access?['entitlement_source'] == 'trial' &&
+        trialExpiry != null && trialExpiry.isAfter(now);
+    final trialDaysLeft = trialActive
+        ? (trialExpiry.difference(now).inSeconds / 86400).ceil()
+        : 0;
+    // No promotional trial claim for a paid or admin-enabled account.
+    final showTrialCard = auth.isLoggedIn && auth.accessChecked &&
+        (trialActive || !auth.hasAccountAccess);
 
-    final language = context
-        .watch<LocaleProvider>()
-        .locale
-        .languageCode;
 
-    final isTurkish = language == 'tr';
-    final isGerman = language == 'de';
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final compact = screenWidth < 600;
 
-    String title;
-    String description;
-    IconData symbol;
+    // Pro is available during the trial as well.
+    final showPro = auth.isLoggedIn;
 
-    switch (widget.mode) {
-      case _AccessStatusMode.pending:
-        title = isTurkish
-            ? 'Cihaz onayı bekleniyor'
-            : isGerman
-                ? 'Gerätefreigabe ausstehend'
-                : 'Device approval pending';
-
-        description = isTurkish
-            ? 'Bu cihaz kaydedildi ancak henüz '
-              'onaylanmadı. Onaydan sonra tekrar '
-              'kontrol edin.'
-            : isGerman
-                ? 'Dieses Gerät wurde registriert, '
-                  'ist aber noch nicht freigegeben. '
-                  'Nach der Freigabe kannst du den '
-                  'Status erneut prüfen.'
-                : 'This device is registered but '
-                  'not yet approved. Check again '
-                  'after approval.';
-
-        symbol = Icons.hourglass_top_rounded;
-        break;
-
-      case _AccessStatusMode.blocked:
-        title = isTurkish
-            ? 'Cihaz erişimi engellendi'
-            : isGerman
-                ? 'Gerät nicht freigegeben'
-                : 'Device access blocked';
-
-        description = isTurkish
-            ? 'Bu cihaz engellendi veya reddedildi.'
-            : isGerman
-                ? 'Dieses Gerät wurde gesperrt '
-                  'oder abgelehnt.'
-                : 'This device has been blocked '
-                  'or rejected.';
-
-        symbol = Icons.block_rounded;
-        break;
-
-      case _AccessStatusMode.error:
-        title = isTurkish
-            ? 'Erişim kontrolü başarısız'
-            : isGerman
-                ? 'Zugangsprüfung fehlgeschlagen'
-                : 'Access verification failed';
-
-        description = auth.error ??
-            (isTurkish
-                ? 'Lütfen tekrar deneyin.'
-                : isGerman
-                    ? 'Bitte versuche es erneut.'
-                    : 'Please try again.');
-
-        symbol = Icons.error_outline_rounded;
-        break;
-    }
+    final entries = <_HomeEntry>[
+      _HomeEntry(
+        Icons.live_tv_rounded,
+        l10n.t('nav_live'),
+        () => _open(const LiveTvScreen()),
+      ),
+      _HomeEntry(
+        Icons.movie_creation_outlined,
+        l10n.t('nav_vod'),
+        () => _open(const VodScreen()),
+      ),
+      _HomeEntry(
+        Icons.video_library_outlined,
+        l10n.t('nav_series'),
+        () => _open(const SeriesScreen()),
+      ),
+    ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Streamia Player'),
-      ),
       body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: 480,
+        child: Column(
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                compact ? 12 : 36,
+                12,
+                compact ? 12 : 36,
+                8,
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+              child: Row(
                 children: [
-                  Icon(
-                    symbol,
-                    size: 56,
-                    color: Theme.of(context)
-                        .colorScheme
-                        .primary,
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  Text(
-                    title,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 23,
-                      fontWeight: FontWeight.bold,
+                  Container(
+                    width: compact ? 40 : 52,
+                    height: compact ? 40 : 52,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: AppTheme.accentGradient,
                     ),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  SelectableText(
-                    description,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      fontSize: 15,
-                    ),
-                  ),
-
-                  if (auth.deviceId != null) ...[
-                    const SizedBox(height: 20),
-
-                    const Text(
-                      'Device ID',
-                      textAlign: TextAlign.center,
+                    alignment: Alignment.center,
+                    child: const Text(
+                      'S',
                       style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-
-                    const SizedBox(height: 6),
-
-                    SelectableText(
-                      auth.deviceId!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-
-                  if (widget.mode == _AccessStatusMode.pending &&
-                      auth.hasAccountAccess) ...[
-                    const SizedBox(height: 24),
-                    Text(
-                      isTurkish ? 'Kayıtlı cihazlarınız'
-                          : isGerman ? 'Deine aktiven Geräte'
-                          : 'Your active devices',
-                      style: const TextStyle(
-                        fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 12),
-                    if (auth.loadingDevices)
-                      const CircularProgressIndicator()
-                    else if (auth.deviceListError != null)
-                      SelectableText(auth.deviceListError!,
-                        textAlign: TextAlign.center)
-                    else if (auth.activeDevices.isEmpty)
-                      Text(isTurkish ? 'Aktif cihaz bulunamadı.'
-                          : isGerman ? 'Keine aktiven Geräte gefunden.'
-                          : 'No active devices found.')
-                    else
-                      ...auth.activeDevices.map((device) {
-                        final id = device['device_id']?.toString() ?? '';
-                        final name = (device['device_name']?.toString().trim().isNotEmpty ?? false)
-                            ? device['device_name'].toString()
-                            : (isTurkish ? 'İsimsiz cihaz'
-                                : isGerman ? 'Unbenanntes Gerät' : 'Unnamed device');
-                        return Card(
-                          child: RadioListTile<String>(
-                            value: id,
-                            groupValue: _selectedDeviceId,
-                            onChanged: (value) => setState(() => _selectedDeviceId = value),
-                            title: Text(name),
-                            subtitle: Text(device['platform']?.toString() ?? ''),
-                            secondary: const Icon(Icons.devices),
-                          ),
-                        );
-                      }),
-                    if (auth.activeDevices.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: _selectedDeviceId == null ? null : () {
-                            final matches = auth.activeDevices.where(
-                              (device) => device['device_id']?.toString() == _selectedDeviceId,
-                            );
-                            if (matches.isNotEmpty) _showReplacementPreview(matches.first);
-                          },
-                          icon: const Icon(Icons.swap_horiz),
-                          label: Text(isTurkish ? 'Seçilen cihazı değiştir (önizleme)'
-                              : isGerman ? 'Ausgewähltes Gerät ersetzen (Vorschau)'
-                              : 'Replace selected device (preview)'),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    Text(
-                      isTurkish
-                          ? 'Cihaz değiştirme, güvenlik kontrolü tamamlanınca açılacak.'
-                          : isGerman
-                              ? 'Der Gerätewechsel wird nach Abschluss der Sicherheitsprüfung freigeschaltet.'
-                              : 'Device replacement will be enabled after security verification.',
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton.icon(
-                      onPressed: auth.loadingDevices ? null
-                          : () => auth.loadActiveDevices(),
-                      icon: const Icon(Icons.devices),
-                      label: Text(isTurkish ? 'Listeyi yenile'
-                          : isGerman ? 'Geräteliste aktualisieren'
-                          : 'Refresh device list'),
-                    ),
-                  ],
-
-                  const SizedBox(height: 28),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: auth.isBusy
-                          ? null
-                          : () {
-                              auth.refreshDeviceAndAccess();
-                            },
-                      icon: const Icon(Icons.refresh),
-                      label: Text(
-                        isTurkish
-                            ? 'Tekrar kontrol et'
-                            : isGerman
-                                ? 'Erneut prüfen'
-                                : 'Check again',
+                        color: Colors.white,
+                        fontSize: 27,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
                   ),
-
-                  const SizedBox(height: 12),
-
-                  TextButton(
-                    onPressed: auth.isBusy
-                        ? null
-                        : () {
-                            auth.logout();
-                          },
+                  const SizedBox(width: 10),
+                  Expanded(
                     child: Text(
-                      isTurkish
-                          ? 'Çıkış yap'
-                          : isGerman
-                              ? 'Abmelden'
-                              : 'Log out',
+                      l10n.t('app_name'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: compact ? 17 : 24,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.3,
+                      ),
                     ),
+                  ),
+                  if (showPro) ...[
+                    _ProButton(
+                      label: l10n.t('nav_pro'),
+                      onTap: () => _open(const PaywallScreen()),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  IconButton(
+                    tooltip: _label(
+                      context,
+                      'Suche',
+                      'Ara',
+                      'Search',
+                    ),
+                    onPressed: () =>
+                        _open(const MasterSearchScreen()),
+                    icon: const Icon(Icons.search_rounded),
+                  ),
+                  IconButton(
+                    tooltip: _label(
+                      context,
+                      'Design wechseln',
+                      'Temayı değiştir',
+                      'Change theme',
+                    ),
+                    onPressed: () =>
+                        context.read<ThemeProvider>().toggleTheme(),
+                    icon: Icon(
+                      isDark
+                          ? Icons.light_mode_outlined
+                          : Icons.dark_mode_outlined,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: _label(
+                      context,
+                      'Einstellungen',
+                      'Ayarlar',
+                      'Settings',
+                    ),
+                    onPressed: () =>
+                        _open(const SettingsScreen()),
+                    icon: const Icon(Icons.settings_outlined),
                   ),
                 ],
               ),
             ),
-          ),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = constraints.maxWidth;
+                  final horizontal = width < 600 ? 16.0 : 36.0;
+
+                  final int columns;
+                  if (width < 380) {
+                    columns = 1;
+                  } else if (width < 650) {
+                    columns = 2;
+                  } else {
+                    columns = 3;
+                  }
+
+                  final double aspectRatio;
+                  if (columns == 1) {
+                    aspectRatio = 3.2;
+                  } else if (columns == 2) {
+                    aspectRatio = 1.45;
+                  } else {
+                    aspectRatio = width >= 1100 ? 2.05 : 1.6;
+                  }
+
+                  return FocusTraversalGroup(
+                    child: CustomScrollView(
+                      slivers: [
+                        SliverPadding(
+                          padding: EdgeInsets.fromLTRB(
+                            horizontal,
+                            18,
+                            horizontal,
+                            12,
+                          ),
+                          sliver: SliverToBoxAdapter(
+                            child: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                if (showTrialCard)
+                                  _TrialInfoCard(
+                                    title: trialActive
+                                        ? _trialText(context, trialDaysLeft)
+                                        : _label(
+                                            context,
+                                            'Streamia Pro entdecken',
+                                            'Streamia Pro paketlerini keşfet',
+                                            'Explore Streamia Pro',
+                                          ),
+                                    subtitle: trialActive
+                                        ? _label(
+                                            context,
+                                            '1 Gerät · Testphase aktiv',
+                                            '1 cihaz · Deneme aktif',
+                                            '1 device · Trial active',
+                                          )
+                                        : _label(
+                                            context,
+                                            'Tarife für 1, 3 oder 5 Geräte ansehen',
+                                            '1, 3 veya 5 cihazlık paketler',
+                                            'View plans for 1, 3 or 5 devices',
+                                          ),
+                                    actionLabel: _label(
+                                      context,
+                                      'Pro-Tarife',
+                                      'Pro paketleri',
+                                      'Pro plans',
+                                    ),
+                                    onTap: () =>
+                                        _open(const PaywallScreen()),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        SliverPadding(
+                          padding: EdgeInsets.fromLTRB(
+                            horizontal,
+                            8,
+                            horizontal,
+                            28,
+                          ),
+                          sliver: SliverGrid(
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) => _PremiumTile(
+                                entry: entries[index],
+                                autofocus: index == 0,
+                              ),
+                              childCount: entries.length,
+                            ),
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: columns,
+                              mainAxisSpacing: 14,
+                              crossAxisSpacing: 14,
+                              childAspectRatio: aspectRatio,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class StartupGate extends StatefulWidget {
-  final PrefsService prefsService;
-  final LocaleProvider localeProvider;
-  final Widget destination;
+class _HomeEntry {
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
 
-  const StartupGate({
-    super.key,
-    required this.prefsService,
-    required this.localeProvider,
-    required this.destination,
+  const _HomeEntry(
+    this.icon,
+    this.title,
+    this.onTap,
+  );
+}
+
+class _TrialInfoCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String actionLabel;
+  final VoidCallback onTap;
+
+  const _TrialInfoCard({
+    required this.title,
+    required this.subtitle,
+    required this.actionLabel,
+    required this.onTap,
   });
 
   @override
-  State<StartupGate> createState() {
-    return _StartupGateState();
-  }
-}
-
-class _StartupGateState extends State<StartupGate> {
-  bool _splashFinished = false;
-  bool _legalDialogOpen = false;
-
-  @override
-  void initState() {
-    super.initState();
-
-    Timer(
-      const Duration(milliseconds: 1700),
-      () {
-        if (!mounted) return;
-
-        setState(() {
-          _splashFinished = true;
-        });
-      },
-    );
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (!_splashFinished) {
-      return const SplashScreen();
-    }
+    final dark = Theme.of(context).brightness == Brightness.dark;
 
-    if (!widget.localeProvider.hasSelectedLanguage) {
-      return widget.destination;
-    }
-
-    if (!widget.prefsService
-        .hasAcceptedCurrentLegalDisclaimer) {
-      if (!_legalDialogOpen) {
-        _legalDialogOpen = true;
-
-        WidgetsBinding.instance.addPostFrameCallback(
-          (_) async {
-            if (!mounted) return;
-
-            await Navigator.of(context).push<bool>(
-              MaterialPageRoute(
-                fullscreenDialog: true,
-                builder: (_) => LegalDisclaimerScreen(
-                  prefs: widget.prefsService,
-                  requireAcceptance: true,
-                  languageCode: widget
-                      .localeProvider
-                      .locale
-                      .languageCode,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        focusColor: AppTheme.electricBlue.withOpacity(0.25),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: dark
+                ? AppTheme.darkSurface
+                : const Color(0xFFE6EDF2),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: AppTheme.electricBlue.withOpacity(0.28),
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 13,
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: AppTheme.electricBlue.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.card_giftcard_rounded,
+                  color: AppTheme.electricBlue,
+                  size: 24,
                 ),
               ),
-            );
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Tooltip(
+                message: actionLabel,
+                child: Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: AppTheme.electricBlue,
+                  size: 16,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
 
-            if (mounted) {
-              setState(() {
-                _legalDialogOpen = false;
-              });
-            }
-          },
-        );
-      }
+class _ProButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
 
-      return const SplashScreen();
-    }
+  const _ProButton({
+    required this.label,
+    required this.onTap,
+  });
 
-    return widget.destination;
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        focusColor: AppTheme.electricBlue.withOpacity(0.25),
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: AppTheme.accentGradient,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PremiumTile extends StatelessWidget {
+  final _HomeEntry entry;
+  final bool autofocus;
+
+  const _PremiumTile({
+    required this.entry,
+    this.autofocus = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        autofocus: autofocus,
+        onTap: entry.onTap,
+        focusColor: AppTheme.electricBlue.withOpacity(0.28),
+        borderRadius: BorderRadius.circular(20),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: dark
+                ? AppTheme.darkSurface
+                : AppTheme.lightSurface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: AppTheme.electricBlue.withOpacity(0.25),
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.electricBlue.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(
+                    entry.icon,
+                    size: 24,
+                    color: AppTheme.electricBlue,
+                  ),
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        entry.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 14,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
