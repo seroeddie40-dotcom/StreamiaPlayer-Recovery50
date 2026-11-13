@@ -13,8 +13,8 @@ class AppTheme {
   static const Color darkSurface = Color(0xFF141A2E);
 
   // New hybrid light mode
-  static const Color lightBg = Color(0xFFE9EFF3);
-  static const Color lightSurface = Color(0xFFF7F9FB);
+  static const Color lightBg = Color(0xFFC7CFD7);
+  static const Color lightSurface = Color(0xFFDCE3E9);
   static const Color lightText = Color(0xFF263D50);
   static const Color lightBorder = Color(0xFFC8D8E3);
 
