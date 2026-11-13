@@ -57,8 +57,7 @@ class _VodScreenState extends State<VodScreen> {
       final genre = _genre(item);
       counts[genre] = (counts[genre] ?? 0) + 1;
     }
-    final genres = counts.keys.toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final genres = counts.keys.toList(growable: false);
     final selected = genres.contains(_selectedGenre) ? _selectedGenre : null;
     final filtered = items.where((item) {
       if (selected != null && _genre(item) != selected) return false;
@@ -227,7 +226,7 @@ class _GenreButton extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
           child: Row(children: [
-            Expanded(child: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis,
+            Expanded(child: Text(title, softWrap: true,
               style: TextStyle(fontWeight: selected ? FontWeight.bold : FontWeight.normal))),
             const SizedBox(width: 8),
             Text('$count', style: Theme.of(context).textTheme.bodySmall),
