@@ -824,18 +824,45 @@ class _EpisodeRow extends StatelessWidget {
             };
             final progress = (entry?.progress ?? 0).clamp(0.0, 1.0);
             return SizedBox(
-              width: 116,
-              child: Column(
+              width: 112,
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  IconButton(
-              tooltip: active
-                  ? (cancelLabels[lang] ?? cancelLabels['en']!)
-                  : (downloadLabels[lang] ?? downloadLabels['en']!),
-              icon: Icon(active ? Icons.cancel_outlined :
-                  entry?.state == DownloadState.completed
-                      ? Icons.download_done : Icons.download_outlined),
+                  if (active)
+                    SizedBox(
+                      width: 42,
+                      child: Text(
+                        entry!.progress > 0 ? '${(progress * 100).round()}%' : '…',
+                        textAlign: TextAlign.right,
+                        maxLines: 1,
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ),
+                  SizedBox(
+                    width: 54,
+                    height: 54,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        if (active)
+                          SizedBox(
+                            width: 46,
+                            height: 46,
+                            child: CircularProgressIndicator(
+                              value: entry!.progress > 0 ? progress : null,
+                              strokeWidth: 3,
+                              color: const Color(0xFF20D8C6),
+                              backgroundColor: Colors.white24,
+                            ),
+                          ),
+                        IconButton(
+                          tooltip: active
+                              ? (cancelLabels[lang] ?? cancelLabels['en']!)
+                              : (downloadLabels[lang] ?? downloadLabels['en']!),
+                          icon: Icon(active ? Icons.close :
+                              entry?.state == DownloadState.completed
+                                  ? Icons.download_done : Icons.download_outlined),
               onPressed: () async {
                 if (active) {
                   DownloadService.cancel(id);
@@ -879,28 +906,10 @@ class _EpisodeRow extends StatelessWidget {
                   }
                 }
               },
+                        ),
+                      ],
+                    ),
                   ),
-                  if (active) ...[
-                    Text(
-                      entry!.progress > 0
-                          ? '${(progress * 100).round()}%'
-                          : ({'de': 'Lädt …', 'tr': 'İndiriliyor', 'en': 'Downloading …', 'ru': 'Загрузка …', 'pl': 'Pobieranie …', 'es': 'Descargando …', 'fr': 'Téléchargement …', 'ar': 'جارٍ التنزيل …'}[lang] ?? 'Downloading …'),
-                      style: Theme.of(context).textTheme.labelSmall,
-                    ),
-                    const SizedBox(height: 3),
-                    SizedBox(
-                      width: 100,
-                      child: LinearProgressIndicator(
-                        value: entry.progress > 0 ? progress : null,
-                        minHeight: 4,
-                      ),
-                    ),
-                  ] else if (entry?.state == DownloadState.failed) ...[
-                    Text(
-                      ({'de': 'Fehler', 'tr': 'Hata', 'en': 'Failed', 'ru': 'Ошибка', 'pl': 'Błąd', 'es': 'Error', 'fr': 'Échec', 'ar': 'فشل'}[lang] ?? 'Failed'),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.redAccent),
-                    ),
-                  ],
                 ],
               ),
             );
