@@ -209,6 +209,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _queueSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) => _progressService.flushPending());
     _startHideTimer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Live TV starts with folders on the left and channels beside them.
+      // This is only the initial view; Back/close still hides the drawer.
+      if (mounted && widget.isLive && widget.channel != null) {
+        _openNavigationDrawer();
+      }
       final library = context.read<ContentProvider>();
       if (widget.channel != null) library.addToHistory(widget.channel!);
       if (widget.contentId != null && !widget.isLive && widget.episodes == null) {
