@@ -9,6 +9,211 @@ import 'package:path_provider/path_provider.dart';
 
 import '../services/recording_service.dart';
 
+
+// Screen-local translations. Recording filenames and platform errors remain unchanged.
+const Map<String, Map<String, String>> _recordingStrings = {
+  'de': {
+    'title': 'Meine Aufnahmen',
+    'refresh': 'Aktualisieren',
+    'empty': 'Noch keine Aufnahmen vorhanden.',
+    'deleteQuestion': 'Aufnahme löschen?',
+    'cancel': 'Abbrechen',
+    'delete': 'Löschen',
+    'deleteTooltip': 'Aufnahme löschen',
+    'device': 'Gerätespeicher',
+    'usb': 'USB / Extern',
+    'localReadError': 'Lokale Aufnahmen konnten nicht gelesen werden',
+    'usbExtension': 'USB-Aufnahmen benötigen noch die Android-Erweiterung.',
+    'usbReadError': 'USB-Speicher konnte nicht gelesen werden.',
+    'usbLoadError': 'USB-Aufnahmen konnten nicht geladen werden',
+    'usbOpenError': 'USB-Aufnahme konnte nicht geöffnet werden.',
+    'fileMissing': 'Aufnahmedatei nicht gefunden',
+    'usbPlayError': 'USB-Aufnahme konnte nicht abgespielt werden.',
+    'playError': 'Wiedergabe fehlgeschlagen',
+    'busyDelete': 'Eine laufende Aufnahme kann nicht gelöscht werden.',
+    'deleteNotConfirmed': 'Löschen wurde nicht bestätigt.',
+    'deleted': 'Aufnahme gelöscht.',
+    'deleteError': 'Aufnahme konnte nicht gelöscht werden.',
+    'deleteFailed': 'Löschen fehlgeschlagen',
+    'defaultName': 'Aufnahme.ts',
+  },
+  'en': {
+    'title': 'My recordings',
+    'refresh': 'Refresh',
+    'empty': 'No recordings yet.',
+    'deleteQuestion': 'Delete recording?',
+    'cancel': 'Cancel',
+    'delete': 'Delete',
+    'deleteTooltip': 'Delete recording',
+    'device': 'Device storage',
+    'usb': 'USB / External',
+    'localReadError': 'Could not read local recordings',
+    'usbExtension': 'USB recordings require the Android extension.',
+    'usbReadError': 'Could not read USB storage.',
+    'usbLoadError': 'Could not load USB recordings',
+    'usbOpenError': 'Could not open USB recording.',
+    'fileMissing': 'Recording file not found',
+    'usbPlayError': 'Could not play USB recording.',
+    'playError': 'Playback failed',
+    'busyDelete': 'An active recording cannot be deleted.',
+    'deleteNotConfirmed': 'Deletion was not confirmed.',
+    'deleted': 'Recording deleted.',
+    'deleteError': 'Could not delete recording.',
+    'deleteFailed': 'Deletion failed',
+    'defaultName': 'Recording.ts',
+  },
+  'tr': {
+    'title': 'Kayıtlarım',
+    'refresh': 'Yenile',
+    'empty': 'Henüz kayıt yok.',
+    'deleteQuestion': 'Kayıt silinsin mi?',
+    'cancel': 'İptal',
+    'delete': 'Sil',
+    'deleteTooltip': 'Kaydı sil',
+    'device': 'Cihaz depolama',
+    'usb': 'USB / Harici',
+    'localReadError': 'Yerel kayıtlar okunamadı',
+    'usbExtension': 'USB kayıtları için Android uzantısı gerekli.',
+    'usbReadError': 'USB depolama okunamadı.',
+    'usbLoadError': 'USB kayıtları yüklenemedi',
+    'usbOpenError': 'USB kaydı açılamadı.',
+    'fileMissing': 'Kayıt dosyası bulunamadı',
+    'usbPlayError': 'USB kaydı oynatılamadı.',
+    'playError': 'Oynatma başarısız',
+    'busyDelete': 'Devam eden bir kayıt silinemez.',
+    'deleteNotConfirmed': 'Silme işlemi onaylanmadı.',
+    'deleted': 'Kayıt silindi.',
+    'deleteError': 'Kayıt silinemedi.',
+    'deleteFailed': 'Silme başarısız',
+    'defaultName': 'Kayıt.ts',
+  },
+  'ru': {
+    'title': 'Мои записи',
+    'refresh': 'Обновить',
+    'empty': 'Записей пока нет.',
+    'deleteQuestion': 'Удалить запись?',
+    'cancel': 'Отмена',
+    'delete': 'Удалить',
+    'deleteTooltip': 'Удалить запись',
+    'device': 'Память устройства',
+    'usb': 'USB / Внешний',
+    'localReadError': 'Не удалось прочитать локальные записи',
+    'usbExtension': 'Для USB-записей требуется расширение Android.',
+    'usbReadError': 'Не удалось прочитать USB-накопитель.',
+    'usbLoadError': 'Не удалось загрузить USB-записи',
+    'usbOpenError': 'Не удалось открыть USB-запись.',
+    'fileMissing': 'Файл записи не найден',
+    'usbPlayError': 'Не удалось воспроизвести USB-запись.',
+    'playError': 'Ошибка воспроизведения',
+    'busyDelete': 'Нельзя удалить текущую запись.',
+    'deleteNotConfirmed': 'Удаление не подтверждено.',
+    'deleted': 'Запись удалена.',
+    'deleteError': 'Не удалось удалить запись.',
+    'deleteFailed': 'Ошибка удаления',
+    'defaultName': 'Запись.ts',
+  },
+  'pl': {
+    'title': 'Moje nagrania',
+    'refresh': 'Odśwież',
+    'empty': 'Brak nagrań.',
+    'deleteQuestion': 'Usunąć nagranie?',
+    'cancel': 'Anuluj',
+    'delete': 'Usuń',
+    'deleteTooltip': 'Usuń nagranie',
+    'device': 'Pamięć urządzenia',
+    'usb': 'USB / Zewnętrzna',
+    'localReadError': 'Nie można odczytać nagrań lokalnych',
+    'usbExtension': 'Nagrania USB wymagają rozszerzenia Android.',
+    'usbReadError': 'Nie można odczytać pamięci USB.',
+    'usbLoadError': 'Nie można wczytać nagrań USB',
+    'usbOpenError': 'Nie można otworzyć nagrania USB.',
+    'fileMissing': 'Nie znaleziono pliku nagrania',
+    'usbPlayError': 'Nie można odtworzyć nagrania USB.',
+    'playError': 'Błąd odtwarzania',
+    'busyDelete': 'Nie można usunąć trwającego nagrania.',
+    'deleteNotConfirmed': 'Nie potwierdzono usunięcia.',
+    'deleted': 'Nagranie usunięte.',
+    'deleteError': 'Nie można usunąć nagrania.',
+    'deleteFailed': 'Błąd usuwania',
+    'defaultName': 'Nagranie.ts',
+  },
+  'es': {
+    'title': 'Mis grabaciones',
+    'refresh': 'Actualizar',
+    'empty': 'Todavía no hay grabaciones.',
+    'deleteQuestion': '¿Eliminar grabación?',
+    'cancel': 'Cancelar',
+    'delete': 'Eliminar',
+    'deleteTooltip': 'Eliminar grabación',
+    'device': 'Almacenamiento del dispositivo',
+    'usb': 'USB / Externo',
+    'localReadError': 'No se pudieron leer las grabaciones locales',
+    'usbExtension': 'Las grabaciones USB requieren la extensión de Android.',
+    'usbReadError': 'No se pudo leer el almacenamiento USB.',
+    'usbLoadError': 'No se pudieron cargar las grabaciones USB',
+    'usbOpenError': 'No se pudo abrir la grabación USB.',
+    'fileMissing': 'Archivo de grabación no encontrado',
+    'usbPlayError': 'No se pudo reproducir la grabación USB.',
+    'playError': 'Error de reproducción',
+    'busyDelete': 'No se puede eliminar una grabación en curso.',
+    'deleteNotConfirmed': 'No se confirmó la eliminación.',
+    'deleted': 'Grabación eliminada.',
+    'deleteError': 'No se pudo eliminar la grabación.',
+    'deleteFailed': 'Error al eliminar',
+    'defaultName': 'Grabación.ts',
+  },
+  'fr': {
+    'title': 'Mes enregistrements',
+    'refresh': 'Actualiser',
+    'empty': 'Aucun enregistrement.',
+    'deleteQuestion': 'Supprimer cet enregistrement ?',
+    'cancel': 'Annuler',
+    'delete': 'Supprimer',
+    'deleteTooltip': 'Supprimer l’enregistrement',
+    'device': 'Stockage de l’appareil',
+    'usb': 'USB / Externe',
+    'localReadError': 'Impossible de lire les enregistrements locaux',
+    'usbExtension': 'Les enregistrements USB nécessitent l’extension Android.',
+    'usbReadError': 'Impossible de lire le stockage USB.',
+    'usbLoadError': 'Impossible de charger les enregistrements USB',
+    'usbOpenError': 'Impossible d’ouvrir l’enregistrement USB.',
+    'fileMissing': 'Fichier d’enregistrement introuvable',
+    'usbPlayError': 'Impossible de lire l’enregistrement USB.',
+    'playError': 'Échec de la lecture',
+    'busyDelete': 'Impossible de supprimer un enregistrement en cours.',
+    'deleteNotConfirmed': 'Suppression non confirmée.',
+    'deleted': 'Enregistrement supprimé.',
+    'deleteError': 'Impossible de supprimer l’enregistrement.',
+    'deleteFailed': 'Échec de la suppression',
+    'defaultName': 'Enregistrement.ts',
+  },
+  'ar': {
+    'title': 'تسجيلاتي',
+    'refresh': 'تحديث',
+    'empty': 'لا توجد تسجيلات بعد.',
+    'deleteQuestion': 'هل تريد حذف التسجيل؟',
+    'cancel': 'إلغاء',
+    'delete': 'حذف',
+    'deleteTooltip': 'حذف التسجيل',
+    'device': 'ذاكرة الجهاز',
+    'usb': 'USB / خارجي',
+    'localReadError': 'تعذرت قراءة التسجيلات المحلية',
+    'usbExtension': 'تتطلب تسجيلات USB إضافة أندرويد.',
+    'usbReadError': 'تعذرت قراءة وحدة تخزين USB.',
+    'usbLoadError': 'تعذر تحميل تسجيلات USB',
+    'usbOpenError': 'تعذر فتح تسجيل USB.',
+    'fileMissing': 'ملف التسجيل غير موجود',
+    'usbPlayError': 'تعذر تشغيل تسجيل USB.',
+    'playError': 'فشل التشغيل',
+    'busyDelete': 'لا يمكن حذف تسجيل جارٍ.',
+    'deleteNotConfirmed': 'لم يتم تأكيد الحذف.',
+    'deleted': 'تم حذف التسجيل.',
+    'deleteError': 'تعذر حذف التسجيل.',
+    'deleteFailed': 'فشل الحذف',
+    'defaultName': 'تسجيل.ts',
+  },
+};
+
 class RecordingsScreen extends StatefulWidget {
   const RecordingsScreen({super.key});
 
@@ -35,6 +240,11 @@ class _RecordingEntry {
 class _RecordingsScreenState extends State<RecordingsScreen> {
   static const MethodChannel _channel =
       MethodChannel('com.streamia/recording');
+
+  String _t(String key) {
+    final language = Localizations.localeOf(context).languageCode;
+    return (_recordingStrings[language] ?? _recordingStrings['en']!)[key] ?? key;
+  }
 
   List<_RecordingEntry> _recordings = [];
   bool _loading = true;
@@ -91,7 +301,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
         }
       }
     } catch (error) {
-      _error = 'Lokale Aufnahmen konnten nicht gelesen werden: $error';
+      _error = '${_t('localReadError')}: $error';
     }
 
     try {
@@ -120,7 +330,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
 
         entries.add(
           _RecordingEntry(
-            name: data['name']?.toString() ?? 'Aufnahme.ts',
+            name: data['name']?.toString() ?? _t('defaultName'),
             location: uri,
             isUsb: true,
             size: size,
@@ -134,12 +344,12 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
       }
     } on MissingPluginException {
       _usbWarning =
-          'USB-Aufnahmen benötigen noch die Android-Erweiterung.';
+          _t('usbExtension');
     } on PlatformException catch (error) {
       _usbWarning =
-          error.message ?? 'USB-Speicher konnte nicht gelesen werden.';
+          error.message ?? _t('usbReadError');
     } catch (error) {
-      _usbWarning = 'USB-Aufnahmen konnten nicht geladen werden: $error';
+      _usbWarning = '${_t('usbLoadError')}: $error';
     }
 
     entries.sort((a, b) {
@@ -191,7 +401,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
         );
 
         if (prepared == null || prepared.isEmpty) {
-          throw StateError('USB-Aufnahme konnte nicht geöffnet werden.');
+          throw StateError(_t('usbOpenError'));
         }
 
         path = prepared;
@@ -200,8 +410,8 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
       final file = File(path);
 
       if (!await file.exists()) {
-        throw const FileSystemException(
-          'Aufnahmedatei nicht gefunden',
+        throw FileSystemException(
+          _t('fileMissing'),
         );
       }
 
@@ -218,10 +428,10 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
       );
     } on PlatformException catch (error) {
       _message(
-        error.message ?? 'USB-Aufnahme konnte nicht abgespielt werden.',
+        error.message ?? _t('usbPlayError'),
       );
     } catch (error) {
-      _message('Wiedergabe fehlgeschlagen: $error');
+      _message('${_t('playError')}: $error');
     }
   }
 
@@ -234,7 +444,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
       if (status.isBusy &&
           status.outputPath == entry.location) {
         _message(
-          'Eine laufende Aufnahme kann nicht gelöscht werden.',
+          _t('busyDelete'),
         );
         return;
       }
@@ -242,19 +452,19 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Aufnahme löschen?'),
+          title: Text(_t('deleteQuestion')),
           content: Text(entry.name),
           actions: [
             TextButton(
               autofocus: true,
               onPressed: () =>
                   Navigator.pop(dialogContext, false),
-              child: const Text('Abbrechen'),
+              child: Text(_t('cancel')),
             ),
             TextButton(
               onPressed: () =>
                   Navigator.pop(dialogContext, true),
-              child: const Text('Löschen'),
+              child: Text(_t('delete')),
             ),
           ],
         ),
@@ -269,20 +479,20 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
         );
 
         if (deleted != true) {
-          throw StateError('Löschen wurde nicht bestätigt.');
+          throw StateError(_t('deleteNotConfirmed'));
         }
       } else {
         await File(entry.location).delete();
       }
 
       await _load();
-      _message('Aufnahme gelöscht.');
+      _message(_t('deleted'));
     } on PlatformException catch (error) {
       _message(
-        error.message ?? 'Aufnahme konnte nicht gelöscht werden.',
+        error.message ?? _t('deleteError'),
       );
     } catch (error) {
-      _message('Löschen fehlgeschlagen: $error');
+      _message('${_t('deleteFailed')}: $error');
     }
   }
 
@@ -306,7 +516,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
           overflow: TextOverflow.ellipsis,
         ),
         subtitle: Text(
-          '${entry.isUsb ? "USB / Extern" : "Gerätespeicher"}'
+          '${entry.isUsb ? _t('usb') : _t('device')}'
           ' · ${_size(entry.size)}'
           '${date == null ? "" : " · $date"}',
           maxLines: 2,
@@ -314,7 +524,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
         ),
         onTap: () => _play(entry),
         trailing: IconButton(
-          tooltip: 'Aufnahme löschen',
+          tooltip: _t('deleteTooltip'),
           icon: const Icon(Icons.delete_outline),
           onPressed: () => _delete(entry),
         ),
@@ -326,10 +536,10 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Meine Aufnahmen'),
+        title: Text(_t('title')),
         actions: [
           IconButton(
-            tooltip: 'Aktualisieren',
+            tooltip: _t('refresh'),
             onPressed: _loading ? null : _load,
             icon: const Icon(Icons.refresh),
           ),
@@ -369,7 +579,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
                       padding: EdgeInsets.all(48),
                       child: Center(
                         child: Text(
-                          'Noch keine Aufnahmen vorhanden.',
+                          _t('empty'),
                           textAlign: TextAlign.center,
                         ),
                       ),
