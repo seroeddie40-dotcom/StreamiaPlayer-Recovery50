@@ -12,7 +12,7 @@ import '../widgets/favorite_toggle_button.dart';
 import '../widgets/voice_input_field.dart';
 import 'player_screen.dart';
 
-/// Compact, keyboard-safe Live TV catalogue for phones, tablets and Android TV.
+/// Live-TV catalogue for phones, tablets and Android TV.
 class LiveTvScreen extends StatefulWidget {
   const LiveTvScreen({super.key});
 
@@ -28,6 +28,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
   final _searchFocus = FocusNode();
 
   String _selectedCategory = _all;
+  bool _folderFocusExpanded = false;
   String _search = '';
 
   List<Channel>? _cachedChannels;
@@ -42,7 +43,9 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
 
   void _onSearchChanged() {
     if (!mounted) return;
+
     final next = _searchController.text.trim().toLowerCase();
+
     if (next != _search) {
       setState(() => _search = next);
     }
@@ -58,6 +61,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
 
   String _text(String de, String tr, String en) {
     final code = context.read<LocaleProvider>().locale.languageCode;
+
     switch (code) {
       case 'de':
         return de;
@@ -70,6 +74,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
 
   String _categoryFor(Channel channel) {
     final value = channel.category?.trim();
+
     return value == null || value.isEmpty ? _other : value;
   }
 
@@ -86,8 +91,9 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
     final categories = counts.keys
         .where((key) => key != _other)
         .toList()
-      ..sort((a, b) =>
-          a.toLowerCase().compareTo(b.toLowerCase()));
+      ..sort(
+        (a, b) => a.toLowerCase().compareTo(b.toLowerCase()),
+      );
 
     if (counts.containsKey(_other)) {
       categories.add(_other);
@@ -170,17 +176,13 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Material(
                     color: selected
-                        ? AppTheme.electricBlue.withValues(
-                            alpha: 0.16,
-                          )
+                        ? AppTheme.electricBlue.withValues(alpha: 0.16)
                         : Colors.transparent,
                     borderRadius: BorderRadius.circular(9),
                     child: InkWell(
                       borderRadius: BorderRadius.circular(9),
                       focusColor:
-                          AppTheme.electricBlue.withValues(
-                        alpha: 0.25,
-                      ),
+                          AppTheme.electricBlue.withValues(alpha: 0.25),
                       onTap: () {
                         _selectCategory(category);
 
@@ -241,15 +243,13 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final channels =
-        context.watch<ContentProvider>().channels;
+    final channels = context.watch<ContentProvider>().channels;
 
     _updateCategories(channels);
 
-    final category =
-        _cachedCategories.contains(_selectedCategory)
-            ? _selectedCategory
-            : _all;
+    final category = _cachedCategories.contains(_selectedCategory)
+        ? _selectedCategory
+        : _all;
 
     final filtered = <Channel>[];
 
@@ -270,10 +270,11 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 700;
-        final language =
-            context.watch<LocaleProvider>()
-                .locale
-                .languageCode;
+
+        final language = context
+            .watch<LocaleProvider>()
+            .locale
+            .languageCode;
 
         return Scaffold(
           resizeToAvoidBottomInset: true,
@@ -290,8 +291,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
             actions: compact
                 ? [
                     Builder(
-                      builder: (buttonContext) =>
-                          IconButton(
+                      builder: (buttonContext) => IconButton(
                         tooltip: _text(
                           'Kategorien',
                           'Kategoriler',
@@ -301,8 +301,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                           Icons.folder_open_outlined,
                         ),
                         onPressed: () =>
-                            Scaffold.of(buttonContext)
-                                .openEndDrawer(),
+                            Scaffold.of(buttonContext).openEndDrawer(),
                       ),
                     ),
                   ]
@@ -321,13 +320,28 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
           body: Row(
             children: [
               if (!compact)
-                SizedBox(
-                  width: constraints.maxWidth >= 1100
-                      ? 340
-                      : 285,
-                  child: _categoryPanel(
-                    channels,
-                    inDrawer: false,
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeInOut,
+                  width: _folderFocusExpanded
+                      ? (constraints.maxWidth * 0.46)
+                          .clamp(285.0, 480.0)
+                      : (constraints.maxWidth >= 1100
+                          ? 340.0
+                          : 285.0),
+                  child: Focus(
+                    onFocusChange: (focused) {
+                      if (mounted &&
+                          focused != _folderFocusExpanded) {
+                        setState(
+                          () => _folderFocusExpanded = focused,
+                        );
+                      }
+                    },
+                    child: _categoryPanel(
+                      channels,
+                      inDrawer: false,
+                    ),
                   ),
                 ),
               Expanded(
@@ -364,8 +378,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                                 controller: _searchController,
                                 appLanguageCode: language,
                                 focusNode: _searchFocus,
-                                keyboardType:
-                                    TextInputType.text,
+                                keyboardType: TextInputType.text,
                                 textInputAction:
                                     TextInputAction.search,
                                 decoration: InputDecoration(
@@ -452,16 +465,15 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                               builder: (context, area) {
                                 final width = area.maxWidth;
 
-                                final columns =
-                                    width >= 1000
-                                        ? 6
-                                        : width >= 760
-                                            ? 5
-                                            : width >= 520
-                                                ? 4
-                                                : width >= 330
-                                                    ? 3
-                                                    : 2;
+                                final columns = width >= 1000
+                                    ? 6
+                                    : width >= 760
+                                        ? 5
+                                        : width >= 520
+                                            ? 4
+                                            : width >= 330
+                                                ? 3
+                                                : 2;
 
                                 return FocusTraversalGroup(
                                   child: GridView.builder(
@@ -481,9 +493,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                                       mainAxisSpacing: 8,
                                       crossAxisSpacing: 8,
                                       mainAxisExtent:
-                                          width < 520
-                                              ? 118
-                                              : 136,
+                                          width < 520 ? 118 : 136,
                                     ),
                                     itemCount: filtered.length,
                                     itemBuilder: (context, index) =>
@@ -522,9 +532,8 @@ class _ChannelTile extends StatelessWidget {
 
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      focusColor: AppTheme.electricBlue.withValues(
-        alpha: 0.22,
-      ),
+      focusColor:
+          AppTheme.electricBlue.withValues(alpha: 0.22),
       onTap: () => pushWithFocusRestore(
         context,
         MaterialPageRoute(
@@ -542,9 +551,7 @@ class _ChannelTile extends StatelessWidget {
               : AppTheme.lightSurface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: AppTheme.electricBlue.withValues(
-              alpha: 0.22,
-            ),
+            color: AppTheme.electricBlue.withValues(alpha: 0.22),
           ),
         ),
         child: Stack(
