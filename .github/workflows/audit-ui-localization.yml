@@ -1,0 +1,142 @@
+
+name: Streamia Player - UI Localization Audit
+
+on:
+  workflow_dispatch:
+
+  push:
+    paths:
+      - 'lib/**/*.dart'
+      - '.github/workflows/audit-ui-localization.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  localization-audit:
+    name: Find hardcoded UI strings
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Scan Flutter source files
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path("lib")
+          output = Path("localization_audit.txt")
+
+          # Heuristic patterns for common visible UI strings.
+          patterns = [
+              ("Text", re.compile(
+                  r"\bText\s*\(\s*(?:const\s+)?"
+                  r"""(['"])(.+?)\1""",
+                  re.DOTALL
+              )),
+              ("Tooltip", re.compile(
+                  r"\btooltip\s*:\s*(['\"])(.+?)\1"
+              )),
+              ("Label", re.compile(
+                  r"\blabelText\s*:\s*(['\"])(.+?)\1"
+              )),
+              ("Hint", re.compile(
+                  r"\bhintText\s*:\s*(['\"])(.+?)\1"
+              )),
+              ("Title", re.compile(
+                  r"\b(?:title|subtitle)\s*:\s*"
+                  r"(['\"])(.+?)\1"
+              )),
+              ("Semantic label", re.compile(
+                  r"\bsemanticLabel\s*:\s*"
+                  r"(['\"])(.+?)\1"
+              )),
+          ]
+
+          findings = []
+
+          for path in sorted(root.rglob("*.dart")):
+              source = path.read_text(
+                  encoding="utf-8",
+                  errors="replace"
+              )
+
+              for category, pattern in patterns:
+                  for match in pattern.finditer(source):
+                      value = match.group(2).strip()
+
+                      if not value:
+                          continue
+
+                      if value.startswith(("assets/", "http")):
+                          continue
+
+                      line = source.count(
+                          "\n", 0, match.start()
+                      ) + 1
+
+                      findings.append(
+                          (str(path), line, category, value)
+                      )
+
+          lines = [
+              "STREAMIA PLAYER - UI LOCALIZATION AUDIT",
+              "=" * 45,
+              "",
+              f"Potential hardcoded strings: {len(findings)}",
+              "",
+              "These are candidates, not confirmed bugs.",
+              "Review findings before modifying code.",
+              "",
+          ]
+
+          current_file = None
+
+          for path, line, category, value in findings:
+              if path != current_file:
+                  lines.extend([
+                      "",
+                      f"FILE: {path}",
+                      "-" * 45,
+                  ])
+                  current_file = path
+
+              value = " ".join(value.split())
+
+              lines.append(
+                  f"Line {line} [{category}]: {value[:180]}"
+              )
+
+          if not findings:
+              lines.append(
+                  "No matches for the configured patterns."
+              )
+
+          output.write_text(
+              "\n".join(lines) + "\n",
+              encoding="utf-8"
+          )
+
+          print(
+              f"Found {len(findings)} candidates."
+          )
+          print(
+              "Report saved as localization_audit.txt"
+          )
+          PY
+
+      - name: Upload localization audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: streamia-localization-audit
+          path: localization_audit.txt
+          retention-days: 14
