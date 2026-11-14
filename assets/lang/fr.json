@@ -1,4 +1,3 @@
-
 {
   "app_name": "Streamia Player",
   "live_tv": "TV en direct",
@@ -104,5 +103,7 @@
   "tv_keyboard_space": "Espace",
   "tv_keyboard_backspace": "Effacer un caractère",
   "tv_keyboard_cancel": "Annuler",
-  "tv_keyboard_confirm": "Appliquer"
+  "tv_keyboard_confirm": "Appliquer",
+  "btn_login": "Se connecter",
+  "qr_btn": "Scanner le code QR"
 }

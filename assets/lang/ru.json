@@ -1,4 +1,3 @@
-
 {
   "app_name": "Streamia Player",
   "live_tv": "Прямой эфир",
@@ -104,5 +103,7 @@
   "tv_keyboard_space": "Пробел",
   "tv_keyboard_backspace": "Удалить символ",
   "tv_keyboard_cancel": "Отмена",
-  "tv_keyboard_confirm": "Применить"
+  "tv_keyboard_confirm": "Применить",
+  "btn_login": "Войти",
+  "qr_btn": "Сканировать QR-код"
 }

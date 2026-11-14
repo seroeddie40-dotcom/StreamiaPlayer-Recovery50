@@ -1,4 +1,3 @@
-
 {
   "app_name": "Streamia Player",
   "setup_title": "Playlist einrichten",
@@ -83,5 +82,28 @@
   "tv_keyboard_space": "Leerzeichen",
   "tv_keyboard_backspace": "Rücktaste",
   "tv_keyboard_cancel": "Abbrechen",
-  "tv_keyboard_confirm": "Übernehmen"
+  "tv_keyboard_confirm": "Übernehmen",
+  "back": "Zurück",
+  "btn_login": "Anmelden",
+  "cancel": "Abbrechen",
+  "continue_btn": "Weiter",
+  "download": "Herunterladen",
+  "error": "Fehler",
+  "language": "Sprache",
+  "lifetime": "Lebenslang",
+  "live_tv": "Live-TV",
+  "loading": "Wird geladen...",
+  "monthly": "Monatlich",
+  "no": "Nein",
+  "no_data": "Keine Daten verfügbar",
+  "ok": "OK",
+  "play": "Abspielen",
+  "pro": "Pro",
+  "qr_btn": "QR-Code scannen",
+  "series": "Serien",
+  "settings": "Einstellungen",
+  "subscribe": "Abonnieren",
+  "vod": "Filme",
+  "yearly": "Jährlich",
+  "yes": "Ja"
 }
