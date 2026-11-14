@@ -7,6 +7,7 @@ import '../core/theme/app_theme.dart';
 import '../providers/auth_provider.dart';
 import '../providers/theme_provider.dart';
 import 'live_tv_screen.dart';
+import 'downloads_screen.dart';
 import 'master_search_screen.dart';
 import 'paywall_screen.dart';
 import 'recordings_screen.dart';
@@ -44,6 +45,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
       case 'fr': return 'Enregistrements';
       case 'ar': return 'التسجيلات';
       default: return 'Recordings';
+    }
+  }
+
+  String _downloadsLabel(BuildContext context) {
+    switch (Localizations.localeOf(context).languageCode) {
+      case 'de': return 'Downloads';
+      case 'tr': return 'İndirilenler';
+      case 'ru': return 'Загрузки';
+      case 'pl': return 'Pobrane';
+      case 'es': return 'Descargas';
+      case 'fr': return 'Téléchargements';
+      case 'ar': return 'التنزيلات';
+      default: return 'Downloads';
     }
   }
 
@@ -119,6 +133,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Icons.video_library_outlined,
         l10n.t('nav_series'),
         () => _open(const SeriesScreen()),
+      ),
+      _HomeEntry(
+        Icons.download_for_offline_outlined,
+        _downloadsLabel(context),
+        () => _open(const DownloadsScreen()),
       ),
       _HomeEntry(
         Icons.fiber_manual_record_rounded,
