@@ -482,7 +482,13 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
           throw StateError(_t('deleteNotConfirmed'));
         }
       } else {
-        await File(entry.location).delete();
+        final file = File(entry.location);
+        if (await file.exists()) {
+          await file.delete();
+        }
+        if (await file.exists()) {
+          throw StateError(_t('deleteFailed'));
+        }
       }
 
       await _load();
