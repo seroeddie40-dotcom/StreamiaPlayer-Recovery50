@@ -575,7 +575,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
                       ),
                     ),
                   if (_recordings.isEmpty)
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.all(48),
                       child: Center(
                         child: Text(
