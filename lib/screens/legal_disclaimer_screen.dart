@@ -1,4 +1,4 @@
-
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../core/storage/prefs_service.dart';
 import '../core/theme/app_theme.dart';
@@ -24,6 +24,39 @@ class _LegalDisclaimerScreenState
     extends State<LegalDisclaimerScreen> {
   bool _confirmed = false;
   bool _saving = false;
+  static const Duration _minimumReadingTime = Duration(seconds: 30);
+  final Stopwatch _readingWatch = Stopwatch();
+  Timer? _readingTimer;
+  Duration _elapsed = Duration.zero;
+
+  bool get _readingComplete => _elapsed >= _minimumReadingTime;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.requireAcceptance) {
+      _readingWatch.start();
+      _readingTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+        if (!mounted) return;
+        final elapsed = _readingWatch.elapsed;
+        if (elapsed >= _minimumReadingTime) {
+          _readingWatch.stop();
+          _readingTimer?.cancel();
+          setState(() => _elapsed = _minimumReadingTime);
+        } else {
+          setState(() => _elapsed = elapsed);
+        }
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _readingTimer?.cancel();
+    _readingWatch.stop();
+    super.dispose();
+  }
+
 
   String get _language =>
       widget.languageCode ??
@@ -116,30 +149,70 @@ class _LegalDisclaimerScreenState
     return data[_language] ?? data['en']!;
   }
 
+  String _saveErrorMessage() {
+    const messages = <String, String>{
+      'de': 'Die Zustimmung konnte nicht gespeichert werden. Bitte versuche es erneut.',
+      'tr': 'Onay kaydedilemedi. Lütfen tekrar deneyin.',
+      'en': 'Your acceptance could not be saved. Please try again.',
+      'ru': 'Не удалось сохранить согласие. Повторите попытку.',
+      'pl': 'Nie udało się zapisać zgody. Spróbuj ponownie.',
+      'es': 'No se pudo guardar la aceptación. Inténtalo de nuevo.',
+      'fr': 'Impossible d’enregistrer votre accord. Veuillez réessayer.',
+      'ar': 'تعذّر حفظ الموافقة. يُرجى المحاولة مرة أخرى.',
+    };
+    return messages[_language] ?? messages['en']!;
+  }
+
+  String _readingMessage(int remainingSeconds) {
+    if (remainingSeconds == 0) {
+      const ready = <String, String>{
+        'de': 'Du kannst jetzt die Bestätigung auswählen und in Ruhe weiterlesen.',
+        'tr': 'Artık onay kutusunu işaretleyebilir ve okumaya devam edebilirsiniz.',
+        'en': 'You can now select the checkbox and continue reading at your own pace.',
+        'ru': 'Теперь можно отметить флажок и продолжить чтение без спешки.',
+        'pl': 'Możesz teraz zaznaczyć pole i spokojnie czytać dalej.',
+        'es': 'Ya puedes marcar la casilla y seguir leyendo sin prisa.',
+        'fr': 'Vous pouvez maintenant cocher la case et continuer à lire à votre rythme.',
+        'ar': 'يمكنك الآن تحديد مربع الموافقة ومتابعة القراءة دون استعجال.',
+      };
+      return ready[_language] ?? ready['en']!;
+    }
+    const waiting = <String, String>{
+      'de': 'Bitte noch {seconds} Sekunden warten, bevor du bestätigen kannst.',
+      'tr': 'Onaylamadan önce lütfen {seconds} saniye daha bekleyin.',
+      'en': 'Please wait {seconds} more seconds before you can confirm.',
+      'ru': 'Подождите ещё {seconds} сек., прежде чем подтвердить.',
+      'pl': 'Poczekaj jeszcze {seconds} s, zanim potwierdzisz.',
+      'es': 'Espera {seconds} segundos más antes de confirmar.',
+      'fr': 'Veuillez patienter encore {seconds} secondes avant de confirmer.',
+      'ar': 'يُرجى الانتظار {seconds} ثانية أخرى قبل التأكيد.',
+    };
+    return (waiting[_language] ?? waiting['en']!)
+        .replaceAll('{seconds}', '$remainingSeconds');
+  }
+
   Future<void> _accept() async {
-    if (!_confirmed || _saving) return;
+    if (!widget.requireAcceptance || !_readingComplete || !_confirmed || _saving) return;
 
     setState(() => _saving = true);
 
     try {
-      await widget.prefs?.setLegalDisclaimerAccepted(
-        _language,
-      );
+      // During onboarding, a preferences service is required to persist
+      // acceptance. Do not report success when nothing was saved.
+      final prefs = widget.prefs;
+      if (prefs == null) {
+        throw StateError('Missing preferences service');
+      }
+      await prefs.setLegalDisclaimerAccepted(_language);
 
       if (!mounted) return;
-
       Navigator.of(context).pop(true);
     } catch (error) {
       if (!mounted) return;
-
       setState(() => _saving = false);
-
+      debugPrint('Legal disclaimer acceptance failed: ${error.runtimeType}');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Die Zustimmung konnte nicht gespeichert werden: $error',
-          ),
-        ),
+        SnackBar(content: Text(_saveErrorMessage())),
       );
     }
   }
@@ -147,6 +220,12 @@ class _LegalDisclaimerScreenState
   @override
   Widget build(BuildContext context) {
     final t = _copy;
+    final remainingSeconds = _readingComplete
+        ? 0
+        : (_minimumReadingTime.inMilliseconds - _elapsed.inMilliseconds + 999) ~/ 1000;
+    final progress = (_elapsed.inMilliseconds /
+            _minimumReadingTime.inMilliseconds)
+        .clamp(0.0, 1.0);
 
     return Scaffold(
       appBar: AppBar(
@@ -177,9 +256,23 @@ class _LegalDisclaimerScreenState
               ],
               if (widget.requireAcceptance) ...[
                 const Divider(height: 28),
+                Text(
+                  _readingMessage(remainingSeconds),
+                  style: const TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 12),
+                Semantics(
+                  label: _readingMessage(remainingSeconds),
+                  child: LinearProgressIndicator(
+                    value: progress,
+                    minHeight: 7,
+                    color: AppTheme.electricBlue,
+                  ),
+                ),
+                const SizedBox(height: 16),
                 CheckboxListTile(
                   value: _confirmed,
-                  onChanged: _saving
+                  onChanged: _saving || !_readingComplete
                       ? null
                       : (value) {
                           setState(() {
@@ -200,8 +293,9 @@ class _LegalDisclaimerScreenState
                 ),
                 const SizedBox(height: 12),
                 FilledButton(
-                  onPressed:
-                      !_confirmed || _saving ? null : _accept,
+                  onPressed: !_readingComplete || !_confirmed || _saving
+                      ? null
+                      : _accept,
                   style: FilledButton.styleFrom(
                     overlayColor: Colors.white24,
                   ),
