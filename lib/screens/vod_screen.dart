@@ -27,6 +27,7 @@ String _vodText(BuildContext context, String key) {
       'noResults': 'Keine passenden Filme',
       'download': 'Film herunterladen',
       'downloading': 'Download läuft',
+      'cancel': 'Abbrechen',
       'failed': 'Download fehlgeschlagen',
       'description': 'Beschreibung',
       'director': 'Regie',
@@ -47,6 +48,7 @@ String _vodText(BuildContext context, String key) {
       'noResults': 'Eşleşen film yok',
       'download': 'Filmi indir',
       'downloading': 'İndiriliyor',
+      'cancel': 'İptal et',
       'failed': 'İndirme başarısız',
       'description': 'Açıklama',
       'director': 'Yönetmen',
@@ -67,6 +69,7 @@ String _vodText(BuildContext context, String key) {
       'noResults': 'No matching movies',
       'download': 'Download movie',
       'downloading': 'Downloading',
+      'cancel': 'Cancel',
       'failed': 'Download failed',
       'description': 'Description',
       'director': 'Director',
@@ -87,6 +90,7 @@ String _vodText(BuildContext context, String key) {
       'noResults': 'Ничего не найдено',
       'download': 'Скачать фильм',
       'downloading': 'Загрузка',
+      'cancel': 'Отменить',
       'failed': 'Ошибка загрузки',
       'description': 'Описание',
       'director': 'Режиссёр',
@@ -107,6 +111,7 @@ String _vodText(BuildContext context, String key) {
       'noResults': 'Brak wyników',
       'download': 'Pobierz film',
       'downloading': 'Pobieranie',
+      'cancel': 'Anuluj',
       'failed': 'Błąd pobierania',
       'description': 'Opis',
       'director': 'Reżyser',
@@ -127,6 +132,7 @@ String _vodText(BuildContext context, String key) {
       'noResults': 'Sin resultados',
       'download': 'Descargar película',
       'downloading': 'Descargando',
+      'cancel': 'Cancelar',
       'failed': 'Error de descarga',
       'description': 'Descripción',
       'director': 'Dirección',
@@ -147,6 +153,7 @@ String _vodText(BuildContext context, String key) {
       'noResults': 'Aucun résultat',
       'download': 'Télécharger le film',
       'downloading': 'Téléchargement',
+      'cancel': 'Annuler',
       'failed': 'Échec du téléchargement',
       'description': 'Description',
       'director': 'Réalisation',
@@ -167,6 +174,7 @@ String _vodText(BuildContext context, String key) {
       'noResults': 'لا توجد نتائج',
       'download': 'تنزيل الفيلم',
       'downloading': 'جارٍ التنزيل',
+      'cancel': 'إلغاء',
       'failed': 'فشل التنزيل',
       'description': 'الوصف',
       'director': 'المخرج',
@@ -564,13 +572,17 @@ class _GenreButton extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Text(
                       title,
-                      softWrap: true,
+                      maxLines: 1,
+                      softWrap: false,
                       style: TextStyle(
                         fontWeight: selected
                             ? FontWeight.bold
                             : FontWeight.normal,
+                      ),
                       ),
                     ),
                   ),
@@ -602,8 +614,8 @@ class _VodTile extends StatefulWidget {
 }
 
 class _VodTileState extends State<_VodTile> {
-  double _progress = 0;
-  bool _downloading = false;
+  String get _downloadId => 'movie_${widget.item.id}';
+  bool _startingDownload = false;
   bool _opening = false;
 
   Future<void> _openDetails() async {
@@ -643,41 +655,36 @@ class _VodTileState extends State<_VodTile> {
   }
 
   Future<void> _download() async {
-    if (_downloading) return;
-
+    final active = DownloadService.entries.value.where(
+      (entry) => entry.id == _downloadId &&
+          (entry.state == DownloadState.downloading ||
+           entry.state == DownloadState.queued),
+    );
+    if (active.isNotEmpty) {
+      DownloadService.cancel(_downloadId);
+      return;
+    }
+    if (_startingDownload) return;
     if (!_validVodUrl(widget.item.streamUrl)) {
       _showVodError(context);
       return;
     }
-
-    setState(() {
-      _downloading = true;
-      _progress = 0;
-    });
-
+    setState(() => _startingDownload = true);
     try {
-      await DownloadService.download(
+      await DownloadService.start(
+        id: _downloadId,
+        title: widget.item.title,
+        kind: 'movie',
         url: widget.item.streamUrl,
-        filename:
-            '${widget.item.title.replaceAll(RegExp(r"[^A-Za-z0-9]"), "_")}.mp4',
-        onProgress: (received, total) {
-          if (total > 0 && mounted) {
-            setState(() => _progress = received / total);
-          }
-        },
       );
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_vodText(context, 'failed')),
-          ),
+          SnackBar(content: Text(_vodText(context, 'failed'))),
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _downloading = false);
-      }
+      if (mounted) setState(() => _startingDownload = false);
     }
   }
 
@@ -738,25 +745,29 @@ class _VodTileState extends State<_VodTile> {
                     child: Material(
                       color: Colors.black54,
                       shape: const CircleBorder(),
-                      child: IconButton(
-                        tooltip: _downloading
-                            ? _vodText(
-                                context,
-                                'downloading',
-                              )
-                            : _vodText(
-                                context,
-                                'download',
-                              ),
-                        onPressed:
-                            _downloading ? null : _download,
-                        icon: Icon(
-                          _downloading
-                              ? Icons.downloading
-                              : Icons.download,
-                          color: Colors.white,
-                          size: 20,
-                        ),
+                      child: ValueListenableBuilder<List<DownloadEntry>>(
+                        valueListenable: DownloadService.entries,
+                        builder: (context, entries, _) {
+                          final matches = entries.where(
+                            (entry) => entry.id == _downloadId,
+                          );
+                          final entry = matches.isEmpty ? null : matches.first;
+                          final active = entry?.state == DownloadState.queued ||
+                              entry?.state == DownloadState.downloading;
+                          return IconButton(
+                            tooltip: active
+                                ? _vodText(context, 'cancel')
+                                : _vodText(context, 'download'),
+                            onPressed: _download,
+                            icon: Icon(
+                              active ? Icons.cancel_outlined :
+                                  entry?.state == DownloadState.completed
+                                      ? Icons.download_done : Icons.download,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          );
+                        },
                       ),
                     ),
                   ),
@@ -764,17 +775,24 @@ class _VodTileState extends State<_VodTile> {
                     const Center(
                       child: CircularProgressIndicator(),
                     ),
-                  if (_downloading && _progress > 0)
-                    Positioned(
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      child: LinearProgressIndicator(
-                        value: _progress.clamp(0.0, 1.0),
-                        backgroundColor: Colors.black45,
-                        color: AppTheme.electricBlue,
-                      ),
+                  Positioned(
+                    left: 0, right: 0, bottom: 0,
+                    child: ValueListenableBuilder<List<DownloadEntry>>(
+                      valueListenable: DownloadService.entries,
+                      builder: (context, entries, _) {
+                        final matches = entries.where((e) => e.id == _downloadId);
+                        if (matches.isEmpty ||
+                            matches.first.state != DownloadState.downloading) {
+                          return const SizedBox.shrink();
+                        }
+                        return LinearProgressIndicator(
+                          value: matches.first.progress.clamp(0.0, 1.0),
+                          backgroundColor: Colors.black45,
+                          color: AppTheme.electricBlue,
+                        );
+                      },
                     ),
+                  ),
                 ],
               ),
             ),
