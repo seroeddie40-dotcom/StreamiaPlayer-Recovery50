@@ -107,7 +107,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   int _selectedHistoryTab = 0;
   int _videoFitIndex = 0;
   static const List<BoxFit> _videoFits = [BoxFit.contain, BoxFit.cover, BoxFit.fill];
-  static const List<String> _videoFitLabels = ['Original', 'Ausfüllen', 'Strecken'];
+  String _videoFitLabel(int index) => AppLocalizations.of(context).t(['player_fit_original', 'player_fit_cover', 'player_fit_stretch'][index]);
   Timer? _hideTimer;
   Timer? _progressTimer;
   Timer? _queueSyncTimer;
@@ -695,12 +695,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                 runSpacing: 6,
                 children: [
                   if (!widget.isLive) ...[
-                    _controlButton(Icons.replay_10, '10 Sekunden zurück', () => _seekBy(-10)),
-                    _controlButton(Icons.forward_10, '10 Sekunden vor', () => _seekBy(10)),
+                    _controlButton(Icons.replay_10, AppLocalizations.of(context).t('player_seek_back'), () => _seekBy(-10)),
+                    _controlButton(Icons.forward_10, AppLocalizations.of(context).t('player_seek_forward'), () => _seekBy(10)),
                   ],
-                  _controlButton(Icons.closed_caption, 'Untertitel', _showSubtitleTracks, focusNode: _subtitleButtonFocus),
-                  _controlButton(Icons.audiotrack, 'Audiosprache', _showAudioTracks, focusNode: _audioButtonFocus),
-                  _controlButton(Icons.aspect_ratio, 'Bildformat: ${_videoFitLabels[_videoFitIndex]}', _cycleVideoFit),
+                  _controlButton(Icons.closed_caption, AppLocalizations.of(context).t('player_subtitles'), _showSubtitleTracks, focusNode: _subtitleButtonFocus),
+                  _controlButton(Icons.audiotrack, AppLocalizations.of(context).t('player_audio'), _showAudioTracks, focusNode: _audioButtonFocus),
+                  _controlButton(Icons.aspect_ratio, "${AppLocalizations.of(context).t('player_video_fit')}: ${_videoFitLabel(_videoFitIndex)}", _cycleVideoFit),
                 ],
               ),
             ),
@@ -714,18 +714,18 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                       focusColor: AppTheme.electricBlue.withOpacity(0.38),
                       borderRadius: BorderRadius.circular(12),
                       onTap: _openNavigationDrawer,
-                      child: _pill(widget.isLive ? 'Sender & Ordner' : 'Folgen', Icons.list),
+                      child: _pill(widget.isLive ? AppLocalizations.of(context).t('player_channels_folders') : AppLocalizations.of(context).t('player_episodes'), Icons.list),
                     ),
                   if (widget.isLive) ...[
-                    IconButton(focusColor: AppTheme.electricBlue.withOpacity(0.38), onPressed: _zapPrevious, tooltip: 'Vorheriger Sender', icon: const Icon(Icons.skip_previous, color: Colors.white)),
-                    IconButton(focusColor: AppTheme.electricBlue.withOpacity(0.38), onPressed: _zapNext, tooltip: 'Nächster Sender', icon: const Icon(Icons.skip_next, color: Colors.white)),
+                    IconButton(focusColor: AppTheme.electricBlue.withOpacity(0.38), onPressed: _zapPrevious, tooltip: AppLocalizations.of(context).t('player_previous_channel'), icon: const Icon(Icons.skip_previous, color: Colors.white)),
+                    IconButton(focusColor: AppTheme.electricBlue.withOpacity(0.38), onPressed: _zapNext, tooltip: AppLocalizations.of(context).t('player_next_channel'), icon: const Icon(Icons.skip_next, color: Colors.white)),
                   ],
                   const SizedBox(width: 12),
                   InkWell(
                     focusColor: AppTheme.electricBlue.withOpacity(0.38),
                     borderRadius: BorderRadius.circular(12),
                     onTap: _toggleHistorySidebar,
-                    child: _pill('Verlauf', Icons.history),
+                    child: _pill(AppLocalizations.of(context).t('player_history'), Icons.history),
                   ),
                 ],
               ),
@@ -792,18 +792,18 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         backgroundColor: const Color(0xF0161D2A),
         builder: (sheetContext) => SafeArea(
           child: ListView(shrinkWrap: true, children: [
-            const ListTile(title: Text('Audiosprache', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+            ListTile(title: Text(AppLocalizations.of(context).t('player_audio'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
             _trackOptionTile(
               context: sheetContext,
               icon: Icons.auto_awesome,
-              label: 'Automatisch',
+              label: AppLocalizations.of(context).t('player_auto'),
               selected: _player.state.track.audio.id == 'auto',
               onTap: () => _applyAudioTrack(AudioTrack.auto()),
             ),
             if (options.isEmpty)
-              const ListTile(
-                leading: Icon(Icons.info_outline, color: Colors.white70),
-                title: Text('Keine zusätzlichen Audiospuren gemeldet.', style: TextStyle(color: Colors.white70)),
+              ListTile(
+                leading: const Icon(Icons.info_outline, color: Colors.white70),
+                title: Text(AppLocalizations.of(context).t('player_no_audio_tracks'), style: TextStyle(color: Colors.white70)),
               ),
             ...options.map((track) => _trackOptionTile(
               context: sheetContext,
@@ -830,25 +830,25 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         backgroundColor: const Color(0xF0161D2A),
         builder: (sheetContext) => SafeArea(
           child: ListView(shrinkWrap: true, children: [
-            const ListTile(title: Text('Untertitel', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
+            ListTile(title: Text(AppLocalizations.of(context).t('player_subtitles'), style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
             _trackOptionTile(
               context: sheetContext,
               icon: Icons.auto_awesome,
-              label: 'Automatisch',
+              label: AppLocalizations.of(context).t('player_auto'),
               selected: _player.state.track.subtitle.id == 'auto',
               onTap: () => _applySubtitleTrack(SubtitleTrack.auto()),
             ),
             _trackOptionTile(
               context: sheetContext,
               icon: Icons.subtitles_off,
-              label: 'Aus',
+              label: AppLocalizations.of(context).t('player_off'),
               selected: _player.state.track.subtitle.id == 'no',
               onTap: () => _applySubtitleTrack(SubtitleTrack.no()),
             ),
             if (options.isEmpty)
-              const ListTile(
-                leading: Icon(Icons.info_outline, color: Colors.white70),
-                title: Text('Keine zusätzlichen Untertitel gemeldet.', style: TextStyle(color: Colors.white70)),
+              ListTile(
+                leading: const Icon(Icons.info_outline, color: Colors.white70),
+                title: Text(AppLocalizations.of(context).t('player_no_subtitles'), style: TextStyle(color: Colors.white70)),
               ),
             ...options.map((track) => _trackOptionTile(
               context: sheetContext,
@@ -962,7 +962,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       library.recentVod,
       library.recentSeries,
     ];
-    final names = <String>['Live TV', 'Filme', 'Serien'];
+    final names = <String>[AppLocalizations.of(context).t('nav_live'), AppLocalizations.of(context).t('nav_vod'), AppLocalizations.of(context).t('nav_series')];
     final types = <RecentPlaybackType>[
       RecentPlaybackType.live,
       RecentPlaybackType.vod,
@@ -996,8 +996,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                   padding: const EdgeInsets.fromLTRB(16, 18, 12, 10),
                   child: Row(
                     children: [
-                      const Expanded(
-                        child: Text('Verlauf', style: TextStyle(
+                      Expanded(
+                        child: Text(AppLocalizations.of(context).t('player_history'), style: TextStyle(
                           color: Colors.white,
                           fontSize: 19,
                           fontWeight: FontWeight.bold,
@@ -1005,7 +1005,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                       ),
                       IconButton(
                         focusNode: _historyCloseFocus,
-                        tooltip: 'Schließen',
+                        tooltip: AppLocalizations.of(context).t('player_close'),
                         focusColor: AppTheme.electricBlue.withOpacity(0.38),
                         onPressed: _closeHistorySidebar,
                         icon: const Icon(Icons.close, color: Colors.white70),
@@ -1057,11 +1057,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                   child: Row(
                     children: [
                       Expanded(
-                        child: Text('Zuletzt angesehen · ${entries.length}/10',
+                        child: Text("${AppLocalizations.of(context).t('player_recent')}: ${entries.length}/10",
                           style: const TextStyle(color: Colors.white70, fontSize: 12)),
                       ),
                       IconButton(
-                        tooltip: '${names[_selectedHistoryTab]}-Verlauf löschen',
+                        tooltip: "${AppLocalizations.of(context).t('player_clear_history')}: ${names[_selectedHistoryTab]}",
                         focusColor: AppTheme.electricBlue.withOpacity(0.38),
                         onPressed: entries.isEmpty ? null : () => _confirmClearHistory(
                           types[_selectedHistoryTab], names[_selectedHistoryTab]),
@@ -1074,8 +1074,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                 const Divider(height: 1, color: Colors.white24),
                 Expanded(
                   child: entries.isEmpty
-                      ? const Center(
-                          child: Text('Noch nichts angesehen',
+                      ? Center(
+                          child: Text(AppLocalizations.of(context).t('player_history_empty'),
                             style: TextStyle(color: Colors.white70)),
                         )
                       : ListView.builder(
@@ -1118,18 +1118,18 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Verlauf löschen?'),
-        content: Text('Möchtest du den Bereich „$label“ für diese Playlist wirklich leeren?'),
+        title: Text(AppLocalizations.of(context).t('player_clear_history_question')),
+        content: Text("${AppLocalizations.of(context).t('player_clear_history_confirm')} $label?"),
         actions: [
           TextButton(
             autofocus: true,
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Abbrechen'),
+            child: Text(AppLocalizations.of(context).t('player_cancel')),
           ),
           FilledButton.icon(
             onPressed: () => Navigator.pop(dialogContext, true),
             icon: const Icon(Icons.delete_outline),
-            label: const Text('Verlauf löschen'),
+            label: Text(AppLocalizations.of(context).t('player_clear_history')),
           ),
         ],
       ),
@@ -1197,12 +1197,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     return showDialog<PlaybackStartChoice>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text(isSeries ? 'Serie fortsetzen?' : 'Film fortsetzen?'),
+        title: Text(AppLocalizations.of(context).t(isSeries ? 'player_resume_series' : 'player_resume_movie')),
         content: Text(hasProgress ? (isSeries ? 'Deine letzte Wiedergabeposition in dieser Episode: $label' : 'Deine letzte Wiedergabeposition: $label') : (isSeries ? 'Möchtest du diese Episode abspielen?' : 'Dieser Film wurde noch nicht angesehen. Möchtest du ihn starten?')),
         actions: [
-          TextButton(autofocus: true, onPressed: () => Navigator.pop(dialogContext, PlaybackStartChoice.cancel), child: const Text('Abbrechen')),
-          TextButton(onPressed: () => Navigator.pop(dialogContext, PlaybackStartChoice.fromBeginning), child: const Text('Von vorne starten')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, PlaybackStartChoice.resume), child: const Text('Weiterschauen')),
+          TextButton(autofocus: true, onPressed: () => Navigator.pop(dialogContext, PlaybackStartChoice.cancel), child: Text(AppLocalizations.of(context).t('player_cancel'))),
+          TextButton(onPressed: () => Navigator.pop(dialogContext, PlaybackStartChoice.fromBeginning), child: Text(AppLocalizations.of(context).t('player_from_start'))),
+          FilledButton(onPressed: () => Navigator.pop(dialogContext, PlaybackStartChoice.resume), child: Text(AppLocalizations.of(context).t('player_continue'))),
         ],
       ),
     ).then((choice) => choice == PlaybackStartChoice.cancel ? null : choice);
@@ -1287,8 +1287,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
               border: Border(right: BorderSide(color: Colors.white.withOpacity(0.16)))),
             child: Column(children: [
               Padding(padding: const EdgeInsets.fromLTRB(16, 18, 12, 10), child: Row(children: [
-                const Expanded(child: Text('Sender & Ordner', style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold))),
-                IconButton(focusNode: _drawerCloseFocus, tooltip: 'Schließen', focusColor: AppTheme.electricBlue.withOpacity(0.38), onPressed: _closeNavigationDrawer, icon: const Icon(Icons.close, color: Colors.white70)),
+                Expanded(child: Text(AppLocalizations.of(context).t('player_channels_folders'), style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold))),
+                IconButton(focusNode: _drawerCloseFocus, tooltip: AppLocalizations.of(context).t('player_close'), focusColor: AppTheme.electricBlue.withOpacity(0.38), onPressed: _closeNavigationDrawer, icon: const Icon(Icons.close, color: Colors.white70)),
               ])),
               const Divider(color: Colors.white24, height: 1),
               Expanded(
@@ -1302,7 +1302,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                           controller: _categoryListScroll,
                           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
                           children: [
-                            _categoryTile('Alle', null, autofocus: true),
+                            _categoryTile(AppLocalizations.of(context).t('player_all'), null, autofocus: true),
                             ...categories.map((category) => _categoryTile(category, category)),
                           ],
                         ),
@@ -1394,8 +1394,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
             decoration: BoxDecoration(color: const Color(0xE6101724),
               border: Border(right: BorderSide(color: Colors.white.withOpacity(0.16)))),
             child: Column(children: [
-              const Padding(padding: EdgeInsets.all(18), child: Align(alignment: Alignment.centerLeft,
-                child: Text('Staffeln & Episoden', style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)))),
+              Padding(padding: const EdgeInsets.all(18), child: Align(alignment: Alignment.centerLeft,
+                child: Text(AppLocalizations.of(context).t('player_seasons_episodes'), style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold)))),
               Expanded(child: FocusTraversalGroup(child: ListView.builder(
           controller: _episodeListScroll,
           itemExtent: _navigationRowExtent,
