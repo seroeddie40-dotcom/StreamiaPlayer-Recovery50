@@ -171,7 +171,6 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                         ),
                       ),
                     ),
-                  ),
                 );
               },
             ),
