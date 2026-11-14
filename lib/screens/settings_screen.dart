@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -115,7 +114,17 @@ class SettingsScreen extends StatelessWidget {
               ListTile(
                 autofocus: true,
                 focusColor: focusColor,
-                title: const Text('Dark / Light Mode'),
+                title: Text(_label(
+                    context,
+                    'Dunkel-/Hellmodus',
+                    'Koyu / Açık Tema',
+                    'Dark / Light Mode',
+                    'Тёмная / светлая тема',
+                    'الوضع الداكن / الفاتح',
+                    'Tryb ciemny / jasny',
+                    'Modo oscuro / claro',
+                    'Mode sombre / clair',
+                  )),
                 trailing: Switch(
                   value: isDark,
                   onChanged: (_) => theme.toggleTheme(),
@@ -167,9 +176,17 @@ class SettingsScreen extends StatelessWidget {
               ListTile(
                 focusColor: focusColor,
                 leading: const Icon(Icons.gavel_outlined),
-                title: const Text(
-                  'Rechtliche Hinweise / Disclaimer',
-                ),
+                title: Text(_label(
+                    context,
+                    'Rechtliche Hinweise / Disclaimer',
+                    'Yasal Bilgilendirme / Sorumluluk Reddi',
+                    'Legal notices / Disclaimer',
+                    'Правовая информация / Отказ от ответственности',
+                    'إشعارات قانونية / إخلاء المسؤولية',
+                    'Informacje prawne / Zastrzeżenie',
+                    'Avisos legales / Aviso de responsabilidad',
+                    'Mentions légales / Avertissement',
+                  )),
                 trailing:
                     const Icon(Icons.chevron_right),
                 onTap: () => _open(
@@ -243,10 +260,28 @@ class SettingsScreen extends StatelessWidget {
               ListTile(
                 focusColor: focusColor,
                 leading: const Icon(Icons.favorite),
-                title: const Text('Meine Favoriten'),
-                subtitle: const Text(
-                  'Sender, Filme und Serien anzeigen und verwalten',
-                ),
+                title: Text(_label(
+                    context,
+                    'Meine Favoriten',
+                    'Favorilerim',
+                    'My favorites',
+                    'Моё избранное',
+                    'مفضلتي',
+                    'Moje ulubione',
+                    'Mis favoritos',
+                    'Mes favoris',
+                  )),
+                subtitle: Text(_label(
+                    context,
+                    'Sender, Filme und Serien anzeigen und verwalten',
+                    'Filmler ve Diziler görüntüle ve yönet',
+                    'View and manage channels, movies and series',
+                    'Просмотр и управление каналами, фильмами и сериалами',
+                    'عرض القنوات والأفلام والمسلسلات وإدارتها',
+                    'Wyświetlaj kanały, filmy i seriale oraz zarządzaj nimi',
+                    'Ver y gestionar canales, películas y series',
+                    'Afficher et gérer les chaînes, films et séries',
+                  )),
                 trailing:
                     const Icon(Icons.chevron_right),
                 onTap: () => _open(
@@ -261,12 +296,28 @@ class SettingsScreen extends StatelessWidget {
                 focusColor: focusColor,
                 leading:
                     const Icon(Icons.favorite_outline),
-                title: const Text(
-                  'Favoriten sichern & übertragen',
-                ),
-                subtitle: const Text(
-                  'Sender, Filme und Serien mit deinem Konto synchronisieren',
-                ),
+                title: Text(_label(
+                    context,
+                    'Favoriten sichern & übertragen',
+                    'Favorileri yedekle ve aktar',
+                    'Back up & transfer favorites',
+                    'Резервное копирование и перенос избранного',
+                    'نسخ المفضلة احتياطياً ونقلها',
+                    'Kopia zapasowa i przenoszenie ulubionych',
+                    'Guardar y transferir favoritos',
+                    'Sauvegarder et transférer les favoris',
+                  )),
+                subtitle: Text(_label(
+                    context,
+                    'Sender, Filme und Serien mit deinem Konto synchronisieren',
+                    'Kanalları, filmleri ve dizileri hesabınla eşitle',
+                    'Sync channels, movies and series with your account',
+                    'Синхронизация каналов, фильмов и сериалов с аккаунтом',
+                    'مزامنة القنوات والأفلام والمسلسلات مع حسابك',
+                    'Synchronizuj kanały, filmy i seriale z kontem',
+                    'Sincroniza canales, películas y series con tu cuenta',
+                    'Synchroniser les chaînes, films et séries avec votre compte',
+                  )),
                 trailing:
                     const Icon(Icons.chevron_right),
                 onTap: () => _open(
@@ -279,7 +330,17 @@ class SettingsScreen extends StatelessWidget {
 
               ListTile(
                 focusColor: focusColor,
-                title: const Text('Kindersperre'),
+                title: Text(_label(
+                    context,
+                    'Kindersperre',
+                    'Ebeveyn Kilidi',
+                    'Parental lock',
+                    'Родительский контроль',
+                    'قفل الرقابة الأبوية',
+                    'Blokada rodzicielska',
+                    'Control parental',
+                    'Contrôle parental',
+                  )),
                 trailing:
                     const Icon(Icons.lock_outline),
                 onTap: () => _open(
@@ -303,9 +364,17 @@ class SettingsScreen extends StatelessWidget {
                       leading: const Icon(
                         Icons.admin_panel_settings,
                       ),
-                      title: const Text(
-                        'Admin – Geräteverwaltung',
-                      ),
+                      title: Text(_label(
+                    context,
+                    'Admin – Geräteverwaltung',
+                    'Yönetici – Cihaz Yönetimi',
+                    'Admin – Device management',
+                    'Администратор — управление устройствами',
+                    'المشرف – إدارة الأجهزة',
+                    'Administrator – Zarządzanie urządzeniami',
+                    'Administrador – Gestión de dispositivos',
+                    'Admin – Gestion des appareils',
+                  )),
                       trailing:
                           const Icon(Icons.chevron_right),
                       onTap: () => _open(
@@ -318,7 +387,17 @@ class SettingsScreen extends StatelessWidget {
 
               ListTile(
                 focusColor: focusColor,
-                title: const Text('Abmelden'),
+                title: Text(_label(
+                    context,
+                    'Abmelden',
+                    'Çıkış yap',
+                    'Log out',
+                    'Выйти',
+                    'تسجيل الخروج',
+                    'Wyloguj się',
+                    'Cerrar sesión',
+                    'Se déconnecter',
+                  )),
                 trailing: const Icon(Icons.logout),
                 onTap: () async {
                   final confirmed =
@@ -327,10 +406,28 @@ class SettingsScreen extends StatelessWidget {
                     builder: (dialogContext) =>
                         AlertDialog(
                       title:
-                          const Text('Abmelden?'),
-                      content: const Text(
-                        'Möchtest du dich wirklich abmelden?',
-                      ),
+                          Text(_label(
+                    context,
+                    'Abmelden?',
+                    'Çıkış yapılsın mı?',
+                    'Log out?',
+                    'Выйти из аккаунта?',
+                    'هل تريد تسجيل الخروج؟',
+                    'Wylogować się?',
+                    '¿Cerrar sesión?',
+                    'Se déconnecter ?',
+                  )),
+                      content: Text(_label(
+                    context,
+                    'Möchtest du dich wirklich abmelden?',
+                    'Gerçekten çıkış yapmak istiyor musunuz?',
+                    'Are you sure you want to log out?',
+                    'Вы действительно хотите выйти?',
+                    'هل أنت متأكد أنك تريد تسجيل الخروج؟',
+                    'Czy na pewno chcesz się wylogować?',
+                    '¿Seguro que quieres cerrar sesión?',
+                    'Voulez-vous vraiment vous déconnecter ?',
+                  )),
                       actions: [
                         TextButton(
                           autofocus: true,
@@ -339,9 +436,17 @@ class SettingsScreen extends StatelessWidget {
                             dialogContext,
                             false,
                           ),
-                          child: const Text(
-                            'Abbrechen',
-                          ),
+                          child: Text(_label(
+                    context,
+                    'Abbrechen',
+                    'İptal',
+                    'Cancel',
+                    'Отмена',
+                    'إلغاء',
+                    'Anuluj',
+                    'Cancelar',
+                    'Annuler',
+                  )),
                         ),
                         FilledButton(
                           onPressed: () =>
@@ -349,9 +454,17 @@ class SettingsScreen extends StatelessWidget {
                             dialogContext,
                             true,
                           ),
-                          child: const Text(
-                            'Abmelden',
-                          ),
+                          child: Text(_label(
+                    context,
+                    'Abmelden',
+                    'Çıkış yap',
+                    'Log out',
+                    'Выйти',
+                    'تسجيل الخروج',
+                    'Wyloguj się',
+                    'Cerrar sesión',
+                    'Se déconnecter',
+                  )),
                         ),
                       ],
                     ),
