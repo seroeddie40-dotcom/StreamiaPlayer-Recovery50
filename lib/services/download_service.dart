@@ -240,14 +240,14 @@ class DownloadService {
         final item = entries.value.where((e) => e.id == id);
         if (item.isNotEmpty) {
           _put(item.first.copyWith(
-            state: CancelToken.isCancel(error) || token.isCancelled
+            state: (error is DioException && CancelToken.isCancel(error)) || token.isCancelled
                 ? DownloadState.cancelled : DownloadState.failed,
             error: error.toString(),
           ));
           await _save();
         }
       }
-      if (!CancelToken.isCancel(error)) rethrow;
+      if (!(error is DioException && CancelToken.isCancel(error))) rethrow;
       return null;
     } finally {
       // Release the waiting remover even if deleting the temporary file fails.
