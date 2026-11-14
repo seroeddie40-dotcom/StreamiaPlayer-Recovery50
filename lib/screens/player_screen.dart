@@ -612,13 +612,19 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                          final stopping = recording.phase == RecordingPhase.stopping;
                          final starting = recording.phase == RecordingPhase.starting;
                          final writing = recording.writing;
-                         final label = stopping
-                             ? 'Aufnahme wird beendet …'
-                             : starting
-                                 ? 'Aufnahme startet …'
-                                 : writing
-                                     ? 'Aufnahme stoppen'
-                                     : 'Aufnehmen';
+                         final language = Localizations.localeOf(context).languageCode;
+                         const labels = <String, List<String>>{
+                           'de': ['Aufnehmen', 'Aufnahme stoppen', 'Aufnahme startet …', 'Aufnahme wird beendet …'],
+                           'tr': ['Kayıt başlat', 'Kaydı durdur', 'Kayıt başlatılıyor …', 'Kayıt durduruluyor …'],
+                           'en': ['Record', 'Stop recording', 'Starting recording …', 'Stopping recording …'],
+                           'ru': ['Записать', 'Остановить запись', 'Запись начинается …', 'Запись останавливается …'],
+                           'pl': ['Nagrywaj', 'Zatrzymaj nagrywanie', 'Rozpoczynanie nagrywania …', 'Zatrzymywanie nagrywania …'],
+                           'es': ['Grabar', 'Detener grabación', 'Iniciando grabación …', 'Deteniendo grabación …'],
+                           'fr': ['Enregistrer', 'Arrêter l’enregistrement', 'Démarrage de l’enregistrement …', 'Arrêt de l’enregistrement …'],
+                           'ar': ['تسجيل', 'إيقاف التسجيل', 'بدء التسجيل …', 'إيقاف التسجيل …'],
+                         };
+                         final words = labels[language] ?? labels['en']!;
+                         final label = words[stopping ? 3 : starting ? 2 : writing ? 1 : 0];
                          return Tooltip(
                            message: recording.error ?? label,
                            child: InkWell(
