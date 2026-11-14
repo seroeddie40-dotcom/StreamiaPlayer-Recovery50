@@ -1,0 +1,37 @@
+
+name: Streamia Player - Localization Check
+
+on:
+  push:
+    paths:
+      - 'assets/lang/**'
+      - 'tool/check_localizations.py'
+      - '.github/workflows/check-localizations.yml'
+
+  pull_request:
+    paths:
+      - 'assets/lang/**'
+      - 'tool/check_localizations.py'
+      - '.github/workflows/check-localizations.yml'
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-localizations:
+    name: Validate all 8 languages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check localization files
+        run: python tool/check_localizations.py
