@@ -1297,7 +1297,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       SizedBox(
-                        width: 126,
+                        width: MediaQuery.sizeOf(context).width >= 900 ? 230 : 180,
                         child: ListView(
                           controller: _categoryListScroll,
                           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
@@ -1366,7 +1366,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
           selected: selected,
           selectedTileColor: Colors.transparent,
           contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-          title: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis,
+          title: Text(label, softWrap: true, maxLines: null,
             style: TextStyle(color: Colors.white, fontSize: 11,
               fontWeight: selected ? FontWeight.w700 : FontWeight.normal)),
           onTap: () {
