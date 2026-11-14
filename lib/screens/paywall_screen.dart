@@ -199,7 +199,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
                     .headlineSmall
                     ?.copyWith(
                       fontWeight: FontWeight.bold,
-                      color: scheme.primary,
+                      color: selected ? scheme.onPrimaryContainer : scheme.primary,
                     ),
               ),
               const Divider(height: 28),
