@@ -1,0 +1,230 @@
+
+name: Streamia Player - Repair Localizations
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  repair:
+    name: Repair missing translations
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Add missing translations
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          folder = Path("assets/lang")
+
+          translations = {
+              "de": {
+                  "back": "Zurück",
+                  "btn_login": "Anmelden",
+                  "cancel": "Abbrechen",
+                  "continue_btn": "Weiter",
+                  "download": "Herunterladen",
+                  "error": "Fehler",
+                  "language": "Sprache",
+                  "lifetime": "Lebenslang",
+                  "live_tv": "Live-TV",
+                  "loading": "Wird geladen...",
+                  "monthly": "Monatlich",
+                  "no": "Nein",
+                  "no_data": "Keine Daten verfügbar",
+                  "ok": "OK",
+                  "play": "Abspielen",
+                  "pro": "Pro",
+                  "qr_btn": "QR-Code scannen",
+                  "series": "Serien",
+                  "settings": "Einstellungen",
+                  "subscribe": "Abonnieren",
+                  "vod": "Filme",
+                  "yearly": "Jährlich",
+                  "yes": "Ja",
+              },
+              "tr": {
+                  "back": "Geri",
+                  "btn_login": "Giriş yap",
+                  "cancel": "İptal",
+                  "continue_btn": "Devam et",
+                  "download": "İndir",
+                  "error": "Hata",
+                  "language": "Dil",
+                  "lifetime": "Ömür boyu",
+                  "live_tv": "Canlı TV",
+                  "loading": "Yükleniyor...",
+                  "monthly": "Aylık",
+                  "no": "Hayır",
+                  "no_data": "Veri bulunamadı",
+                  "ok": "Tamam",
+                  "play": "Oynat",
+                  "pro": "Pro",
+                  "qr_btn": "QR kodunu tara",
+                  "series": "Diziler",
+                  "settings": "Ayarlar",
+                  "subscribe": "Abone ol",
+                  "vod": "Filmler",
+                  "yearly": "Yıllık",
+                  "yes": "Evet",
+              },
+              "en": {
+                  "back": "Back",
+                  "cancel": "Cancel",
+                  "continue_btn": "Continue",
+                  "download": "Download",
+                  "error": "Error",
+                  "language": "Language",
+                  "lifetime": "Lifetime",
+                  "live_tv": "Live TV",
+                  "loading": "Loading...",
+                  "monthly": "Monthly",
+                  "no": "No",
+                  "no_data": "No data available",
+                  "ok": "OK",
+                  "play": "Play",
+                  "pro": "Pro",
+                  "series": "Series",
+                  "settings": "Settings",
+                  "subscribe": "Subscribe",
+                  "vod": "Movies",
+                  "yearly": "Yearly",
+                  "yes": "Yes",
+              },
+              "ru": {
+                  "btn_login": "Войти",
+                  "qr_btn": "Сканировать QR-код",
+              },
+              "pl": {
+                  "btn_login": "Zaloguj się",
+                  "qr_btn": "Zeskanuj kod QR",
+              },
+              "es": {
+                  "btn_login": "Iniciar sesión",
+                  "qr_btn": "Escanear código QR",
+              },
+              "fr": {
+                  "btn_login": "Se connecter",
+                  "qr_btn": "Scanner le code QR",
+              },
+              "ar": {
+                  "btn_login": "تسجيل الدخول",
+                  "qr_btn": "مسح رمز QR",
+              },
+          }
+
+          languages = tuple(translations)
+          files = {}
+
+          for lang in languages:
+              path = folder / f"{lang}.json"
+              if not path.is_file():
+                  raise SystemExit(
+                      f"Missing language file: {path}"
+                  )
+
+              def unique_keys(pairs):
+                  result = {}
+                  for key, value in pairs:
+                      if key in result:
+                          raise ValueError(
+                              f"Duplicate key in {lang}: {key}"
+                          )
+                      result[key] = value
+                  return result
+
+              data = json.loads(
+                  path.read_text(encoding="utf-8-sig"),
+                  object_pairs_hook=unique_keys,
+              )
+
+              if not isinstance(data, dict):
+                  raise ValueError(
+                      f"Invalid JSON object: {path}"
+                  )
+
+              files[lang] = data
+
+          all_keys = set()
+          for data in files.values():
+              all_keys.update(data)
+
+          for values in translations.values():
+              all_keys.update(values)
+
+          # Validate before modifying any files.
+          for lang, data in files.items():
+              missing = all_keys - set(data)
+              unavailable = missing - set(
+                  translations[lang]
+              )
+
+              if unavailable:
+                  raise SystemExit(
+                      f"{lang}: No translations for "
+                      f"{sorted(unavailable)}"
+                  )
+
+          for lang, data in files.items():
+              additions = {
+                  key: value
+                  for key, value in translations[lang].items()
+                  if key not in data
+              }
+
+              if additions:
+                  data.update(additions)
+                  path = folder / f"{lang}.json"
+                  path.write_text(
+                      json.dumps(
+                          data,
+                          ensure_ascii=False,
+                          indent=2,
+                      ) + "\n",
+                      encoding="utf-8",
+                  )
+
+              print(
+                  f"{lang}: +{len(additions)} keys, "
+                  f"{len(data)} total"
+              )
+
+          print("Translation repair completed.")
+          PY
+
+      - name: Validate all languages
+        run: python tool/check_localizations.py
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "fix: synchronize all eight localization files"
+          branch: "automation/fix-localizations"
+          delete-branch: true
+          title: "Fix missing translations in all 8 languages"
+          body: |
+            Automated Streamia Player localization repair.
+
+            - Adds missing translation keys
+            - Preserves existing translations
+            - Synchronizes all eight languages
+            - Runs localization consistency checks
+
+            Please review before merging.
+          add-paths: |
+            assets/lang/*.json
