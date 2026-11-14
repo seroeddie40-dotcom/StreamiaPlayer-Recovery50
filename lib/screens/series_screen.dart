@@ -822,7 +822,14 @@ class _EpisodeRow extends StatelessWidget {
               'pl': 'Pobierz odcinek', 'es': 'Descargar episodio',
               'fr': 'Télécharger l’épisode', 'ar': 'تنزيل الحلقة',
             };
-            return IconButton(
+            final progress = (entry?.progress ?? 0).clamp(0.0, 1.0);
+            return SizedBox(
+              width: 116,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  IconButton(
               tooltip: active
                   ? (cancelLabels[lang] ?? cancelLabels['en']!)
                   : (downloadLabels[lang] ?? downloadLabels['en']!),
@@ -837,6 +844,23 @@ class _EpisodeRow extends StatelessWidget {
                 // Completed episodes are opened from the Downloads library.
                 // Do not silently overwrite an existing offline copy.
                 if (entry?.state == DownloadState.completed) return;
+                if (ep.streamUrl.trim().isEmpty) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text(({
+                        'de': 'Keine Episoden-URL vorhanden.',
+                        'tr': 'Bölüm bağlantısı bulunamadı.',
+                        'en': 'Episode URL is missing.',
+                        'ru': 'Ссылка на серию отсутствует.',
+                        'pl': 'Brak adresu odcinka.',
+                        'es': 'Falta el enlace del episodio.',
+                        'fr': 'Lien de l’épisode manquant.',
+                        'ar': 'رابط الحلقة غير متوفر.',
+                      })[lang] ?? 'Episode URL is missing.')),
+                    );
+                  }
+                  return;
+                }
                 try {
                   await DownloadService.start(
                     id: id,
@@ -855,6 +879,30 @@ class _EpisodeRow extends StatelessWidget {
                   }
                 }
               },
+                  ),
+                  if (active) ...[
+                    Text(
+                      entry!.progress > 0
+                          ? '${(progress * 100).round()}%'
+                          : ({'de': 'Lädt …', 'tr': 'İndiriliyor', 'en': 'Downloading …', 'ru': 'Загрузка …', 'pl': 'Pobieranie …', 'es': 'Descargando …', 'fr': 'Téléchargement …', 'ar': 'جارٍ التنزيل …'}[lang] ?? 'Downloading …'),
+                      style: Theme.of(context).textTheme.labelSmall,
+                    ),
+                    const SizedBox(height: 3),
+                    SizedBox(
+                      width: 100,
+                      child: LinearProgressIndicator(
+                        value: entry.progress > 0 ? progress : null,
+                        minHeight: 4,
+                      ),
+                    ),
+                  ] else if (entry?.state == DownloadState.failed) ...[
+                    Text(
+                      ({'de': 'Fehler', 'tr': 'Hata', 'en': 'Failed', 'ru': 'Ошибка', 'pl': 'Błąd', 'es': 'Error', 'fr': 'Échec', 'ar': 'فشل'}[lang] ?? 'Failed'),
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(color: Colors.redAccent),
+                    ),
+                  ],
+                ],
+              ),
             );
           },
         ),
