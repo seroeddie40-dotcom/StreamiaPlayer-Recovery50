@@ -1,4 +1,3 @@
-
 {
   "app_name": "Streamia Player",
   "setup_title": "Set Up Playlist",
@@ -85,5 +84,26 @@
   "tv_keyboard_space": "Space",
   "tv_keyboard_backspace": "Backspace",
   "tv_keyboard_cancel": "Cancel",
-  "tv_keyboard_confirm": "Apply"
+  "tv_keyboard_confirm": "Apply",
+  "back": "Back",
+  "cancel": "Cancel",
+  "continue_btn": "Continue",
+  "download": "Download",
+  "error": "Error",
+  "language": "Language",
+  "lifetime": "Lifetime",
+  "live_tv": "Live TV",
+  "loading": "Loading...",
+  "monthly": "Monthly",
+  "no": "No",
+  "no_data": "No data available",
+  "ok": "OK",
+  "play": "Play",
+  "pro": "Pro",
+  "series": "Series",
+  "settings": "Settings",
+  "subscribe": "Subscribe",
+  "vod": "Movies",
+  "yearly": "Yearly",
+  "yes": "Yes"
 }

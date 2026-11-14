@@ -1,4 +1,3 @@
-
 {
   "app_name": "Streamia Player",
   "live_tv": "البث المباشر",
@@ -104,5 +103,7 @@
   "tv_keyboard_space": "مسافة",
   "tv_keyboard_backspace": "حذف حرف",
   "tv_keyboard_cancel": "إلغاء",
-  "tv_keyboard_confirm": "تطبيق"
+  "tv_keyboard_confirm": "تطبيق",
+  "btn_login": "تسجيل الدخول",
+  "qr_btn": "مسح رمز QR"
 }
