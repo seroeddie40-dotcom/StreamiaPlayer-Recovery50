@@ -24,6 +24,7 @@ class SeriesScreen extends StatefulWidget {
 
 class _SeriesScreenState extends State<SeriesScreen> {
   String? _category;
+  bool _folderFocusExpanded = false;
   String _query = '';
   final TextEditingController _searchController = TextEditingController();
 
@@ -120,9 +121,19 @@ class _SeriesScreenState extends State<SeriesScreen> {
       body: Row(
         children: [
           if (wide)
-            SizedBox(
-              width: width >= 1100 ? 340 : 285,
-              child: Column(
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeInOut,
+              width: _folderFocusExpanded
+                  ? (width * 0.46).clamp(285.0, 480.0)
+                  : (width >= 1100 ? 340.0 : 285.0),
+              child: Focus(
+                onFocusChange: (focused) {
+                  if (mounted && focused != _folderFocusExpanded) {
+                    setState(() => _folderFocusExpanded = focused);
+                  }
+                },
+                child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Padding(
@@ -132,6 +143,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
                   ),
                   Expanded(child: categoryList()),
                 ],
+              ),
               ),
             ),
           if (wide) const VerticalDivider(width: 1),
