@@ -536,6 +536,23 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                     ]),
                   ),
                 )),
+              // Tap outside an open sidebar to close only that sidebar.
+              // This transparent layer sits above player controls but below
+              // the sidebar, so list items remain fully interactive.
+              if (_showDrawer || _showHistory)
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      if (_showDrawer) {
+                        _closeNavigationDrawer();
+                      } else if (_showHistory) {
+                        _closeHistorySidebar();
+                      }
+                    },
+                    child: const SizedBox.expand(),
+                  ),
+                ),
               if (_showHistory) FocusTraversalGroup(child: _buildHistorySidebar()),
               if (_showDrawer && widget.episodes != null) FocusTraversalGroup(child: _buildEpisodesDrawer()),
               if (_showDrawer && widget.isLive) FocusTraversalGroup(child: _buildLiveNavigationDrawer()),
