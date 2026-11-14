@@ -265,7 +265,7 @@ class _VodScreenState extends State<VodScreen> {
               builder: (context, constraints) {
                 final wide = constraints.maxWidth >= 750;
                 final sidebarWidth =
-                    constraints.maxWidth >= 1100 ? 260.0 : 210.0;
+                    constraints.maxWidth >= 1100 ? 340.0 : 285.0;
 
                 final search = Padding(
                   padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
