@@ -84,7 +84,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
             selected: selected == category,
             title: Tooltip(
               message: category,
-              child: Text(category, softWrap: true),
+              child: Text(category, softWrap: true, maxLines: null),
             ),
             trailing: Text('${categoryCounts[category] ?? 0}'),
             onTap: () {
@@ -121,7 +121,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
         children: [
           if (wide)
             SizedBox(
-              width: width >= 1100 ? 260 : 210,
+              width: width >= 1100 ? 340 : 285,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -161,7 +161,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
                     child: Align(
                       alignment: AlignmentDirectional.centerStart,
                       child: InputChip(
-                        label: Text(selected),
+                        label: Text(selected, softWrap: true, maxLines: null),
                         onDeleted: () => setState(() => _category = null),
                       ),
                     ),
