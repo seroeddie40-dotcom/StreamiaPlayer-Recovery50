@@ -378,17 +378,17 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     // Overlay widgets own their remote actions; never toggle playback behind them.
     if (_showDrawer || _showHistory) return KeyEventResult.ignored;
     final key = event.logicalKey;
-    // On the player surface, Right opens recent viewing history on Android TV.
-    // Focused buttons keep their normal left/right focus navigation.
-    if (key == LogicalKeyboardKey.arrowRight &&
+    // On Live TV, Right opens the history sidebar from the player surface.
+    // For films and episodes, hidden controls reserve Left/Right for seeking.
+    if (key == LogicalKeyboardKey.arrowRight && widget.isLive &&
         _playerSurfaceFocus.hasPrimaryFocus) {
       _toggleHistorySidebar();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.arrowLeft) {
-      // When controls are visible, let Flutter's focus traversal move between
-      // buttons. Use left/right for seeking only while the overlay is hidden.
-      if (!widget.isLive && !_showControls) {
+      // Focused controls retain their normal D-pad traversal. Only seek when
+      // the controls are hidden and the content has a seekable timeline.
+      if (!widget.isLive && !_showControls && !_streamFailed && !_reconnecting) {
         final delta = key == LogicalKeyboardKey.arrowRight ? 10 : -10;
         final target = _position + Duration(seconds: delta);
         final upper = _duration > Duration.zero ? _duration : const Duration(days: 365);
