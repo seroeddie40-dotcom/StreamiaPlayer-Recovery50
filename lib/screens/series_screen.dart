@@ -85,7 +85,10 @@ class _SeriesScreenState extends State<SeriesScreen> {
             selected: selected == category,
             title: Tooltip(
               message: category,
-              child: Text(category, softWrap: true, maxLines: null),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Text(category, softWrap: false, maxLines: 1),
+              ),
             ),
             trailing: Text('${categoryCounts[category] ?? 0}'),
             onTap: () {
@@ -693,9 +696,14 @@ class _SeasonHeader extends StatelessWidget {
     var failed = false;
     for (final ep in season.episodes) {
       try {
-        await DownloadService.download(
+        await DownloadService.start(
+          id: 'episode_${series.id}_${season.number}_${ep.id}',
+          title: ep.title,
+          kind: 'episode',
           url: ep.streamUrl,
-          filename: '${series.title}_S${season.number}E${ep.number}.mp4',
+          seriesTitle: series.title,
+          season: season.number,
+          episode: ep.number,
         );
       } catch (_) {
         failed = true;
@@ -794,22 +802,60 @@ class _EpisodeRow extends StatelessWidget {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
-        trailing: IconButton(
-          tooltip: 'Download',
-          icon: const Icon(Icons.download_outlined),
-          onPressed: () async {
-            try {
-              await DownloadService.download(
-                url: ep.streamUrl,
-                filename: '${series.title}_S${season.number}E${ep.number}.mp4',
-              );
-            } catch (_) {
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                  content: Text(AppLocalizations.of(context).t('download_failed')),
-                ));
-              }
-            }
+        trailing: ValueListenableBuilder<List<DownloadEntry>>(
+          valueListenable: DownloadService.entries,
+          builder: (context, entries, _) {
+            final id = 'episode_${series.id}_${season.number}_${ep.id}';
+            final matches = entries.where((entry) => entry.id == id);
+            final entry = matches.isEmpty ? null : matches.first;
+            final active = entry?.state == DownloadState.downloading ||
+                entry?.state == DownloadState.queued;
+            final lang = context.watch<LocaleProvider>().locale.languageCode;
+            const cancelLabels = {
+              'de': 'Abbrechen', 'tr': 'İptal et', 'en': 'Cancel',
+              'ru': 'Отменить', 'pl': 'Anuluj', 'es': 'Cancelar',
+              'fr': 'Annuler', 'ar': 'إلغاء',
+            };
+            const downloadLabels = {
+              'de': 'Episode herunterladen', 'tr': 'Bölümü indir',
+              'en': 'Download episode', 'ru': 'Скачать серию',
+              'pl': 'Pobierz odcinek', 'es': 'Descargar episodio',
+              'fr': 'Télécharger l’épisode', 'ar': 'تنزيل الحلقة',
+            };
+            return IconButton(
+              tooltip: active
+                  ? (cancelLabels[lang] ?? cancelLabels['en']!)
+                  : (downloadLabels[lang] ?? downloadLabels['en']!),
+              icon: Icon(active ? Icons.cancel_outlined :
+                  entry?.state == DownloadState.completed
+                      ? Icons.download_done : Icons.download_outlined),
+              onPressed: () async {
+                if (active) {
+                  DownloadService.cancel(id);
+                  return;
+                }
+                // Completed episodes are opened from the Downloads library.
+                // Do not silently overwrite an existing offline copy.
+                if (entry?.state == DownloadState.completed) return;
+                try {
+                  await DownloadService.start(
+                    id: id,
+                    title: ep.title,
+                    kind: 'episode',
+                    url: ep.streamUrl,
+                    seriesTitle: series.title,
+                    season: season.number,
+                    episode: ep.number,
+                  );
+                } catch (_) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(AppLocalizations.of(context).t('download_failed')),
+                    ));
+                  }
+                }
+              },
+            );
           },
         ),
       ),
