@@ -59,6 +59,67 @@ class FamilyPinService {
     }
   }
 
+  /// Richtet die Eltern-PIN erstmalig ein.
+  ///
+  /// Supabase erlaubt diese Aktion nur, wenn für
+  /// das angemeldete Konto noch keine Eltern-PIN
+  /// existiert.
+  ///
+  /// Eine bestehende PIN kann über diese Methode
+  /// weder geändert noch zurückgesetzt werden.
+  ///
+  /// Zulässige PIN-Länge: 6 bis 12 Ziffern.
+  ///
+  /// Rückgabewerte:
+  /// - success
+  /// - already_configured
+  /// - invalid_pin
+  /// - unauthorized
+  ///
+  /// Die PIN niemals protokollieren oder lokal
+  /// im Klartext speichern.
+  Future<String> initializeParentPin(
+    String newPin,
+  ) async {
+    if (!RegExp(r'^[0-9]{6,12}$').hasMatch(newPin)) {
+      return 'invalid_pin';
+    }
+
+    if (_client.auth.currentUser == null) {
+      return 'unauthorized';
+    }
+
+    final response = await _client.rpc(
+      'initialize_family_parent_pin',
+      params: {
+        'p_new_pin': newPin,
+      },
+    );
+
+    if (response is! String) {
+      throw const FormatException(
+        'Unerwartete Antwort bei der '
+        'Eltern-PIN-Einrichtung.',
+      );
+    }
+
+    const allowedStatuses = {
+      'success',
+      'already_configured',
+      'invalid_pin',
+      'unauthorized',
+    };
+
+    if (!allowedStatuses.contains(response)) {
+      throw FormatException(
+        'Unbekannter Status bei der '
+        'Eltern-PIN-Einrichtung: $response',
+      );
+    }
+
+    return response;
+  }
+
   /// Verifiziert die PIN auf dem Supabase-Server.
   ///
   /// PIN und Sitzungstoken dürfen nicht in Logs
