@@ -217,7 +217,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
           'Only one playlist is allowed during the trial. The old playlist will be replaced after a successful import. Trial time and devices stay unchanged.',
         )),
         actions: [
-          TextButton(onPressed: () => Navigator.of(dialogContext).pop(false),
+          TextButton(autofocus: true, onPressed: () => Navigator.of(dialogContext).pop(false),
             child: Text(_copy('Abbrechen', 'İptal', 'Cancel'))),
           FilledButton(onPressed: () => Navigator.of(dialogContext).pop(true),
             child: Text(_copy('Ersetzen', 'Değiştir', 'Replace'))),
