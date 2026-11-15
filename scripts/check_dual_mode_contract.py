@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """Source-level checks for the Streamia Android TV / mobile startup contract.
 
@@ -34,7 +33,17 @@ require(main.index('await SystemChrome.setPreferredOrientations(') < main.index(
 require('DeviceLayout.isTelevision' in main, 'Orientation not device-specific')
 require('DeviceOrientation.landscapeLeft' in main and 'DeviceOrientation.landscapeRight' in main, 'TV landscape orientation missing')
 require('DeviceOrientation.portraitUp' in main, 'Mobile portrait orientation missing')
-require('SystemChrome.setPreferredOrientations(' not in app, 'App overrides startup orientation')
+# Startup orientation remains device-specific in main.dart. A phone-only
+# route transition may subsequently change orientation at the dashboard.
+require('class _LandscapeDashboardState' in app, 'Dashboard orientation lifecycle missing')
+require('if (DeviceLayout.isTelevision) return;' in app, 'Dashboard orientation must not affect Android TV')
+require('DeviceOrientation.landscapeLeft' in app and 'DeviceOrientation.landscapeRight' in app,
+        'Dashboard landscape orientations missing')
+require('DeviceOrientation.portraitUp' in app, 'Return-to-onboarding portrait missing')
+require('SystemChrome.setPreferredOrientations(orientations)' in app,
+        'Dashboard orientation transition missing')
+require('_applyOrientation(landscape: true)' in app and '_applyOrientation(landscape: false)' in app,
+        'Dashboard orientation enter/exit handling missing')
 
 require('kIsWeb' in layout, 'Web platform guard missing')
 require('MissingPluginException' in layout and 'PlatformException' in layout, 'Native channel failure handling missing')
