@@ -1,9 +1,11 @@
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../core/focus_navigation.dart';
+import '../core/platform/device_layout.dart';
 import '../services/download_service.dart';
 import 'player_screen.dart';
 
@@ -92,13 +94,22 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     }
   }
 
-  Widget _item(DownloadEntry entry) {
+  Widget _item(DownloadEntry entry, {bool autofocus = false}) {
     final active = entry.state == DownloadState.downloading || entry.state == DownloadState.queued;
     final status = _t(entry.state.name);
     final subtitle = entry.kind == 'episode'
         ? '${_t('season')} ${entry.season ?? '-'} · ${_t('episode')} ${entry.episode ?? '-'} · $status'
         : status;
+    final isTv = DeviceLayout.isTelevision;
     return ListTile(
+      autofocus: isTv && autofocus,
+      focusColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.18),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: isTv ? 24 : 16,
+        vertical: isTv ? 12 : 0,
+      ),
+      onTap: entry.state == DownloadState.completed ? () => _play(entry) : null,
       leading: Icon(entry.kind == 'episode' ? Icons.tv : Icons.movie_outlined),
       title: Text(entry.title),
       subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -127,11 +138,14 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     }
     return ListView(children: [
       ExpansionTile(initiallyExpanded: true, leading: const Icon(Icons.movie), title: Text('${_t('movies')} (${movies.length})'),
-        children: movies.map(_item).toList()),
+        children: movies.asMap().entries.map((e) =>
+          _item(e.value, autofocus: e.key == 0)).toList()),
       ExpansionTile(initiallyExpanded: true, leading: const Icon(Icons.video_library), title: Text('${_t('series')} (${episodes.length})'),
         children: grouped.entries.map((group) => ExpansionTile(
           leading: const Icon(Icons.folder_outlined), title: Text(group.key),
-          children: group.value.map(_item).toList(),
+          children: group.value.asMap().entries.map((e) =>
+            _item(e.value, autofocus: movies.isEmpty && e.key == 0 &&
+              identical(group.value, grouped.values.first))).toList(),
         )).toList()),
     ]);
   }
