@@ -7,14 +7,23 @@ import 'package:flutter/services.dart';
 class DeviceLayout {
   DeviceLayout._();
 
-  static const MethodChannel _channel = MethodChannel('com.streamia/device_identity');
+  static const MethodChannel _channel =
+      MethodChannel('com.streamia/device_identity');
+
   static bool isTelevision = false;
 
   static Future<void> initialize() async {
     isTelevision = false;
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+
+    if (kIsWeb ||
+        defaultTargetPlatform != TargetPlatform.android) {
+      return;
+    }
+
     try {
-      isTelevision = await _channel.invokeMethod<bool>('isTelevision') ?? false;
+      isTelevision =
+          await _channel.invokeMethod<bool>('isTelevision') ??
+              false;
     } on MissingPluginException {
       isTelevision = false;
     } on PlatformException {
