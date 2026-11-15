@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import '../core/platform/device_layout.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 /// Device inventory is loaded through admin-protected RPCs.
@@ -184,7 +185,7 @@ class _AdminDevicesScreenState
               ),
               const SizedBox(height: 12),
               Focus(
-                autofocus: true,
+                autofocus: DeviceLayout.isTelevision,
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(
                     overlayColor: highlightColor,
