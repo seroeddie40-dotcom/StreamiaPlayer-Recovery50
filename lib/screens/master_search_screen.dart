@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
+import '../core/platform/device_layout.dart';
 import '../core/localization/app_localizations.dart';
 import '../providers/content_provider.dart';
 import '../models/channel.dart';
@@ -115,7 +116,12 @@ class _MasterSearchScreenState
       appBar: AppBar(
         title: Text(l10n.t('search_all')),
       ),
-      body: FocusTraversalGroup(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: DeviceLayout.isTelevision ? 1100 : double.infinity,
+          ),
+          child: FocusTraversalGroup(
         child: Column(
           children: [
             Padding(
@@ -147,6 +153,7 @@ class _MasterSearchScreenState
                         )
                       : ListView(
                           padding:
+
                               const EdgeInsets.only(
                             bottom: 24,
                           ),
@@ -174,6 +181,8 @@ class _MasterSearchScreenState
             ),
           ],
         ),
+          ),
+        ),
       ),
     );
   }
@@ -200,7 +209,7 @@ class _MasterSearchScreenState
       focusColor: Theme.of(context)
           .colorScheme
           .primary
-          .withOpacity(0.14),
+          .withValues(alpha: 0.28),
       leading: const Icon(Icons.live_tv),
       title: Text(channel.name),
       subtitle: Text(
@@ -225,7 +234,7 @@ class _MasterSearchScreenState
       focusColor: Theme.of(context)
           .colorScheme
           .primary
-          .withOpacity(0.14),
+          .withValues(alpha: 0.28),
       leading: const Icon(Icons.movie),
       title: Text(movie.title),
       subtitle: Text(l10n.t('nav_vod')),
@@ -249,7 +258,7 @@ class _MasterSearchScreenState
       focusColor: Theme.of(context)
           .colorScheme
           .primary
-          .withOpacity(0.14),
+          .withValues(alpha: 0.28),
       leading: const Icon(Icons.video_library),
       title: Text(series.title),
       subtitle: Text(l10n.t('nav_series')),
