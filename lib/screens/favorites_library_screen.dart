@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/focus_navigation.dart';
+import '../core/platform/device_layout.dart';
 import '../services/favorites_backup_service.dart';
 import '../providers/content_provider.dart';
 import '../models/channel.dart';
@@ -187,6 +188,7 @@ class _FavoritesLibraryScreenState
               overlayColor: Theme.of(dialogContext)
                   .colorScheme
                   .primary
+
                   .withValues(alpha: 0.16),
             ),
             onPressed: () =>
@@ -353,7 +355,7 @@ class _FavoritesLibraryScreenState
                         final row = rows[index];
 
                         return ListTile(
-                          autofocus: index == 0,
+                          autofocus: DeviceLayout.isTelevision && index == 0,
                           focusColor: color.withValues(
                             alpha: 0.14,
                           ),
@@ -402,7 +404,7 @@ class _ErrorState extends StatelessWidget {
   final VoidCallback onRetry;
 
   const _ErrorState({
-    required this.message,
+    required this.message;
     required this.onRetry,
   });
 
