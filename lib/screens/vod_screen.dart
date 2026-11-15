@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
+import '../core/platform/device_layout.dart';
 import '../core/theme/app_theme.dart';
 import '../models/vod_item.dart';
 import '../providers/content_provider.dart';
@@ -313,7 +314,7 @@ class _VodScreenState extends State<VodScreen> {
                       title: _vodText(context, 'all'),
                       count: items.length,
                       selected: selected == null,
-                      autofocus: wide,
+                      autofocus: DeviceLayout.isTelevision && wide,
                       onTap: () =>
                           setState(() => _selectedGenre = null),
                     ),
@@ -471,7 +472,7 @@ class _VodScreenState extends State<VodScreen> {
                                       ),
                                       item: filtered[index],
                                       autofocus:
-                                          index == 0 && !wide,
+                                          DeviceLayout.isTelevision && index == 0 && !wide,
                                     ),
                                   ),
                                 );
@@ -617,6 +618,7 @@ class _VodTileState extends State<_VodTile> {
   String get _downloadId => 'movie_${widget.item.id}';
   bool _startingDownload = false;
   bool _opening = false;
+  bool _focused = false;
 
   Future<void> _openDetails() async {
     if (_opening) return;
@@ -695,6 +697,9 @@ class _VodTileState extends State<_VodTile> {
 
     return InkWell(
       autofocus: widget.autofocus,
+      onFocusChange: (value) {
+        if (mounted) setState(() => _focused = value);
+      },
       focusColor: AppTheme.electricBlue.withOpacity(0.22),
       borderRadius: BorderRadius.circular(16),
       onTap: _opening ? null : _openDetails,
@@ -705,7 +710,10 @@ class _VodTileState extends State<_VodTile> {
               : AppTheme.lightSurface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: AppTheme.electricBlue.withOpacity(0.12),
+            color: _focused
+                ? AppTheme.electricBlue
+                : AppTheme.electricBlue.withOpacity(0.12),
+            width: _focused ? 3 : 1,
           ),
         ),
         clipBehavior: Clip.antiAlias,
