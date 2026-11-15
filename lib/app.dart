@@ -1,3 +1,4 @@
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -130,11 +131,6 @@ class StreamiaApp extends StatelessWidget {
     if (!content.isLoaded) {
       return const _LibraryStartupGate();
     }
-
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
 
     return const DashboardScreen();
   }
@@ -338,7 +334,7 @@ class _DeviceActivationGateState extends State<_DeviceActivationGate> {
                       const SizedBox(height: 12),
                       if (current.loadingDevices) const Center(child: CircularProgressIndicator()),
                       if (!current.loadingDevices && devices.isEmpty)
-                        Text(_tr('Keine ersetzbaren Geräte gefunden. Bitte erneut prüfen.',
+                                              Text(_tr('Keine ersetzbaren Geräte gefunden. Bitte erneut prüfen.',
                           'Değiştirilebilecek cihaz bulunamadı. Lütfen tekrar kontrol edin.',
                           'No replaceable devices found. Please check again.')),
                       for (final device in devices)
