@@ -137,6 +137,7 @@ class _RecordingStorageScreenState
         ),
         actions: [
           TextButton(
+            autofocus: true,
             onPressed: () =>
                 Navigator.pop(dialogContext, false),
             child: Text(
