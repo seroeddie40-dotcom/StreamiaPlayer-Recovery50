@@ -23,6 +23,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Verify Android TV and mobile startup contract
+        run: python3 scripts/check_dual_mode_contract.py
+
+      - name: Check Python preflight scripts
+        run: |
+          python3 -m py_compile scripts/check_android_package.py scripts/check_dual_mode_contract.py scripts/check_local_dart_imports.py scripts/check_flutter_assets.py scripts/check_dart_packages.py
+          python3 scripts/check_android_package.py
+          python3 scripts/check_local_dart_imports.py
+          python3 scripts/check_flutter_assets.py
+          python3 scripts/check_dart_packages.py
+
       - name: Configure Java 17
         uses: actions/setup-java@v4
         with:
@@ -71,6 +82,30 @@ jobs:
           GRADLE
           echo "Configured Gradle init script for all builds, including Flutter's included build."
 
+      - name: Validate Android project
+        run: |
+          if [ -f scripts/check_android_package.py ]; then
+            python3 scripts/check_android_package.py
+          fi
+
+      - name: Install dependencies
+        run: |
+          set -o pipefail
+          mkdir -p build/ci-logs
+          flutter pub get 2>&1 | tee build/ci-logs/flutter-pub-get.log
+
+      - name: Analyze Flutter project
+        run: |
+          set -o pipefail
+          mkdir -p build/ci-logs
+          flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1 | tee build/ci-logs/flutter-analyze.log
+
+      - name: Run Flutter tests
+        run: |
+          set -o pipefail
+          mkdir -p build/ci-logs
+          flutter test 2>&1 | tee build/ci-logs/flutter-test.log
+
       - name: Restore and validate permanent debug signing key
         env:
           DEBUG_KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
@@ -100,26 +135,13 @@ jobs:
           print('Permanent Streamia signing key verified:', expected)
           PY
 
-      - name: Validate Android project
-        run: |
-          if [ -f scripts/check_android_package.py ]; then
-            python3 scripts/check_android_package.py
-          fi
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Analyze Flutter project
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
-
-      - name: Run Flutter tests
-        run: flutter test
-
       - name: Build signed debug APK
         run: |
+          set -o pipefail
+          mkdir -p build/ci-logs
           flutter build apk \
             --debug \
-            --build-number=${{ github.run_number }}
+            --build-number=${{ github.run_number }} 2>&1 | tee build/ci-logs/flutter-build.log
 
       - name: Verify APK signature matches permanent key
         run: |
@@ -141,6 +163,16 @@ jobs:
           print('APK signing certificate matches the permanent Streamia key.')
           PY
           ls -lh "$APK"
+
+      # Keep error logs accessible from a phone even if analysis, tests or build fail.
+      - name: Upload Flutter diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: streamia-flutter-diagnostics
+          path: build/ci-logs/*.log
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Upload Streamia Player APK
         uses: actions/upload-artifact@v4
