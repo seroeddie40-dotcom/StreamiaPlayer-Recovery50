@@ -188,7 +188,6 @@ class _FavoritesLibraryScreenState
               overlayColor: Theme.of(dialogContext)
                   .colorScheme
                   .primary
-
                   .withValues(alpha: 0.16),
             ),
             onPressed: () =>
@@ -404,7 +403,7 @@ class _ErrorState extends StatelessWidget {
   final VoidCallback onRetry;
 
   const _ErrorState({
-    required this.message;
+    required this.message,
     required this.onRetry,
   });
 
