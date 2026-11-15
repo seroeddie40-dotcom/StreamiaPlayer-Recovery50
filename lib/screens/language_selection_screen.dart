@@ -4,9 +4,17 @@ import 'package:provider/provider.dart';
 
 import '../providers/locale_provider.dart';
 import '../core/theme/app_theme.dart';
+import '../core/platform/device_layout.dart';
 
-class LanguageSelectionScreen extends StatelessWidget {
+class LanguageSelectionScreen extends StatefulWidget {
   const LanguageSelectionScreen({super.key});
+
+  @override
+  State<LanguageSelectionScreen> createState() => _LanguageSelectionScreenState();
+}
+
+class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
+  String? _focusedLanguage;
 
   static const _languages = [
     ('de', 'Deutsch', '🇩🇪'),
@@ -49,8 +57,9 @@ class LanguageSelectionScreen extends StatelessWidget {
               final itemSpacing =
                   isCompact ? 10.0 : 14.0;
 
+              final columns = DeviceLayout.isTelevision ? 4 : 2;
               final itemWidth =
-                  (availableWidth - itemSpacing) / 2;
+                  (availableWidth - itemSpacing * (columns - 1)) / columns;
 
               return SingleChildScrollView(
                 padding: EdgeInsets.symmetric(
@@ -116,6 +125,18 @@ class LanguageSelectionScreen extends StatelessWidget {
                               borderRadius:
                                   BorderRadius.circular(16),
                               child: InkWell(
+                                autofocus: DeviceLayout.isTelevision && languageCode == selectedLanguage,
+                                onFocusChange: (focused) {
+                                  if (!DeviceLayout.isTelevision || !mounted) return;
+                                  setState(() {
+                                    if (focused) {
+                                      _focusedLanguage = languageCode;
+                                    } else if (_focusedLanguage == languageCode) {
+                                      _focusedLanguage = null;
+                                    }
+                                  });
+                                },
+                                focusColor: Colors.white24,
                                 borderRadius:
                                     BorderRadius.circular(16),
                                 onTap: () {
@@ -140,11 +161,12 @@ class LanguageSelectionScreen extends StatelessWidget {
                                     borderRadius:
                                         BorderRadius.circular(16),
                                     border: Border.all(
-                                      color: Colors.white.withOpacity(
-                                        isSelected ? 1 : 0.4,
-                                      ),
-                                      width:
-                                          isSelected ? 2 : 1,
+                                      color: DeviceLayout.isTelevision && _focusedLanguage == languageCode
+                                          ? const Color(0xFF00E5FF)
+                                          : Colors.white.withOpacity(isSelected ? 1 : 0.4),
+                                      width: DeviceLayout.isTelevision && _focusedLanguage == languageCode
+                                          ? 3
+                                          : (isSelected ? 2 : 1),
                                     ),
                                   ),
                                   child: Column(
@@ -155,6 +177,8 @@ class LanguageSelectionScreen extends StatelessWidget {
                                         flag,
                                         style: const TextStyle(
                                           fontSize: 26,
+                                        ),
+
                                         ),
                                       ),
 
