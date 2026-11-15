@@ -1,4 +1,3 @@
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -7,6 +6,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
 import 'core/theme/app_theme.dart';
+import 'core/platform/device_layout.dart';
 import 'core/localization/app_localizations.dart';
 import 'core/storage/prefs_service.dart';
 
@@ -132,10 +132,49 @@ class StreamiaApp extends StatelessWidget {
       return const _LibraryStartupGate();
     }
 
-    return const DashboardScreen();
+    return const _LandscapeDashboard();
   }
 }
 
+
+/// Keep onboarding in portrait on phones while restoring the original
+/// landscape experience as soon as the library/dashboard is displayed.
+/// Android TV always remains in landscape.
+class _LandscapeDashboard extends StatefulWidget {
+  const _LandscapeDashboard();
+
+  @override
+  State<_LandscapeDashboard> createState() => _LandscapeDashboardState();
+}
+
+class _LandscapeDashboardState extends State<_LandscapeDashboard> {
+  @override
+  void initState() {
+    super.initState();
+    _applyOrientation(landscape: true);
+  }
+
+  @override
+  void dispose() {
+    // A user who signs out returns to portrait onboarding on a phone.
+    _applyOrientation(landscape: false);
+    super.dispose();
+  }
+
+  void _applyOrientation({required bool landscape}) {
+    if (DeviceLayout.isTelevision) return;
+    final orientations = landscape
+        ? <DeviceOrientation>[
+            DeviceOrientation.landscapeLeft,
+            DeviceOrientation.landscapeRight,
+          ]
+        : <DeviceOrientation>[DeviceOrientation.portraitUp];
+    unawaited(SystemChrome.setPreferredOrientations(orientations));
+  }
+
+  @override
+  Widget build(BuildContext context) => const DashboardScreen();
+}
 
 /// Automatically routes returning users to their library or playlist setup.
 /// A temporary source failure never deletes stored playlist profiles.
@@ -195,7 +234,7 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
   @override
   Widget build(BuildContext context) {
     if (context.watch<ContentProvider>().isLoaded) {
-      return const DashboardScreen();
+      return const _LandscapeDashboard();
     }
     if (!_loading && !_hasProfiles) {
       return const SetupScreen();
@@ -334,7 +373,7 @@ class _DeviceActivationGateState extends State<_DeviceActivationGate> {
                       const SizedBox(height: 12),
                       if (current.loadingDevices) const Center(child: CircularProgressIndicator()),
                       if (!current.loadingDevices && devices.isEmpty)
-                                              Text(_tr('Keine ersetzbaren Geräte gefunden. Bitte erneut prüfen.',
+                        Text(_tr('Keine ersetzbaren Geräte gefunden. Bitte erneut prüfen.',
                           'Değiştirilebilecek cihaz bulunamadı. Lütfen tekrar kontrol edin.',
                           'No replaceable devices found. Please check again.')),
                       for (final device in devices)
