@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:file_picker/file_picker.dart';
@@ -21,6 +22,7 @@ import '../models/playlist_source_config.dart';
 import '../models/playlist_profile.dart';
 import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
+import '../core/platform/device_layout.dart';
 import '../widgets/voice_input_field.dart';
 import '../widgets/tv_text_keyboard.dart';
 
@@ -71,6 +73,12 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   @override
   void initState() {
     super.initState();
+    // Keep playlist entry and loading in portrait on phones, never on TV.
+    if (!DeviceLayout.isTelevision) {
+      unawaited(SystemChrome.setPreferredOrientations(
+        const <DeviceOrientation>[DeviceOrientation.portraitUp],
+      ));
+    }
     _tabController = TabController(length: 3, vsync: this);
     _m3uController.addListener(() {
       if (_selectedM3uPath != null && _m3uController.text.trim().isNotEmpty && mounted) {
@@ -478,6 +486,15 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
 
   @override
   void dispose() {
+    // Returning from playlist editing to an existing dashboard restores landscape.
+    if (widget.returnToPreviousOnSuccess && !DeviceLayout.isTelevision) {
+      unawaited(SystemChrome.setPreferredOrientations(
+        const <DeviceOrientation>[
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ],
+      ));
+    }
     TvServer.stop();
     _tabController.dispose();
     _m3uNameController.dispose();
