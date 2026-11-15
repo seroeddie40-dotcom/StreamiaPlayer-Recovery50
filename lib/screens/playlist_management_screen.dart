@@ -1,8 +1,10 @@
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/content_provider.dart';
 import '../services/playlist_switch_service.dart';
 import '../core/focus_navigation.dart';
+import '../core/platform/device_layout.dart';
 import '../core/localization/app_localizations.dart';
 import '../models/playlist_profile.dart';
 import '../services/playlist_profile_store.dart';
@@ -49,14 +51,14 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
       builder: (dialogContext) => AlertDialog(
         title: Text(AppLocalizations.of(context).t('playlist_edit')),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: name, autofocus: true, textCapitalization: TextCapitalization.none,
+          TextField(controller: name, autofocus: !DeviceLayout.isTelevision, textCapitalization: TextCapitalization.none,
             decoration: InputDecoration(labelText: AppLocalizations.of(context).t('playlist_display_name'))),
           const SizedBox(height: 12),
           TextField(controller: folder, textCapitalization: TextCapitalization.none,
             decoration: InputDecoration(labelText: AppLocalizations.of(context).t('playlist_folder'))),
         ]),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext), child: Text(AppLocalizations.of(context).t('playlist_cancel'))),
+          TextButton(autofocus: DeviceLayout.isTelevision, onPressed: () => Navigator.pop(dialogContext), child: Text(AppLocalizations.of(context).t('playlist_cancel'))),
           FilledButton(onPressed: () => Navigator.pop(dialogContext, (name.text.trim(), folder.text.trim())),
             child: Text(AppLocalizations.of(context).t('playlist_save'))),
         ],
@@ -145,7 +147,8 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
                   for (final profile in entry.value)
                     Card(
                       child: ListTile(
-                        autofocus: _profiles.first.sourceKey == profile.sourceKey,
+                        autofocus: DeviceLayout.isTelevision &&
+                            _profiles.first.sourceKey == profile.sourceKey,
                         focusColor: Theme.of(context).colorScheme.primary.withOpacity(.15),
                         leading: Icon(profile.type == 'xtream' ? Icons.dns_outlined : Icons.playlist_play),
                         title: Text(profile.displayName),
