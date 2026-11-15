@@ -178,8 +178,6 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
                                         style: const TextStyle(
                                           fontSize: 26,
                                         ),
-
-                                        ),
                                       ),
 
                                       const SizedBox(height: 6),
