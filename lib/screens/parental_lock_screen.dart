@@ -1,6 +1,8 @@
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/storage/prefs_service.dart';
+import '../core/platform/device_layout.dart';
 
 class ParentalLockScreen extends StatefulWidget {
   const ParentalLockScreen({super.key});
@@ -85,7 +87,7 @@ class _ParentalLockScreenState extends State<ParentalLockScreen> {
                 color: Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
                 child: InkWell(
-                  autofocus: i == 0,
+                  autofocus: DeviceLayout.isTelevision && i == 0,
                   borderRadius: BorderRadius.circular(8),
                   focusColor: Theme.of(context).colorScheme.primary.withOpacity(0.28),
                   onTap: () => _onDigit('${i + 1}'),
@@ -150,7 +152,7 @@ class _ParentalLockScreenState extends State<ParentalLockScreen> {
                       return Material(
                         color: Colors.transparent,
                         child: InkWell(
-                          autofocus: i == 0,
+                          autofocus: DeviceLayout.isTelevision && i == 0,
                           focusColor: Theme.of(context).colorScheme.primary.withOpacity(0.24),
                           onTap: () async {
                             final newList = List<String>.from(folders)..remove(f);
