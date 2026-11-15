@@ -8,6 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../services/recording_service.dart';
+import '../core/platform/device_layout.dart';
 
 
 // Screen-local translations. Recording filenames and platform errors remain unchanged.
@@ -505,12 +506,21 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
   Widget _buildRecordingTile(_RecordingEntry entry) {
     final date = entry.modified?.toLocal().toString();
 
+    final isTv = DeviceLayout.isTelevision;
     return Card(
       margin: const EdgeInsets.symmetric(
         horizontal: 12,
         vertical: 5,
       ),
       child: ListTile(
+        autofocus: isTv && _recordings.isNotEmpty &&
+            identical(entry, _recordings.first),
+        focusColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.18),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: isTv ? 24 : 16,
+          vertical: isTv ? 12 : 0,
+        ),
         leading: Icon(
           entry.isUsb
               ? Icons.usb
