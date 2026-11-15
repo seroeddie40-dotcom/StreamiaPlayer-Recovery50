@@ -2,6 +2,10 @@
 package com.streamia.streamia_player
 
 import android.app.Activity
+import android.app.UiModeManager
+import android.content.Context
+import android.content.res.Configuration
+import android.content.pm.PackageManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -632,6 +636,15 @@ class MainActivity : FlutterActivity() {
         ).setMethodCallHandler { call, result ->
 
             when (call.method) {
+                "isTelevision" -> {
+                    val modeManager = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+                    val isTv = modeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+                        packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+                        packageManager.hasSystemFeature("android.software.leanback_only") ||
+                        packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
+                    result.success(isTv)
+                }
+
                 "getAndroidId" -> {
                     result.success(
                         Settings.Secure.getString(
