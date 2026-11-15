@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
+import '../core/platform/device_layout.dart';
 import '../core/localization/app_localizations.dart';
 import '../providers/content_provider.dart';
 import '../services/watch_progress_service.dart';
@@ -79,7 +80,7 @@ class _ContinueWatchingScreenState
           if (snapshot.hasError) {
             return Center(
               child: TextButton.icon(
-                autofocus: true,
+                autofocus: DeviceLayout.isTelevision,
                 style: TextButton.styleFrom(
                   overlayColor: focusColor,
                 ),
@@ -149,7 +150,7 @@ class _ContinueWatchingScreenState
                       : 0.0;
 
                   return ListTile(
-                    autofocus: index == 0,
+                    autofocus: DeviceLayout.isTelevision && index == 0,
                     focusColor: Theme.of(context)
                         .colorScheme
                         .primary
