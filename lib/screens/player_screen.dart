@@ -53,6 +53,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   final FocusNode _drawerCloseFocus = FocusNode(debugLabel: 'Navigation schließen');
   final FocusNode _categoryAllFocus = FocusNode(debugLabel: 'Alle Sender');
   final FocusNode _historyCloseFocus = FocusNode(debugLabel: 'Verlauf schließen');
+  final FocusNode _currentEpisodeFocus = FocusNode(debugLabel: 'Aktuelle Episode');
   final ScrollController _episodeListScroll = ScrollController();
   static const double _navigationRowExtent = 72;
   // Invalidates pending scroll requests when a drawer/category changes.
@@ -461,6 +462,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _drawerCloseFocus.dispose();
     _categoryAllFocus.dispose();
     _historyCloseFocus.dispose();
+    _currentEpisodeFocus.dispose();
     _episodeListScroll.dispose();
     _playerSurfaceFocus.dispose();
     _subtitleButtonFocus.dispose();
@@ -1272,7 +1274,14 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _hideTimer?.cancel();
     _scrollToCurrentNavigationItem();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _showDrawer && widget.isLive) _categoryAllFocus.requestFocus();
+      if (!mounted || !_showDrawer) return;
+      if (widget.isLive) {
+        _categoryAllFocus.requestFocus();
+      } else if (widget.episodes != null) {
+        // The episode list has its own autofocus on the current episode.
+        // Do not leave focus on the video surface when opening the drawer.
+        _currentEpisodeFocus.requestFocus();
+      }
     });
   }
 
@@ -1418,6 +1427,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                   _keepFocusedNavigationRowVisible(rowContext, focused),
               child: InkWell(
               autofocus: i == _currentEpisode,
+              focusNode: i == _currentEpisode ? _currentEpisodeFocus : null,
               focusColor: AppTheme.electricBlue.withOpacity(0.38),
               onTap: () async {
                 await _saveProgress();
