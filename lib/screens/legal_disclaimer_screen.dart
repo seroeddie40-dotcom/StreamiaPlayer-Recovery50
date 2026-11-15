@@ -1,5 +1,8 @@
+
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../core/platform/device_layout.dart';
 import '../core/storage/prefs_service.dart';
 import '../core/theme/app_theme.dart';
 
@@ -22,6 +25,10 @@ class LegalDisclaimerScreen extends StatefulWidget {
 
 class _LegalDisclaimerScreenState
     extends State<LegalDisclaimerScreen> {
+  final ScrollController _scrollController = ScrollController();
+  final FocusNode _readingFocus = FocusNode(debugLabel: 'Legal notice scroll');
+  final FocusNode _confirmationFocus = FocusNode(debugLabel: 'Legal notice acceptance');
+  final FocusNode _continueFocus = FocusNode(debugLabel: 'Legal notice continue');
   bool _confirmed = false;
   bool _saving = false;
   static const Duration _minimumReadingTime = Duration(seconds: 30);
@@ -54,6 +61,10 @@ class _LegalDisclaimerScreenState
   void dispose() {
     _readingTimer?.cancel();
     _readingWatch.stop();
+    _scrollController.dispose();
+    _readingFocus.dispose();
+    _confirmationFocus.dispose();
+    _continueFocus.dispose();
     super.dispose();
   }
 
@@ -217,9 +228,39 @@ class _LegalDisclaimerScreenState
     }
   }
 
+  KeyEventResult _handleReadingKey(FocusNode node, KeyEvent event) {
+    if (!DeviceLayout.isTelevision || event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    final offset = switch (event.logicalKey) {
+      LogicalKeyboardKey.arrowDown => 130.0,
+      LogicalKeyboardKey.pageDown => 390.0,
+      LogicalKeyboardKey.arrowUp => -130.0,
+      LogicalKeyboardKey.pageUp => -390.0,
+      _ => 0.0,
+    };
+    if (offset == 0 || !_scrollController.hasClients) {
+      return KeyEventResult.ignored;
+    }
+    final position = _scrollController.position;
+    final target = (position.pixels + offset)
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    if (target == position.pixels && offset > 0 && widget.requireAcceptance) {
+      _confirmationFocus.requestFocus();
+      return KeyEventResult.handled;
+    }
+    _scrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+    );
+    return KeyEventResult.handled;
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = _copy;
+    final isTv = DeviceLayout.isTelevision;
     final remainingSeconds = _readingComplete
         ? 0
         : (_minimumReadingTime.inMilliseconds - _elapsed.inMilliseconds + 999) ~/ 1000;
@@ -227,90 +268,92 @@ class _LegalDisclaimerScreenState
             _minimumReadingTime.inMilliseconds)
         .clamp(0.0, 1.0);
 
+    final textStyle = TextStyle(fontSize: isTv ? 19 : 15, height: 1.55);
+    final paragraphs = <Widget>[
+      Icon(Icons.gavel_rounded, size: isTv ? 42 : 48,
+          color: AppTheme.electricBlue),
+      const SizedBox(height: 18),
+      for (final paragraph in t.sublist(1, 6)) ...[
+        Text(paragraph, style: textStyle),
+        const SizedBox(height: 16),
+      ],
+    ];
+
     return Scaffold(
       appBar: AppBar(
         title: Text(t[0]),
-        automaticallyImplyLeading:
-            !widget.requireAcceptance,
+        automaticallyImplyLeading: !widget.requireAcceptance,
       ),
       body: SafeArea(
-        child: FocusTraversalGroup(
-          child: ListView(
-            padding: const EdgeInsets.all(24),
-            children: [
-              const Icon(
-                Icons.gavel_rounded,
-                size: 48,
-                color: AppTheme.electricBlue,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: isTv ? 1050 : 720),
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: isTv ? 28 : 16,
+                vertical: isTv ? 12 : 8,
               ),
-              const SizedBox(height: 20),
-              for (final paragraph in t.sublist(1, 6)) ...[
-                Text(
-                  paragraph,
-                  style: const TextStyle(
-                    fontSize: 15,
-                    height: 1.55,
-                  ),
-                ),
-                const SizedBox(height: 16),
-              ],
-              if (widget.requireAcceptance) ...[
-                const Divider(height: 28),
-                Text(
-                  _readingMessage(remainingSeconds),
-                  style: const TextStyle(fontSize: 14),
-                ),
-                const SizedBox(height: 12),
-                Semantics(
-                  label: _readingMessage(remainingSeconds),
-                  child: LinearProgressIndicator(
-                    value: progress,
-                    minHeight: 7,
-                    color: AppTheme.electricBlue,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                CheckboxListTile(
-                  value: _confirmed,
-                  onChanged: _saving || !_readingComplete
-                      ? null
-                      : (value) {
-                          setState(() {
-                            _confirmed = value ?? false;
-                          });
-                        },
-                  autofocus: true,
-                  activeColor: AppTheme.electricBlue,
-                  controlAffinity:
-                      ListTileControlAffinity.leading,
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(
-                    t[6],
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: Focus(
+                      focusNode: _readingFocus,
+                      autofocus: isTv,
+                      onKeyEvent: _handleReadingKey,
+                      child: ListView(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.only(bottom: 16),
+                        children: paragraphs,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                FilledButton(
-                  onPressed: !_readingComplete || !_confirmed || _saving
-                      ? null
-                      : _accept,
-                  style: FilledButton.styleFrom(
-                    overlayColor: Colors.white24,
-                  ),
-                  child: _saving
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : Text(t[7]),
-                ),
-              ],
-            ],
+                  if (widget.requireAcceptance) ...[
+                    const Divider(height: 16),
+                    Text(
+                      _readingMessage(remainingSeconds),
+                      style: TextStyle(fontSize: isTv ? 16 : 14),
+                    ),
+                    const SizedBox(height: 8),
+                    Semantics(
+                      label: _readingMessage(remainingSeconds),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 7,
+                        color: AppTheme.electricBlue,
+                      ),
+                    ),
+                    CheckboxListTile(
+                      focusNode: _confirmationFocus,
+                      value: _confirmed,
+                      onChanged: _saving || !_readingComplete
+                          ? null
+                          : (value) => setState(() => _confirmed = value ?? false),
+                      activeColor: AppTheme.electricBlue,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(t[6], style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: isTv ? 17 : 14,
+                      )),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: isTv ? 360 : double.infinity,
+                      height: isTv ? 52 : 48,
+                      child: FilledButton(
+                        focusNode: _continueFocus,
+                        onPressed: !_readingComplete || !_confirmed || _saving
+                            ? null : _accept,
+                        child: _saving
+                            ? const SizedBox(width: 20, height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2))
+                            : Text(t[7]),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
           ),
         ),
       ),
