@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/focus_navigation.dart';
+import '../core/platform/device_layout.dart';
 import '../core/localization/app_localizations.dart';
 import '../providers/theme_provider.dart';
 import '../providers/locale_provider.dart';
@@ -107,12 +108,20 @@ class SettingsScreen extends StatelessWidget {
         ),
       ),
       body: SafeArea(
-        child: FocusTraversalGroup(
-          child: ListView(
-            padding: const EdgeInsets.all(32),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: DeviceLayout.isTelevision ? 920 : 720,
+            ),
+            child: FocusTraversalGroup(
+              child: ListView(
+                padding: EdgeInsets.symmetric(
+                  horizontal: DeviceLayout.isTelevision ? 40 : 20,
+                  vertical: DeviceLayout.isTelevision ? 28 : 16,
+                ),
             children: [
               ListTile(
-                autofocus: true,
+                autofocus: DeviceLayout.isTelevision,
                 focusColor: focusColor,
                 title: Text(_label(
                     context,
@@ -481,7 +490,9 @@ class SettingsScreen extends StatelessWidget {
                   }
                 },
               ),
-            ],
+              ],
+              ),
+            ),
           ),
         ),
       ),
