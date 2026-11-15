@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../core/focus_navigation.dart';
+import '../core/platform/device_layout.dart';
 import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
 import '../providers/content_provider.dart';
@@ -201,7 +202,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
                                 itemCount: filtered.length,
                                 itemBuilder: (context, i) => _SeriesTile(
                                   series: filtered[i],
-                                  autofocus: i == 0,
+                                  autofocus: DeviceLayout.isTelevision && i == 0,
                                 ),
                               ),
                             );
@@ -231,7 +232,7 @@ String _seriesText(String language, String key) {
   return (labels[language] ?? labels['en']!)[key] ?? labels['en']![key] ?? key;
 }
 
-class _SeriesTile extends StatelessWidget {
+class _SeriesTile extends StatefulWidget {
   final Series series;
   final bool autofocus;
 
@@ -241,19 +242,28 @@ class _SeriesTile extends StatelessWidget {
   });
 
   @override
+  State<_SeriesTile> createState() => _SeriesTileState();
+}
+
+class _SeriesTileState extends State<_SeriesTile> {
+  bool _focused = false;
+
+  @override
   Widget build(BuildContext context) {
-    final isDark =
-        Theme.of(context).brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return InkWell(
-      autofocus: autofocus,
+      autofocus: widget.autofocus,
+      onFocusChange: (value) {
+        if (mounted) setState(() => _focused = value);
+      },
       focusColor:
           AppTheme.electricBlue.withValues(alpha: 0.22),
       onTap: () => pushWithFocusRestore(
         context,
         MaterialPageRoute(
           builder: (_) => SeriesDetailScreen(
-            series: series,
+            series: widget.series,
           ),
         ),
       ),
@@ -263,6 +273,10 @@ class _SeriesTile extends StatelessWidget {
               ? AppTheme.darkSurface
               : AppTheme.lightSurface,
           borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: _focused ? AppTheme.electricBlue : Colors.transparent,
+            width: _focused ? 3 : 1,
+          ),
         ),
         clipBehavior: Clip.antiAlias,
         child: Stack(
@@ -272,9 +286,9 @@ class _SeriesTile extends StatelessWidget {
                   CrossAxisAlignment.stretch,
               children: [
                 Expanded(
-                  child: series.posterUrl != null
+                  child: widget.series.posterUrl != null
                       ? CachedNetworkImage(
-                          imageUrl: series.posterUrl!,
+                          imageUrl: widget.series.posterUrl!,
                           fit: BoxFit.cover,
                           errorWidget: (_, __, ___) =>
                               const Icon(
@@ -294,19 +308,19 @@ class _SeriesTile extends StatelessWidget {
                         CrossAxisAlignment.start,
                     children: [
                       Text(
-                        series.title,
+                        widget.series.title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      if (series.releaseDate != null ||
-                          series.genre != null)
+                      if (widget.series.releaseDate != null ||
+                          widget.series.genre != null)
                         Text(
                           [
-                            series.releaseDate,
-                            series.genre,
+                            widget.series.releaseDate,
+                            widget.series.genre,
                           ]
                               .whereType<String>()
                               .where((v) => v.isNotEmpty)
@@ -326,9 +340,9 @@ class _SeriesTile extends StatelessWidget {
               top: 4,
               left: 4,
               child: FavoriteToggleButton(
-                contentId: series.id,
+                contentId: widget.series.id,
                 contentType: 'series',
-                title: series.title,
+                title: widget.series.title,
               ),
             ),
           ],
