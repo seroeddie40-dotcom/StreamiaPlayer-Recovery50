@@ -1,8 +1,10 @@
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
+import '../core/platform/device_layout.dart';
 import '../core/theme/app_theme.dart';
 import '../models/channel.dart';
 import '../providers/content_provider.dart';
@@ -152,6 +154,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                                     _label(category),
                                     maxLines: 1,
                                     softWrap: false,
+
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
@@ -267,6 +270,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                       ),
                     ),
                   ),
+
                 )),
               ]),
             ),
@@ -306,6 +310,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                       itemCount: filtered.length,
                       itemBuilder: (context, index) => _ChannelTile(
                         channel: filtered[index],
+                        autofocus: DeviceLayout.isTelevision && index == 0,
                       ),
                     ),
                   );
@@ -317,27 +322,42 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
   }
 }
 
-class _ChannelTile extends StatelessWidget {
+class _ChannelTile extends StatefulWidget {
   final Channel channel;
-  const _ChannelTile({required this.channel});
+  final bool autofocus;
+  const _ChannelTile({required this.channel, this.autofocus = false});
+
+  @override
+  State<_ChannelTile> createState() => _ChannelTileState();
+}
+
+class _ChannelTileState extends State<_ChannelTile> {
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final logo = channel.logoUrl?.trim();
+    final logo = widget.channel.logoUrl?.trim();
     return InkWell(
+      autofocus: widget.autofocus,
+      onFocusChange: (focused) {
+        if (mounted) setState(() => _focused = focused);
+      },
       borderRadius: BorderRadius.circular(12),
       focusColor: AppTheme.electricBlue.withValues(alpha: 0.22),
       onTap: () => pushWithFocusRestore(
         context,
-        MaterialPageRoute(builder: (_) => PlayerScreen(channel: channel, isLive: true)),
+        MaterialPageRoute(builder: (_) => PlayerScreen(channel: widget.channel, isLive: true)),
       ),
       child: Container(
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.electricBlue.withValues(alpha: 0.22)),
+          border: Border.all(
+            color: _focused ? AppTheme.electricBlue : AppTheme.electricBlue.withValues(alpha: 0.22),
+            width: _focused ? 3 : 1,
+          ),
         ),
         child: Stack(children: [
           Column(children: [
@@ -356,7 +376,7 @@ class _ChannelTile extends StatelessWidget {
             SizedBox(height: 39, child: Padding(
               padding: const EdgeInsets.fromLTRB(7, 1, 7, 5),
               child: Center(child: Text(
-                channel.name,
+                widget.channel.name,
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -365,9 +385,9 @@ class _ChannelTile extends StatelessWidget {
             )),
           ]),
           Positioned(top: 0, right: 0, child: FavoriteToggleButton(
-            contentId: channel.id,
+            contentId: widget.channel.id,
             contentType: 'live',
-            title: channel.name,
+            title: widget.channel.name,
           )),
         ]),
       ),
