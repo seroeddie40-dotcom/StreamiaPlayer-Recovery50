@@ -1,7 +1,9 @@
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
+import '../core/platform/device_layout.dart';
 import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
 import '../providers/auth_provider.dart';
@@ -177,6 +179,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ),
                   const SizedBox(width: 10),
+
                   Expanded(
                     child: Text(
                       l10n.t('app_name'),
@@ -322,11 +325,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             delegate: SliverChildBuilderDelegate(
                               (context, index) => _PremiumTile(
                                 entry: entries[index],
-                                autofocus: index == 0,
+                                autofocus: DeviceLayout.isTelevision && index == 0,
                               ),
                               childCount: entries.length,
                             ),
                             gridDelegate:
+
                                 SliverGridDelegateWithFixedCrossAxisCount(
                               crossAxisCount: columns,
                               mainAxisSpacing: 14,
