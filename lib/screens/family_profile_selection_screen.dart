@@ -157,11 +157,45 @@ class _FamilyProfileSelectionScreenState
       if (!mounted) return;
 
       if (!activated || !session.isReady) {
-        _showMessage(
-          'Das Profil konnte nicht aktiviert '
-          'werden. Bitte prüfe die PIN '
-          'und versuche es erneut.',
-        );
+        if (profile.type == FamilyProfileType.adult) {
+          final openManagement = await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) => AlertDialog(
+              title: const Text('Profil nicht entsperrt'),
+              content: const Text(
+                'Die Erwachsenen-PIN konnte nicht bestätigt '
+                'werden. Möglicherweise ist sie falsch oder '
+                'für dieses Profil noch nicht eingerichtet. '
+                'Eine erstmalige Einrichtung ist ausschließlich '
+                'in der geschützten Familienverwaltung möglich.',
+              ),
+              actions: [
+                TextButton(
+                  autofocus: true,
+                  onPressed: () =>
+                      Navigator.of(dialogContext).pop(false),
+                  child: const Text('Schließen'),
+                ),
+                FilledButton(
+                  onPressed: () =>
+                      Navigator.of(dialogContext).pop(true),
+                  child: const Text('Familienverwaltung'),
+                ),
+              ],
+            ),
+          );
+          if (!mounted) return;
+          if (openManagement == true) {
+            // Release the selection lock before navigating.
+            setState(() => _isSelecting = false);
+            await _openProfileManagement();
+          }
+        } else {
+          _showMessage(
+            'Das Kinderprofil konnte nicht aktiviert werden. '
+            'Bitte versuche es erneut.',
+          );
+        }
         return;
       }
 
