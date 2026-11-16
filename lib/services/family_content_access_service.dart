@@ -217,6 +217,32 @@ class FamilyContentAccessSnapshot {
     return true;
   }
 
+  /// Non-sensitive counts for diagnosing an unexpectedly empty child catalog.
+  /// No stream URLs, credentials, titles or profile identifiers are exposed.
+  String catalogDiagnostics<T>({
+    required Iterable<T> items,
+    required String sourceKey,
+    required String contentType,
+    required String? Function(T) categoryKeyOf,
+  }) {
+    final entries = items.toList(growable: false);
+    final missing = entries.where((item) =>
+        (categoryKeyOf(item) ?? '').trim().isEmpty).length;
+    final permitted = entries.where((item) => canAccessCategory(
+      sourceKey: sourceKey,
+      contentType: contentType,
+      categoryKey: categoryKeyOf(item) ?? '',
+    )).length;
+    final blocked = rules.where((rule) =>
+      rule['source_key'] == sourceKey.trim() &&
+      rule['content_type'] == contentType.trim().toLowerCase() &&
+      rule['is_visible'] == false,
+    ).length;
+    return 'Diagnose: geladen ${entries.length}, freigegeben $permitted, '
+        'ohne Kategorie-ID $missing, gespeicherte Sperren $blocked, '
+        'Regeln geladen: $rulesLoaded';
+  }
+
   /// Returns only content items allowed by
   /// this permission snapshot.
   ///
