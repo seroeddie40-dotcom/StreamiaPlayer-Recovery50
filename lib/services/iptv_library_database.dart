@@ -153,7 +153,7 @@ class IptvLibraryDatabase {
       return result;
     }
     return StoredIptvLibrary(
-      channels: (await read('channels')).map((v) => _channelFromJson(v as Map<String, dynamic>)).toList(growable: false),
+      channels: (await read('channels')).map((v) => _channelFromJson(v as Map<String, dynamic>, sourceKey)).toList(growable: false),
       vod: (await read('vod')).map((v) => _vodFromJson(v as Map<String, dynamic>)).toList(growable: false),
       series: (await read('series')).map((v) => _seriesFromJson(v as Map<String, dynamic>)).toList(growable: false),
     );
@@ -172,10 +172,12 @@ class IptvLibraryDatabase {
   Map<String, Object?> _channelToJson(Channel c) => {
     'id': c.id, 'name': c.name, 'streamUrl': c.streamUrl,
     'logoUrl': c.logoUrl, 'category': c.category, 'epgChannelId': c.epgChannelId,
+    'sourceKey': c.sourceKey, 'categoryKey': c.categoryKey,
   };
-  Channel _channelFromJson(Map<String, dynamic> j) => Channel(
+  Channel _channelFromJson(Map<String, dynamic> j, String catalogSourceKey) => Channel(
     id: j['id'] as String, name: j['name'] as String, streamUrl: j['streamUrl'] as String,
     logoUrl: j['logoUrl'] as String?, category: j['category'] as String?, epgChannelId: j['epgChannelId'] as String?,
+    sourceKey: catalogSourceKey, categoryKey: j['categoryKey'] as String?,
   );
 
   Map<String, Object?> _vodToJson(VodItem v) => {
