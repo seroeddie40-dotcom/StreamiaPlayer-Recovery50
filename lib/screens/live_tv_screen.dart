@@ -184,10 +184,11 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
   @override
   Widget build(BuildContext context) {
     final family = context.watch<FamilySessionProvider>();
-    final allChannels = context.watch<ContentProvider>().channels;
+    final content = context.watch<ContentProvider>();
+    final allChannels = content.channels;
     final channels = family.isReady
         ? allChannels.where((channel) => family.canAccessCategory(
-            sourceKey: channel.sourceKey ?? '',
+            sourceKey: content.sourceKey,
             contentType: 'live',
             categoryKey: channel.categoryKey ?? '',
           )).toList(growable: false)
@@ -339,8 +340,9 @@ class _ChannelTile extends StatelessWidget {
       focusColor: AppTheme.electricBlue.withValues(alpha: 0.22),
       onTap: () {
         final family = context.read<FamilySessionProvider>();
+        final content = context.read<ContentProvider>();
         if (!family.isReady || !family.canAccessCategory(
-          sourceKey: channel.sourceKey ?? '',
+          sourceKey: content.sourceKey,
           contentType: 'live',
           categoryKey: channel.categoryKey ?? '',
         )) return;
