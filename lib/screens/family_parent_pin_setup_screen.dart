@@ -51,10 +51,10 @@ class _FamilyParentPinSetupScreenState
     final pin = _pinController.text;
     final confirmation = _confirmController.text;
 
-    if (!RegExp(r'^[0-9]{6,12}$').hasMatch(pin)) {
+    if (!RegExp(r'^[0-9]{6,10}$').hasMatch(pin)) {
       setState(() {
         _errorMessage =
-            'Die PIN muss aus 6 bis 12 Ziffern bestehen.';
+            'Die PIN muss aus 6 bis 10 Ziffern bestehen.';
       });
       return;
     }
@@ -109,7 +109,7 @@ class _FamilyParentPinSetupScreenState
         case 'invalid_pin':
           setState(() {
             _errorMessage =
-                'Ungültige PIN. Bitte 6 bis 12 Ziffern verwenden.';
+                'Ungültige PIN. Bitte 6 bis 10 Ziffern verwenden.';
           });
           break;
 
@@ -156,7 +156,7 @@ class _FamilyParentPinSetupScreenState
       obscureText: !_showPin,
       keyboardType: TextInputType.number,
       textInputAction: textInputAction,
-      maxLength: 12,
+      maxLength: 10,
       inputFormatters: [
         FilteringTextInputFormatter.digitsOnly,
       ],
