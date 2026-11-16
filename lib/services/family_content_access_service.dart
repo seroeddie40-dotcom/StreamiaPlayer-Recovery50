@@ -168,27 +168,21 @@ class FamilyContentAccessSnapshot {
         contentType.trim().toLowerCase();
     final normalizedCategoryKey = categoryKey.trim();
 
-    // Invalid identifiers never grant access.
+    // A snapshot must be loaded before granting any access.
+    if (!rulesLoaded) return false;
+
+    // Adult profiles must never lose channels because imported
+    // Xtream entries lack category/source metadata.
+    if (!isChild) return true;
+
+    // A child needs valid identifiers to apply folder restrictions.
     if (normalizedSourceKey.isEmpty ||
         normalizedCategoryKey.isEmpty ||
-        !_validContentTypes.contains(
-          normalizedContentType,
-        )) {
+        !_validContentTypes.contains(normalizedContentType)) {
       return false;
     }
 
-    // No permissions loaded: fail closed.
-    if (!rulesLoaded) {
-      return false;
-    }
-
-    // Adult profiles are not restricted
-    // by child category permissions.
-    if (!isChild) {
-      return true;
-    }
-
-    // A matching explicit true rule is required.
+    // Only an explicit false rule blocks a folder.
     for (final rule in rules) {
       if (rule['source_key'] == normalizedSourceKey &&
           rule['content_type'] ==
@@ -199,7 +193,8 @@ class FamilyContentAccessSnapshot {
       }
     }
 
-    return false;
+    // Unlisted categories are visible by default.
+    return true;
   }
 
   /// Returns only content items allowed by
@@ -219,14 +214,14 @@ class FamilyContentAccessSnapshot {
     for (final item in items) {
       final categoryKey = categoryKeyOf(item);
 
-      if (categoryKey == null) {
+      if (categoryKey == null && isChild) {
         continue;
       }
 
       if (canAccessCategory(
         sourceKey: sourceKey,
         contentType: contentType,
-        categoryKey: categoryKey,
+        categoryKey: categoryKey ?? '',
       )) {
         result.add(item);
       }

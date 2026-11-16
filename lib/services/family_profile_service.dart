@@ -108,7 +108,7 @@ class FamilyProfileService {
       }
     }
 
-    // Kinderprofile: standardmäßig gesperrt.
-    return false;
+    // Ohne ausdrückliche Sperre ist der Ordner sichtbar.
+    return true;
   }
 }

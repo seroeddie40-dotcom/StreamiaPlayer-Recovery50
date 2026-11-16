@@ -44,6 +44,7 @@ class PlaylistSwitchService {
         config.username != null && config.password != null) {
       final service = XtreamService(
         baseUrl: config.serverUrl!, username: config.username!, password: config.password!,
+        sourceKey: profile.sourceKey,
       );
       try {
         final live = await service.getLiveStreams();
