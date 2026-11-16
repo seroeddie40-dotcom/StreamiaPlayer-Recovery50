@@ -1,3 +1,4 @@
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -13,6 +14,8 @@ import 'providers/theme_provider.dart';
 import 'providers/locale_provider.dart';
 import 'providers/content_provider.dart';
 import 'providers/auth_provider.dart';
+import 'providers/family_session_provider.dart';
+
 import 'services/playlist_profile_store.dart';
 import 'services/playlist_switch_service.dart';
 
@@ -23,6 +26,7 @@ import 'screens/dashboard_screen.dart';
 import 'screens/paywall_screen.dart';
 import 'screens/splash_screen.dart';
 import 'screens/legal_disclaimer_screen.dart';
+import 'screens/family_profile_selection_screen.dart';
 
 class StreamiaApp extends StatelessWidget {
   final PrefsService prefsService;
@@ -57,9 +61,8 @@ class StreamiaApp extends StatelessWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
 
-      // IMPORTANT:
-      // No custom MaterialApp.builder overlay.
-      // Flutter Navigator and Overlay remain intact.
+      // Keep the standard Flutter Navigator and Overlay.
+      // No custom MaterialApp.builder overlay is used.
 
       home: StartupGate(
         prefsService: prefsService,
@@ -82,9 +85,13 @@ class StreamiaApp extends StatelessWidget {
       return const LanguageSelectionScreen();
     }
 
-    // Do not flash the login screen while restoring a persisted session.
+    // Do not display login while restoring a session.
     if (auth.isInitializing) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
     }
 
     if (!auth.isLoggedIn) {
@@ -99,7 +106,7 @@ class StreamiaApp extends StatelessWidget {
       );
     }
 
-    // Technical errors must not redirect to payment.
+    // Technical errors must not trigger payment.
     if (auth.error != null) {
       return const _AccessStatusScreen(
         mode: _AccessStatusMode.error,
@@ -112,7 +119,7 @@ class StreamiaApp extends StatelessWidget {
       );
     }
 
-    // Account entitlement takes precedence over a pending device.
+    // Entitlement takes precedence over pending devices.
     if (auth.requiresPayment) {
       return const PaywallScreen();
     }
@@ -136,113 +143,475 @@ class StreamiaApp extends StatelessWidget {
       DeviceOrientation.landscapeRight,
     ]);
 
-    return const DashboardScreen();
+    // Never return DashboardScreen directly.
+    // Every normal startup must pass the family gate.
+    return const _FamilyStartupGate();
   }
 }
 
+/// Protects the normal dashboard startup.
+///
+/// The family selection screen is opened as a route,
+/// because it returns the selected profile via Navigator.pop.
+///
+/// Dashboard access requires a ready, account-bound
+/// family session.
+///
+/// A failed or cancelled selection never grants access.
+class _FamilyStartupGate extends StatefulWidget {
+  const _FamilyStartupGate();
 
-/// Automatically routes returning users to their library or playlist setup.
-/// A temporary source failure never deletes stored playlist profiles.
+  @override
+  State<_FamilyStartupGate> createState() =>
+      _FamilyStartupGateState();
+}
+
+class _FamilyStartupGateState
+    extends State<_FamilyStartupGate> {
+  bool _selectionOpen = false;
+  bool _selectionScheduled = false;
+  bool _selectionAttempted = false;
+
+  String? _errorMessage;
+
+  String _copy(
+    String de,
+    String tr,
+    String en,
+  ) {
+    final language =
+        Localizations.localeOf(context).languageCode;
+
+    if (language == 'de') return de;
+    if (language == 'tr') return tr;
+    return en;
+  }
+
+  bool get _hasAuthorizedAccess {
+    final auth = context.read<AuthProvider>();
+
+    return auth.isLoggedIn &&
+        !auth.isInitializing &&
+        auth.accessChecked &&
+        !auth.isBusy &&
+        auth.error == null &&
+        auth.hasAccess &&
+        !auth.deviceBlocked &&
+        !auth.devicePending &&
+        auth.deviceApproved;
+  }
+
+  void _scheduleSelection() {
+    if (_selectionOpen || _selectionScheduled) {
+      return;
+    }
+
+    _selectionScheduled = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _selectionScheduled = false;
+
+      if (!mounted || !_hasAuthorizedAccess) {
+        return;
+      }
+
+      final session =
+          context.read<FamilySessionProvider>();
+
+      if (session.isReady || _selectionOpen) {
+        return;
+      }
+
+      unawaited(_openSelection());
+    });
+  }
+
+  Future<void> _openSelection() async {
+    if (!mounted ||
+        _selectionOpen ||
+        !_hasAuthorizedAccess) {
+      return;
+    }
+
+    final session =
+        context.read<FamilySessionProvider>();
+
+    if (session.isReady) {
+      return;
+    }
+
+    setState(() {
+      _selectionOpen = true;
+      _selectionAttempted = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) =>
+              const FamilyProfileSelectionScreen(),
+        ),
+      );
+
+      if (!mounted) return;
+
+      if (!session.isReady) {
+        _errorMessage = _copy(
+          'Bitte wähle ein freigegebenes Familienprofil.',
+          'Lütfen izin verilen bir aile profili seçin.',
+          'Please select an authorized family profile.',
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+
+      _errorMessage = _copy(
+        'Die Profilauswahl konnte nicht geöffnet werden.',
+        'Profil seçimi açılamadı.',
+        'Could not open profile selection.',
+      );
+
+      debugPrint(
+        'Family selection failed: ${error.runtimeType}',
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _selectionOpen = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = context.watch<AuthProvider>();
+    final session =
+        context.watch<FamilySessionProvider>();
+
+    // The outer startup router also enforces these checks.
+    // Recheck here to avoid granting access from a stale route.
+    final authorized =
+        auth.isLoggedIn &&
+        !auth.isInitializing &&
+        auth.accessChecked &&
+        !auth.isBusy &&
+        auth.error == null &&
+        auth.hasAccess &&
+        !auth.deviceBlocked &&
+        !auth.devicePending &&
+        auth.deviceApproved;
+
+    if (!authorized) {
+      return const Scaffold(
+        body: Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+
+    if (session.isReady) {
+      return const DashboardScreen();
+    }
+
+    // A new profile selection is opened once automatically.
+    // If it is cancelled, the user must explicitly retry.
+    if (!session.isLoading &&
+        !_selectionOpen &&
+        !_selectionScheduled &&
+        !_selectionAttempted) {
+      _scheduleSelection();
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Streamia Player'),
+      ),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints:
+                const BoxConstraints(maxWidth: 460),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.family_restroom,
+                  size: 58,
+                ),
+                const SizedBox(height: 20),
+
+                Text(
+                  _copy(
+                    'Familienprofil auswählen',
+                    'Aile profili seç',
+                    'Select family profile',
+                  ),
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context)
+                      .textTheme
+                      .headlineSmall,
+                ),
+
+                const SizedBox(height: 16),
+
+                Text(
+                  _errorMessage ??
+                      _copy(
+                        'Wähle ein Profil, um Streamia Player zu verwenden.',
+                        'Streamia Player kullanmak için bir profil seçin.',
+                        'Choose a profile to use Streamia Player.',
+                      ),
+                  textAlign: TextAlign.center,
+                ),
+
+                const SizedBox(height: 24),
+
+                if (session.isLoading ||
+                    _selectionOpen ||
+                    _selectionScheduled)
+                  const CircularProgressIndicator()
+                else
+                  FilledButton.icon(
+                    onPressed: _openSelection,
+                    icon: const Icon(
+                      Icons.account_circle_outlined,
+                    ),
+                    label: Text(
+                      _copy(
+                        'Profil auswählen',
+                        'Profil seç',
+                        'Select profile',
+                      ),
+                    ),
+                  ),
+
+                const SizedBox(height: 16),
+
+                TextButton.icon(
+                  onPressed: auth.isBusy
+                      ? null
+                      : () async {
+                          session.clearSession();
+                          await auth.logout();
+                        },
+                  icon: const Icon(Icons.logout),
+                  label: Text(
+                    _copy(
+                      'Abmelden',
+                      'Çıkış yap',
+                      'Log out',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Automatically restores a saved playlist or opens setup.
+///
+/// A temporary source failure never deletes stored
+/// playlist profiles.
+///
+/// Successful restoration still passes the family gate.
 class _LibraryStartupGate extends StatefulWidget {
   const _LibraryStartupGate();
 
   @override
-  State<_LibraryStartupGate> createState() => _LibraryStartupGateState();
+  State<_LibraryStartupGate> createState() =>
+      _LibraryStartupGateState();
 }
 
-class _LibraryStartupGateState extends State<_LibraryStartupGate> {
+class _LibraryStartupGateState
+    extends State<_LibraryStartupGate> {
   bool _loading = true;
   bool _hasProfiles = false;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadLibrary());
+
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _loadLibrary(),
+    );
   }
 
   Future<void> _loadLibrary() async {
     if (!mounted) return;
-    setState(() { _loading = true; });
+
+    setState(() {
+      _loading = true;
+    });
+
     try {
-      final profiles = await PlaylistProfileStore().load();
+      final profiles =
+          await PlaylistProfileStore().load();
+
       if (!mounted) return;
+
       if (profiles.isEmpty) {
-        setState(() { _hasProfiles = false; _loading = false; });
+        setState(() {
+          _hasProfiles = false;
+          _loading = false;
+        });
         return;
       }
+
       _hasProfiles = true;
-      final active = profiles.where((p) => p.isActive).firstOrNull ?? profiles.first;
+
+      final active =
+          profiles.where((p) => p.isActive).firstOrNull ??
+              profiles.first;
+
       final content = context.read<ContentProvider>();
-      // Prefer the encrypted offline catalog, so opening the app does not
-      // depend on the playlist server being reachable.
-      final restored = await content.restoreStoredLibrary(
-        active.sourceKey, sourceLabel: active.displayName,
+
+      // Prefer the encrypted offline catalog.
+      // Opening the app should not require an
+      // immediately reachable playlist server.
+      final restored =
+          await content.restoreStoredLibrary(
+        active.sourceKey,
+        sourceLabel: active.displayName,
       );
+
       if (!restored && !content.isLoaded) {
-        // No cached catalog: use the already saved secure source credentials.
-        await PlaylistSwitchService().activate(active, content);
+        // Reuse saved secure source credentials.
+        await PlaylistSwitchService().activate(
+          active,
+          content,
+        );
       }
+
       if (!mounted) return;
+
       if (!content.isLoaded) {
-        setState(() { _loading = false; });
+        setState(() {
+          _loading = false;
+        });
       }
     } catch (error) {
-      debugPrint('Streamia startup library load failed: ${error.runtimeType}');
-      if (mounted) setState(() { _loading = false; });
+      debugPrint(
+        'Streamia startup library load failed: '
+        '${error.runtimeType}',
+      );
+
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
     }
   }
 
-  String _copy(BuildContext context, String de, String tr, String en) {
-    final language = Localizations.localeOf(context).languageCode;
-    return language == 'de' ? de : language == 'tr' ? tr : en;
+  String _copy(
+    BuildContext context,
+    String de,
+    String tr,
+    String en,
+  ) {
+    final language =
+        Localizations.localeOf(context).languageCode;
+
+    return language == 'de'
+        ? de
+        : language == 'tr'
+            ? tr
+            : en;
   }
 
   @override
   Widget build(BuildContext context) {
     if (context.watch<ContentProvider>().isLoaded) {
-      return const DashboardScreen();
+      // This is the second startup path.
+      // It must use exactly the same family gate.
+      return const _FamilyStartupGate();
     }
+
     if (!_loading && !_hasProfiles) {
       return const SetupScreen();
     }
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Streamia Player')),
+      appBar: AppBar(
+        title: const Text('Streamia Player'),
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 460),
+            constraints:
+                const BoxConstraints(maxWidth: 460),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (_loading) ...[
                   const CircularProgressIndicator(),
                   const SizedBox(height: 18),
-                  Text(_copy(context, 'Mediathek wird geladen…',
-                      'Medya kitaplığı yükleniyor…', 'Loading your library…')),
+                  Text(
+                    _copy(
+                      context,
+                      'Mediathek wird geladen…',
+                      'Medya kitaplığı yükleniyor…',
+                      'Loading your library…',
+                    ),
+                  ),
                 ] else ...[
-                  const Icon(Icons.cloud_off_outlined, size: 48),
+                  const Icon(
+                    Icons.cloud_off_outlined,
+                    size: 48,
+                  ),
                   const SizedBox(height: 16),
-                  Text(_copy(context,
-                    'Die gespeicherte Playlist konnte gerade nicht geladen werden. Deine Daten bleiben erhalten.',
-                    'Kayıtlı oynatma listesi şu anda yüklenemiyor. Verileriniz korunur.',
-                    'Your saved playlist could not be loaded. Your data is safe.'),
-                    textAlign: TextAlign.center),
+                  Text(
+                    _copy(
+                      context,
+                      'Die gespeicherte Playlist konnte gerade nicht geladen werden. Deine Daten bleiben erhalten.',
+                      'Kayıtlı oynatma listesi şu anda yüklenemiyor. Verileriniz korunur.',
+                      'Your saved playlist could not be loaded. Your data is safe.',
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
                   const SizedBox(height: 18),
                   FilledButton.icon(
                     onPressed: _loadLibrary,
                     icon: const Icon(Icons.refresh),
-                    label: Text(_copy(context, 'Erneut versuchen', 'Tekrar dene', 'Retry')),
+                    label: Text(
+                      _copy(
+                        context,
+                        'Erneut versuchen',
+                        'Tekrar dene',
+                        'Retry',
+                      ),
+                    ),
                   ),
                 ],
                 if (_hasProfiles) ...[
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
-                    onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const SetupScreen()),
+                    onPressed: () =>
+                        Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            const SetupScreen(),
+                      ),
                     ),
-                    icon: const Icon(Icons.playlist_add),
-                    label: Text(_copy(context, 'Playlist bearbeiten',
-                        'Oynatma listesini düzenle', 'Edit playlist')),
+                    icon:
+                        const Icon(Icons.playlist_add),
+                    label: Text(
+                      _copy(
+                        context,
+                        'Playlist bearbeiten',
+                        'Oynatma listesini düzenle',
+                        'Edit playlist',
+                      ),
+                    ),
                   ),
                 ],
               ],
@@ -259,164 +628,365 @@ enum _AccessStatusMode {
   error,
 }
 
-/// Only shown when the server has no free slot for this installation.
-/// No standalone device-replacement page: a one-time, explicit-choice dialog
-/// sits over the startup loading surface. The dashboard remains access-gated.
+/// Handles a pending device replacement.
+///
+/// Server-side device authorization remains authoritative.
 class _DeviceActivationGate extends StatefulWidget {
   const _DeviceActivationGate();
 
   @override
-  State<_DeviceActivationGate> createState() => _DeviceActivationGateState();
+  State<_DeviceActivationGate> createState() =>
+      _DeviceActivationGateState();
 }
 
-class _DeviceActivationGateState extends State<_DeviceActivationGate> {
+class _DeviceActivationGateState
+    extends State<_DeviceActivationGate> {
   String? _selected;
   String? _error;
+
   bool _working = false;
   bool _dialogOpen = false;
 
-  String _tr(String de, String tr, String en) {
-    final language = context.read<LocaleProvider>().locale.languageCode;
-    return language == 'de' ? de : language == 'tr' ? tr : en;
+  String _tr(
+    String de,
+    String tr,
+    String en,
+  ) {
+    final language =
+        context.read<LocaleProvider>()
+            .locale
+            .languageCode;
+
+    return language == 'de'
+        ? de
+        : language == 'tr'
+            ? tr
+            : en;
   }
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _open());
+
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _open(),
+    );
   }
 
   Future<void> _open() async {
     if (!mounted || _dialogOpen) return;
+
     _dialogOpen = true;
+
     final auth = context.read<AuthProvider>();
-    // Re-read server state before asking the user to replace a device.
-    // An installation may have been approved since the previous check.
+
+    // Recheck the server before asking for replacement.
     await auth.refreshDeviceAndAccess();
-    if (!mounted || !auth.devicePending || auth.deviceApproved ||
-        !auth.hasAccountAccess || auth.error != null) {
+
+    if (!mounted ||
+        !auth.devicePending ||
+        auth.deviceApproved ||
+        !auth.hasAccountAccess ||
+        auth.error != null) {
       _dialogOpen = false;
       return;
     }
+
     await auth.loadActiveDevices();
-    if (!mounted || !auth.devicePending || auth.deviceApproved ||
-        !auth.hasAccountAccess || auth.error != null) {
+
+    if (!mounted ||
+        !auth.devicePending ||
+        auth.deviceApproved ||
+        !auth.hasAccountAccess ||
+        auth.error != null) {
       _dialogOpen = false;
       return;
     }
+
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (dialogContext, updateDialog) => Consumer<AuthProvider>(
+        builder: (dialogContext, updateDialog) =>
+            Consumer<AuthProvider>(
           builder: (dialogContext, current, _) {
             final devices = current.activeDevices;
-            // A refresh may have approved this installation while the dialog
-            // was loading. Close the obsolete dialog instead of showing it.
-            if (current.deviceApproved || !current.devicePending) {
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (dialogContext.mounted && Navigator.of(dialogContext).canPop()) {
+
+            if (current.deviceApproved ||
+                !current.devicePending) {
+              WidgetsBinding.instance
+                  .addPostFrameCallback((_) {
+                if (dialogContext.mounted &&
+                    Navigator.of(dialogContext)
+                        .canPop()) {
                   Navigator.of(dialogContext).pop();
                 }
               });
+
               return const SizedBox.shrink();
             }
+
             return AlertDialog(
-              title: Text(_tr('Geräteplatz belegt', 'Cihaz sınırına ulaşıldı', 'Device limit reached')),
+              title: Text(
+                _tr(
+                  'Geräteplatz belegt',
+                  'Cihaz sınırına ulaşıldı',
+                  'Device limit reached',
+                ),
+              ),
               content: SizedBox(
                 width: 420,
                 child: SingleChildScrollView(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
                     children: [
-                      Text(_tr(
-                        'Wähle ein bisheriges Gerät, das du durch dieses Gerät ersetzen möchtest.',
-                        'Bu cihazla değiştirmek istediğiniz eski cihazı seçin.',
-                        'Choose an existing device to replace with this one.',
-                      )),
+                      Text(
+                        _tr(
+                          'Wähle ein bisheriges Gerät, das du durch dieses Gerät ersetzen möchtest.',
+                          'Bu cihazla değiştirmek istediğiniz eski cihazı seçin.',
+                          'Choose an existing device to replace with this one.',
+                        ),
+                      ),
                       const SizedBox(height: 12),
-                      if (current.loadingDevices) const Center(child: CircularProgressIndicator()),
-                      if (!current.loadingDevices && devices.isEmpty)
-                        Text(_tr('Keine ersetzbaren Geräte gefunden. Bitte erneut prüfen.',
-                          'Değiştirilebilecek cihaz bulunamadı. Lütfen tekrar kontrol edin.',
-                          'No replaceable devices found. Please check again.')),
+
+                      if (current.loadingDevices)
+                        const Center(
+                          child:
+                              CircularProgressIndicator(),
+                        ),
+
+                      if (!current.loadingDevices &&
+                          devices.isEmpty)
+                        Text(
+                          _tr(
+                            'Keine ersetzbaren Geräte gefunden. Bitte erneut prüfen.',
+                            'Değiştirilebilecek cihaz bulunamadı. Lütfen tekrar kontrol edin.',
+                            'No replaceable devices found. Please check again.',
+                          ),
+                        ),
+
                       for (final device in devices)
                         RadioListTile<String>(
                           contentPadding: EdgeInsets.zero,
-                          title: Text(device['device_name']?.toString() ?? _tr('Gerät', 'Cihaz', 'Device')),
-                          subtitle: Text(device['platform']?.toString() ?? ''),
-                          value: device['device_id'].toString(),
+                          title: Text(
+                            device['device_name']
+                                    ?.toString() ??
+                                _tr(
+                                  'Gerät',
+                                  'Cihaz',
+                                  'Device',
+                                ),
+                          ),
+                          subtitle: Text(
+                            device['platform']
+                                    ?.toString() ??
+                                '',
+                          ),
+                          value: device['device_id']
+                              .toString(),
                           groupValue: _selected,
-                          onChanged: _working ? null : (id) => updateDialog(() => _selected = id),
+                          onChanged: _working
+                              ? null
+                              : (id) => updateDialog(
+                                    () => _selected = id,
+                                  ),
                         ),
+
                       if (_error != null) ...[
                         const SizedBox(height: 10),
-                        Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                        Text(
+                          _error!,
+                          style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .error,
+                          ),
+                        ),
                       ],
-                      if (_working) const Center(child: CircularProgressIndicator()),
+
+                      if (_working)
+                        const Center(
+                          child:
+                              CircularProgressIndicator(),
+                        ),
                     ],
                   ),
                 ),
               ),
               actions: [
                 TextButton(
-                  onPressed: _working ? null : () async {
-                    Navigator.of(dialogContext).pop();
-                    await context.read<AuthProvider>().logout();
-                  },
-                  child: Text(_tr('Abmelden', 'Çıkış yap', 'Log out')),
+                  onPressed: _working
+                      ? null
+                      : () async {
+                          Navigator.of(dialogContext)
+                              .pop();
+                          await context
+                              .read<AuthProvider>()
+                              .logout();
+                        },
+                  child: Text(
+                    _tr(
+                      'Abmelden',
+                      'Çıkış yap',
+                      'Log out',
+                    ),
+                  ),
                 ),
+
                 TextButton(
-                  onPressed: _working ? null : () async {
-                    updateDialog(() => _error = null);
-                    await current.refreshDeviceAndAccess();
-                    if (dialogContext.mounted && current.devicePending &&
-                        current.hasAccountAccess && current.error == null) {
-                      await current.loadActiveDevices();
-                    }
-                  },
-                  child: Text(_tr('Aktualisieren', 'Yenile', 'Refresh')),
+                  onPressed: _working
+                      ? null
+                      : () async {
+                          updateDialog(
+                            () => _error = null,
+                          );
+
+                          await current
+                              .refreshDeviceAndAccess();
+
+                          if (dialogContext.mounted &&
+                              current.devicePending &&
+                              current.hasAccountAccess &&
+                              current.error == null) {
+                            await current
+                                .loadActiveDevices();
+                          }
+                        },
+                  child: Text(
+                    _tr(
+                      'Aktualisieren',
+                      'Yenile',
+                      'Refresh',
+                    ),
+                  ),
                 ),
+
                 FilledButton(
-                  onPressed: _working || _selected == null ? null : () async {
-                    final id = _selected!;
-                    final selectedDevice = devices.where((d) => d['device_id'].toString() == id);
-                    if (selectedDevice.isEmpty) return;
-                    final name = selectedDevice.first['device_name']?.toString() ?? id;
-                    final confirmed = await showDialog<bool>(
-                      context: dialogContext,
-                      builder: (confirmationContext) => AlertDialog(
-                        title: Text(_tr('Gerät ersetzen?', 'Cihaz değiştirilsin mi?', 'Replace device?')),
-                        content: Text(_tr(
-                          '„$name“ wird abgemeldet. Die Testzeit bleibt unverändert.',
-                          '“$name” cihazının erişimi kaldırılacak. Deneme süresi değişmez.',
-                          '“$name” will lose access. Your trial period is unchanged.',
-                        )),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(confirmationContext, false),
-                            child: Text(_tr('Abbrechen', 'İptal', 'Cancel'))),
-                          FilledButton(onPressed: () => Navigator.pop(confirmationContext, true),
-                            child: Text(_tr('Ersetzen', 'Değiştir', 'Replace'))),
-                        ],
-                      ),
-                    );
-                    if (confirmed != true || !mounted) return;
-                    updateDialog(() { _working = true; _error = null; });
-                    try {
-                      await current.replaceActiveDevice(id);
-                      if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-                    } catch (_) {
-                      if (dialogContext.mounted) updateDialog(() {
-                        _error = _tr('Gerätewechsel nicht möglich. Bitte erneut versuchen.',
-                          'Cihaz değiştirilemedi. Lütfen tekrar deneyin.',
-                          'Device replacement failed. Please try again.');
-                      });
-                    } finally {
-                      if (dialogContext.mounted) updateDialog(() => _working = false);
-                    }
-                  },
-                  child: Text(_tr('Gerät ersetzen', 'Cihazı değiştir', 'Replace device')),
+                  onPressed:
+                      _working || _selected == null
+                          ? null
+                          : () async {
+                              final id = _selected!;
+
+                              final selectedDevice =
+                                  devices.where(
+                                (d) =>
+                                    d['device_id']
+                                        .toString() ==
+                                    id,
+                              );
+
+                              if (selectedDevice.isEmpty) {
+                                return;
+                              }
+
+                              final name =
+                                  selectedDevice.first[
+                                              'device_name']
+                                          ?.toString() ??
+                                      id;
+
+                              final confirmed =
+                                  await showDialog<bool>(
+                                context: dialogContext,
+                                builder:
+                                    (confirmationContext) =>
+                                        AlertDialog(
+                                  title: Text(
+                                    _tr(
+                                      'Gerät ersetzen?',
+                                      'Cihaz değiştirilsin mi?',
+                                      'Replace device?',
+                                    ),
+                                  ),
+                                  content: Text(
+                                    _tr(
+                                      '„$name“ wird abgemeldet. Die Testzeit bleibt unverändert.',
+                                      '“$name” cihazının erişimi kaldırılacak. Deneme süresi değişmez.',
+                                      '“$name” will lose access. Your trial period is unchanged.',
+                                    ),
+                                  ),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(
+                                        confirmationContext,
+                                        false,
+                                      ),
+                                      child: Text(
+                                        _tr(
+                                          'Abbrechen',
+                                          'İptal',
+                                          'Cancel',
+                                        ),
+                                      ),
+                                    ),
+                                    FilledButton(
+                                      onPressed: () =>
+                                          Navigator.pop(
+                                        confirmationContext,
+                                        true,
+                                      ),
+                                      child: Text(
+                                        _tr(
+                                          'Ersetzen',
+                                          'Değiştir',
+                                          'Replace',
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+
+                              if (confirmed != true ||
+                                  !mounted) {
+                                return;
+                              }
+
+                              updateDialog(() {
+                                _working = true;
+                                _error = null;
+                              });
+
+                              try {
+                                await current
+                                    .replaceActiveDevice(
+                                  id,
+                                );
+
+                                if (dialogContext.mounted) {
+                                  Navigator.of(
+                                    dialogContext,
+                                  ).pop();
+                                }
+                              } catch (_) {
+                                if (dialogContext.mounted) {
+                                  updateDialog(() {
+                                    _error = _tr(
+                                      'Gerätewechsel nicht möglich. Bitte erneut versuchen.',
+                                      'Cihaz değiştirilemedi. Lütfen tekrar deneyin.',
+                                      'Device replacement failed. Please try again.',
+                                    );
+                                  });
+                                }
+                              } finally {
+                                if (dialogContext.mounted) {
+                                  updateDialog(() {
+                                    _working = false;
+                                  });
+                                }
+                              }
+                            },
+                  child: Text(
+                    _tr(
+                      'Gerät ersetzen',
+                      'Cihazı değiştir',
+                      'Replace device',
+                    ),
+                  ),
                 ),
               ],
             );
@@ -424,60 +994,129 @@ class _DeviceActivationGateState extends State<_DeviceActivationGate> {
         ),
       ),
     );
+
     _dialogOpen = false;
   }
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    return const Scaffold(
+      body: Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
   }
 }
 
-/// Only hard blocks and access errors use a dedicated page.
-/// A pending replacement is handled by _DeviceActivationGate as a dialog.
+/// Only hard blocks and access errors use
+/// a dedicated status screen.
 class _AccessStatusScreen extends StatelessWidget {
   final _AccessStatusMode mode;
-  const _AccessStatusScreen({required this.mode});
+
+  const _AccessStatusScreen({
+    required this.mode,
+  });
 
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
-    final lang = context.watch<LocaleProvider>().locale.languageCode;
-    String copy(String de, String tr, String en) =>
-        lang == 'de' ? de : lang == 'tr' ? tr : en;
-    final blocked = mode == _AccessStatusMode.blocked;
+
+    final lang = context
+        .watch<LocaleProvider>()
+        .locale
+        .languageCode;
+
+    String copy(
+      String de,
+      String tr,
+      String en,
+    ) =>
+        lang == 'de'
+            ? de
+            : lang == 'tr'
+                ? tr
+                : en;
+
+    final blocked =
+        mode == _AccessStatusMode.blocked;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Streamia Player')),
+      appBar: AppBar(
+        title: const Text('Streamia Player'),
+      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 460),
+            constraints:
+                const BoxConstraints(maxWidth: 460),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(blocked ? Icons.block : Icons.error_outline,
-                    size: 48, color: Theme.of(context).colorScheme.error),
+                Icon(
+                  blocked
+                      ? Icons.block
+                      : Icons.error_outline,
+                  size: 48,
+                  color: Theme.of(context)
+                      .colorScheme
+                      .error,
+                ),
+
                 const SizedBox(height: 16),
-                Text(blocked
-                    ? copy('Dieses Gerät wurde gesperrt.', 'Bu cihaz engellendi.',
-                        'This device has been blocked.')
-                    : copy('Die Zugangsprüfung ist fehlgeschlagen.',
-                        'Erişim kontrolü başarısız.', 'Access verification failed.'),
-                    textAlign: TextAlign.center),
+
+                Text(
+                  blocked
+                      ? copy(
+                          'Dieses Gerät wurde gesperrt.',
+                          'Bu cihaz engellendi.',
+                          'This device has been blocked.',
+                        )
+                      : copy(
+                          'Die Zugangsprüfung ist fehlgeschlagen.',
+                          'Erişim kontrolü başarısız.',
+                          'Access verification failed.',
+                        ),
+                  textAlign: TextAlign.center,
+                ),
+
                 if (!blocked && auth.error != null) ...[
                   const SizedBox(height: 12),
-                  Text(copy('Bitte versuche es erneut.', 'Lütfen tekrar deneyin.',
-                      'Please try again.'), textAlign: TextAlign.center),
+                  Text(
+                    copy(
+                      'Bitte versuche es erneut.',
+                      'Lütfen tekrar deneyin.',
+                      'Please try again.',
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
                 ],
+
                 const SizedBox(height: 20),
+
                 FilledButton(
-                  onPressed: auth.isBusy ? null : auth.refreshDeviceAndAccess,
-                  child: Text(copy('Erneut prüfen', 'Tekrar kontrol et', 'Check again')),
+                  onPressed: auth.isBusy
+                      ? null
+                      : auth.refreshDeviceAndAccess,
+                  child: Text(
+                    copy(
+                      'Erneut prüfen',
+                      'Tekrar kontrol et',
+                      'Check again',
+                    ),
+                  ),
                 ),
+
                 TextButton(
-                  onPressed: auth.isBusy ? null : auth.logout,
-                  child: Text(copy('Abmelden', 'Çıkış yap', 'Log out')),
+                  onPressed:
+                      auth.isBusy ? null : auth.logout,
+                  child: Text(
+                    copy(
+                      'Abmelden',
+                      'Çıkış yap',
+                      'Log out',
+                    ),
+                  ),
                 ),
               ],
             ),
