@@ -1,4 +1,6 @@
 
+import 'package:flutter/foundation.dart';
+
 import '../models/family_profile.dart';
 import 'family_profile_service.dart';
 
@@ -140,6 +142,23 @@ class FamilyContentAccessSnapshot {
     required this.rules,
   });
 
+  /// Test-only constructor for exercising the real authorization policy
+  /// without a Supabase connection. Production code must use loadSnapshot.
+  @visibleForTesting
+  factory FamilyContentAccessSnapshot.forTesting({
+    required String profileId,
+    required bool isChild,
+    required bool rulesLoaded,
+    required List<Map<String, dynamic>> rules,
+  }) => FamilyContentAccessSnapshot._(
+    profileId: profileId,
+    isChild: isChild,
+    rulesLoaded: rulesLoaded,
+    rules: List.unmodifiable(rules.map(
+      (rule) => Map<String, dynamic>.unmodifiable(rule),
+    )),
+  );
+
   final String profileId;
   final bool isChild;
   final bool rulesLoaded;
@@ -201,9 +220,8 @@ class FamilyContentAccessSnapshot {
   /// Returns only content items allowed by
   /// this permission snapshot.
   ///
-  /// Items without a usable category key
-  /// are excluded, including for children
-  /// whose source metadata is incomplete.
+  /// Child items without a usable category key are excluded.
+  /// Adults can still see uncategorized items.
   List<T> filterItems<T>({
     required Iterable<T> items,
     required String sourceKey,
@@ -215,16 +233,11 @@ class FamilyContentAccessSnapshot {
     for (final item in items) {
       final categoryKey = categoryKeyOf(item);
 
-      // Legacy catalogs can contain entries without a category ID.
-      // Show them only when no folder is explicitly blocked for this
-      // playlist/content type. Otherwise their category cannot be
-      // established safely and they remain hidden until a catalog reload.
+      // A missing original category ID cannot be matched to a parent block.
+      // Adults retain access; children must wait for valid source metadata.
+      // This matches canAccessCategory and prevents bypass via empty IDs.
       if (categoryKey == null || categoryKey.trim().isEmpty) {
-        final hasBlockedCategories = rules.any((rule) =>
-            rule['source_key'] == sourceKey.trim() &&
-            rule['content_type'] == contentType.trim().toLowerCase() &&
-            rule['is_visible'] == false);
-        if (rulesLoaded && !hasBlockedCategories) result.add(item);
+        if (rulesLoaded && !isChild) result.add(item);
         continue;
       }
 

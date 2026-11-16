@@ -40,6 +40,9 @@ class M3uParser {
           streamUrl: line,
           logoUrl: currentLogo,
           category: currentGroup,
+          categoryKey: currentGroup?.trim().isNotEmpty == true
+              ? currentGroup!.trim()
+              : null,
         ));
         currentName = null;
         currentLogo = null;
