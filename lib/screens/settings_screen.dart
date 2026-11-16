@@ -10,6 +10,8 @@ import '../providers/locale_provider.dart';
 import '../providers/auth_provider.dart';
 
 import 'parental_lock_screen.dart';
+import 'family_profile_selection_screen.dart';
+import 'family_profile_management_screen.dart';
 import 'admin_devices_screen.dart';
 import 'legal_disclaimer_screen.dart';
 import 'favorites_backup_screen.dart';
@@ -336,6 +338,28 @@ class SettingsScreen extends StatelessWidget {
               ),
 
               const Divider(),
+
+              ListTile(
+                focusColor: focusColor,
+                leading: const Icon(Icons.family_restroom_outlined),
+                title: const Text('Familienprofile'),
+                subtitle: const Text('Profile auswählen und Kinderschutz verwalten'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _open(
+                  context,
+                  const FamilyProfileSelectionScreen(),
+                ),
+              ),
+              ListTile(
+                focusColor: focusColor,
+                leading: const Icon(Icons.manage_accounts_outlined),
+                title: const Text('Familienprofile verwalten'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _open(
+                  context,
+                  const FamilyProfileManagementScreen(),
+                ),
+              ),
 
               ListTile(
                 focusColor: focusColor,
