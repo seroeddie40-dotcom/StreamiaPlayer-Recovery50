@@ -8,6 +8,7 @@ import '../services/family_pin_service.dart';
 import '../services/family_profile_management_service.dart';
 import 'family_child_category_permissions_screen.dart';
 import 'family_parent_pin_setup_screen.dart';
+import 'family_adult_pin_setup_screen.dart';
 
 class FamilyProfileManagementScreen extends StatefulWidget {
   const FamilyProfileManagementScreen({super.key});
@@ -426,6 +427,37 @@ class _FamilyProfileManagementScreenState
     }
   }
 
+  Future<void> _setupAdultPin(FamilyProfile profile) async {
+    if (_busy ||
+        !_accessGranted ||
+        profile.type != FamilyProfileType.adult) {
+      return;
+    }
+
+    final token = await _requireParentToken();
+    if (token == null || !mounted) return;
+
+    final configured = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => FamilyAdultPinSetupScreen(
+          familyProfileId: profile.id,
+          profileName: profile.displayName,
+          parentAccessToken: token,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    if (configured == true) {
+      _showMessage('Erwachsenenprofil-PIN eingerichtet.');
+    } else {
+      _showMessage(
+        'Die PIN-Einrichtung wurde nicht abgeschlossen. '
+        'Du kannst sie über das Profilmenü nachholen.',
+      );
+    }
+  }
+
   Future<void> _createProfile() async {
     if (_busy ||
         !_accessGranted ||
@@ -561,6 +593,10 @@ class _FamilyProfileManagementScreenState
 
       setState(() => _busy = true);
 
+      // Capture existing IDs so the new profile can be identified
+      // independently of the RPC's return type.
+      final previousIds = _profiles.map((p) => p.id).toSet();
+
       await _managementService.createProfile(
         parentAccessToken: token,
         displayName: input['name']!,
@@ -569,9 +605,31 @@ class _FamilyProfileManagementScreenState
 
       if (!mounted) return;
 
-      _showMessage('Familienprofil erstellt.');
-
+      // Release the busy state before navigating to PIN setup.
+      setState(() => _busy = false);
       await _loadData();
+      if (!mounted) return;
+
+      if (input['type'] == 'adult') {
+        FamilyProfile? created;
+        for (final profile in _profiles) {
+          if (!previousIds.contains(profile.id) &&
+              profile.type == FamilyProfileType.adult) {
+            created = profile;
+            break;
+          }
+        }
+        if (created != null) {
+          await _setupAdultPin(created);
+        } else {
+          _showMessage(
+            'Profil erstellt. Bitte die persönliche PIN '
+            'über das Profilmenü einrichten.',
+          );
+        }
+      } else {
+        _showMessage('Kinderprofil erstellt.');
+      }
     } catch (_) {
       _showMessage(
         'Das Profil konnte nicht erstellt werden.',
@@ -869,6 +927,9 @@ class _FamilyProfileManagementScreenState
               case 'permissions':
                 _openChildPermissions(profile);
                 break;
+              case 'setup_pin':
+                _setupAdultPin(profile);
+                break;
               case 'rename':
                 _renameProfile(profile);
                 break;
@@ -887,6 +948,11 @@ class _FamilyProfileManagementScreenState
                 child: Text(
                   'Ordnerfreigaben verwalten',
                 ),
+              ),
+            if (isAdult)
+              const PopupMenuItem(
+                value: 'setup_pin',
+                child: Text('Erwachsenen-PIN erstmalig einrichten'),
               ),
             const PopupMenuItem(
               value: 'rename',
