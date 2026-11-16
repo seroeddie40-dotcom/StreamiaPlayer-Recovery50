@@ -12,6 +12,7 @@ import 'providers/theme_provider.dart';
 import 'providers/locale_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/content_provider.dart';
+import 'providers/family_session_provider.dart';
 import 'core/storage/prefs_service.dart';
 import 'config/supabase_config.dart';
 
@@ -24,10 +25,12 @@ void main() async {
   await DeviceLayout.initialize();
   await SystemChrome.setPreferredOrientations(
     DeviceLayout.isTelevision
-        ? [DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]
+        ? [
+            DeviceOrientation.landscapeLeft,
+            DeviceOrientation.landscapeRight,
+          ]
         : [DeviceOrientation.portraitUp],
   );
-
 
   // Initialize the shared Supabase client before providers/screens are created.
   // The publishable key is public by design; RLS protects all user data.
@@ -37,16 +40,31 @@ void main() async {
       publishableKey: SupabaseConfig.publishableKey,
     );
   }
-  
+
   final prefs = await SharedPreferences.getInstance();
   final prefsService = PrefsService(prefs);
+
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => ThemeProvider(prefsService)),
-        ChangeNotifierProvider(create: (_) => LocaleProvider(prefsService)),
-        ChangeNotifierProvider(create: (_) => AuthProvider(prefsService)),
-        ChangeNotifierProvider(create: (_) => ContentProvider()),
+        ChangeNotifierProvider(
+          create: (_) => ThemeProvider(prefsService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => LocaleProvider(prefsService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => AuthProvider(prefsService),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => ContentProvider(),
+        ),
+
+        // Global family session for Live TV, VOD, Series,
+        // Favorites, Search, History and Player.
+        ChangeNotifierProvider(
+          create: (_) => FamilySessionProvider(),
+        ),
       ],
       child: StreamiaApp(prefsService: prefsService),
     ),
