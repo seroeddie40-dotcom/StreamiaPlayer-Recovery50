@@ -141,6 +141,83 @@ class XtreamService {
     return null;
   }
 
+  /// Recover category IDs from category-scoped Xtream responses when the
+  /// provider omits category_id in its global catalog. Never infer access
+  /// from display names or assign ambiguous items to a category.
+  Future<Map<String, String>> _recoverCategoryKeys({
+    required String categoriesAction,
+    required String streamsAction,
+    required String idField,
+    required List<dynamic> globalItems,
+  }) async {
+    final missing = <String>{};
+    for (final item in globalItems) {
+      if (item is! Map) continue;
+      final id = _nullable(item[idField]);
+      if (id != null && _originalCategoryKey(
+        Map<String, dynamic>.from(item),
+      ) == null) missing.add(id);
+    }
+    if (missing.isEmpty) return const {};
+
+    dynamic categories;
+    try {
+      categories = await _request({'action': categoriesAction});
+    } catch (_) {
+      return const {};
+    }
+    if (categories is! List) return const {};
+
+    final ids = <String>{};
+    for (final entry in categories) {
+      if (entry is! Map) continue;
+      final id = _nullable(entry['category_id']);
+      if (id != null && id.trim().isNotEmpty) ids.add(id.trim());
+    }
+    if (ids.isEmpty) return const {};
+
+    final matches = <String, String>{};
+    final ambiguous = <String>{};
+    // Limit simultaneous requests to avoid overloading the IPTV provider.
+    final categoryIds = ids.toList(growable: false);
+    for (var offset = 0; offset < categoryIds.length; offset += 4) {
+      final batch = categoryIds.skip(offset).take(4);
+      await Future.wait(batch.map((categoryId) async {
+        dynamic scoped;
+        try {
+          scoped = await _request({
+            'action': streamsAction,
+            'category_id': categoryId,
+          });
+        } catch (_) {
+          return;
+        }
+        if (scoped is! List) return;
+        // Some nonstandard providers ignore category_id and return the
+        // entire catalog. Such a response is not evidence of membership.
+        if (ids.length > 1 && scoped.length >= globalItems.length) return;
+        for (final item in scoped) {
+          if (item is! Map) continue;
+          final id = _nullable(item[idField]);
+          if (id == null || !missing.contains(id)) continue;
+          final embedded = _originalCategoryKey(
+            Map<String, dynamic>.from(item),
+          );
+          if (embedded != null && embedded != categoryId) continue;
+          if (matches.containsKey(id) && matches[id] != categoryId) {
+            ambiguous.add(id);
+          } else {
+            matches[id] = categoryId;
+          }
+        }
+      }));
+    }
+    for (final id in ambiguous) {
+      matches.remove(id);
+    }
+    return matches;
+  }
+
   static String _normalizeBaseUrl(String value) {
     final parsed = Uri.tryParse(value.trim());
 
@@ -316,6 +393,12 @@ class XtreamService {
     final categories = await _categoryNames(
       'get_live_categories',
     );
+    final recoveredKeys = await _recoverCategoryKeys(
+      categoriesAction: 'get_live_categories',
+      streamsAction: 'get_live_streams',
+      idField: 'stream_id',
+      globalItems: data,
+    );
 
     return data.map((item) {
       final j = item as Map<String, dynamic>;
@@ -345,7 +428,7 @@ class XtreamService {
 
         // Family-profile authorization metadata.
         sourceKey: sourceKey,
-        categoryKey: _originalCategoryKey(j),
+        categoryKey: _originalCategoryKey(j) ?? recoveredKeys[id],
       );
     }).toList();
   }
@@ -372,6 +455,12 @@ class XtreamService {
     final categories = await _categoryNames(
       'get_vod_categories',
     );
+    final recoveredKeys = await _recoverCategoryKeys(
+      categoriesAction: 'get_vod_categories',
+      streamsAction: 'get_vod_streams',
+      idField: 'stream_id',
+      globalItems: data,
+    );
 
     return data.map((item) {
       final j = item as Map<String, dynamic>;
@@ -382,7 +471,7 @@ class XtreamService {
 
       return VodItem(
         id: id,
-        categoryKey: _nullable(j['category_id']),
+        categoryKey: _originalCategoryKey(j) ?? recoveredKeys[id],
         title: (j['name'] ??
                 'Unbekannter Film')
             .toString(),
@@ -452,6 +541,12 @@ class XtreamService {
     final categories = await _categoryNames(
       'get_series_categories',
     );
+    final recoveredKeys = await _recoverCategoryKeys(
+      categoriesAction: 'get_series_categories',
+      streamsAction: 'get_series',
+      idField: 'series_id',
+      globalItems: data,
+    );
 
     return data.map<Series>((item) {
       if (item is! Map) {
@@ -465,7 +560,7 @@ class XtreamService {
 
       return Series(
         id: '${j['series_id']}',
-        categoryKey: _nullable(j['category_id']),
+        categoryKey: _originalCategoryKey(j) ?? recoveredKeys['${j['series_id']}'],
         title: (j['name'] ??
                 'Unbekannte Serie')
             .toString(),
