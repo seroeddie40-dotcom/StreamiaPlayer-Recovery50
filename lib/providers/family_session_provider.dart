@@ -3,21 +3,33 @@ import 'package:flutter/foundation.dart';
 
 import '../models/family_profile.dart';
 import '../services/family_content_access_service.dart';
+import '../services/family_pin_service.dart';
+import '../services/family_profile_service.dart';
 
-/// Holds the active family profile for the current app session.
+/// Manages the active family profile during this app session.
 ///
-/// A family profile must be selected explicitly.
-/// Adult access is never restored automatically after restart.
+/// Adult profiles require successful PIN verification.
+/// Child profiles require successfully loaded permissions.
 ///
-/// This provider handles client-side visibility only.
-/// Playback and server-side authorization must also be enforced.
+/// No profile is automatically activated after app restart.
+///
+/// IMPORTANT:
+/// This is client-side access control.
+/// Server-side authorization remains necessary.
 class FamilySessionProvider extends ChangeNotifier {
   FamilySessionProvider({
     FamilyContentAccessService? accessService,
-  }) : _accessService =
-           accessService ?? FamilyContentAccessService();
+    FamilyPinService? pinService,
+    FamilyProfileService? profileService,
+  })  : _accessService =
+            accessService ?? FamilyContentAccessService(),
+        _pinService = pinService ?? FamilyPinService(),
+        _profileService =
+            profileService ?? FamilyProfileService();
 
   final FamilyContentAccessService _accessService;
+  final FamilyPinService _pinService;
+  final FamilyProfileService _profileService;
 
   FamilyProfile? _activeProfile;
   FamilyContentAccessSnapshot? _snapshot;
@@ -39,33 +51,86 @@ class FamilySessionProvider extends ChangeNotifier {
   bool get isAdult =>
       _activeProfile?.type == FamilyProfileType.adult;
 
-  /// A child session is ready only after its permissions
-  /// have been successfully loaded.
   bool get isReady =>
+      !_isLoading &&
       _activeProfile != null &&
       _snapshot != null &&
       _snapshot!.profileId == _activeProfile!.id &&
-      _snapshot!.isReady &&
-      !_isLoading;
+      _snapshot!.isReady;
 
-  /// Selects a family profile and loads its permissions.
+  /// Activates a profile.
   ///
-  /// The calling screen must verify the adult PIN
-  /// before passing an adult profile here.
+  /// Adult profiles require their PIN.
+  /// Child profiles do not require an adult PIN,
+  /// but their category permissions must load.
   ///
-  /// This method does not verify PINs itself.
-  Future<bool> activateProfile(FamilyProfile profile) async {
+  /// Returns false if activation is not permitted.
+  Future<bool> activateProfile(
+    FamilyProfile profile, {
+    String? adultPin,
+  }) async {
     final generation = ++_generation;
 
-    // Clear the previous session immediately.
+    // Invalidate the previous session immediately.
     _activeProfile = null;
     _snapshot = null;
     _isLoading = true;
     notifyListeners();
 
     try {
+      // Ensure the selected profile still belongs
+      // to the currently authenticated account.
+      final profiles = await _profileService.loadProfiles();
+
+      if (generation != _generation) {
+        return false;
+      }
+
+      FamilyProfile? verifiedProfile;
+
+      for (final candidate in profiles) {
+        if (candidate.id == profile.id) {
+          verifiedProfile = candidate;
+          break;
+        }
+      }
+
+      if (verifiedProfile == null) {
+        _finishFailedActivation(generation);
+        return false;
+      }
+
+      // Use the fresh server-loaded profile type,
+      // not a potentially outdated UI object.
+      if (verifiedProfile.type == FamilyProfileType.adult) {
+        if (adultPin == null ||
+            !RegExp(r'^[0-9]{4,12}$').hasMatch(adultPin)) {
+          _finishFailedActivation(generation);
+          return false;
+        }
+
+        final verification = await _pinService.verifyPin(
+          scope: FamilyPinScope.adult,
+          pin: adultPin,
+          familyProfileId: verifiedProfile.id,
+        );
+
+        if (generation != _generation) {
+          return false;
+        }
+
+        if (!verification.isSuccessful) {
+          _finishFailedActivation(generation);
+          return false;
+        }
+      } else if (verifiedProfile.type !=
+          FamilyProfileType.child) {
+        _finishFailedActivation(generation);
+        return false;
+      }
+
       final loaded = await _accessService.loadSnapshot(
-        profile: profile,
+        profile: verifiedProfile,
       );
 
       if (generation != _generation) {
@@ -73,42 +138,46 @@ class FamilySessionProvider extends ChangeNotifier {
       }
 
       if (!loaded.isReady ||
-          loaded.profileId != profile.id) {
-        _isLoading = false;
-        notifyListeners();
+          loaded.profileId != verifiedProfile.id ||
+          loaded.isChild !=
+              (verifiedProfile.type ==
+                  FamilyProfileType.child)) {
+        _finishFailedActivation(generation);
         return false;
       }
 
-      _activeProfile = profile;
+      _activeProfile = verifiedProfile;
       _snapshot = loaded;
       _isLoading = false;
       notifyListeners();
 
       return true;
     } catch (_) {
-      if (generation != _generation) {
-        return false;
-      }
-
-      _activeProfile = null;
-      _snapshot = null;
-      _isLoading = false;
-      notifyListeners();
-
+      _finishFailedActivation(generation);
       return false;
     }
   }
 
-  /// Refreshes permissions for the active profile.
+  void _finishFailedActivation(int generation) {
+    if (generation != _generation) return;
+
+    _activeProfile = null;
+    _snapshot = null;
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  /// Reloads the active profile and its permissions.
   ///
-  /// Old permissions are invalidated before the
-  /// refresh starts, preventing stale child access.
+  /// Adult PIN verification is not repeated within
+  /// an already active adult session.
+  ///
+  /// The session is cleared if the profile is removed
+  /// or its type changes.
   Future<bool> refreshPermissions() async {
     final profile = _activeProfile;
 
-    if (profile == null) {
-      return false;
-    }
+    if (profile == null) return false;
 
     final generation = ++_generation;
 
@@ -117,47 +186,65 @@ class FamilySessionProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final profiles = await _profileService.loadProfiles();
+
+      if (generation != _generation) {
+        return false;
+      }
+
+      FamilyProfile? currentProfile;
+
+      for (final candidate in profiles) {
+        if (candidate.id == profile.id) {
+          currentProfile = candidate;
+          break;
+        }
+      }
+
+      if (currentProfile == null ||
+          currentProfile.type != profile.type) {
+        _finishFailedActivation(generation);
+        return false;
+      }
+
       final loaded = await _accessService.loadSnapshot(
-        profile: profile,
+        profile: currentProfile,
       );
 
       if (generation != _generation) {
         return false;
       }
 
-      _snapshot = loaded.isReady &&
-              loaded.profileId == profile.id
-          ? loaded
-          : null;
-
-      _isLoading = false;
-      notifyListeners();
-
-      return _snapshot != null;
-    } catch (_) {
-      if (generation != _generation) {
+      if (!loaded.isReady ||
+          loaded.profileId != currentProfile.id ||
+          loaded.isChild !=
+              (currentProfile.type ==
+                  FamilyProfileType.child)) {
+        _finishFailedActivation(generation);
         return false;
       }
 
-      _snapshot = null;
+      _activeProfile = currentProfile;
+      _snapshot = loaded;
       _isLoading = false;
       notifyListeners();
 
+      return true;
+    } catch (_) {
+      _finishFailedActivation(generation);
       return false;
     }
   }
 
-  /// Checks category access in the current session.
+  /// Checks category visibility for the active profile.
   ///
-  /// No active profile means no access.
+  /// No active or ready session means no access.
   bool canAccessCategory({
     required String sourceKey,
     required String contentType,
     required String categoryKey,
   }) {
-    if (!isReady) {
-      return false;
-    }
+    if (!isReady) return false;
 
     return _snapshot!.canAccessCategory(
       sourceKey: sourceKey,
@@ -166,7 +253,7 @@ class FamilySessionProvider extends ChangeNotifier {
     );
   }
 
-  /// Filters items using the active permission snapshot.
+  /// Filters items using the current permission snapshot.
   List<T> filterItems<T>({
     required Iterable<T> items,
     required String sourceKey,
@@ -185,7 +272,7 @@ class FamilySessionProvider extends ChangeNotifier {
     );
   }
 
-  /// Ends the current family session.
+  /// Immediately ends the active family session.
   void clearSession() {
     ++_generation;
     _activeProfile = null;
