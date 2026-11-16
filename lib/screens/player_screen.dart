@@ -11,6 +11,7 @@ import '../models/channel.dart';
 import '../models/series.dart';
 import '../models/vod_item.dart';
 import '../providers/content_provider.dart';
+import '../providers/family_session_provider.dart';
 import '../services/recording_service.dart';
 import '../services/watch_progress_service.dart';
 
@@ -53,7 +54,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   final FocusNode _drawerCloseFocus = FocusNode(debugLabel: 'Navigation schließen');
   final FocusNode _categoryAllFocus = FocusNode(debugLabel: 'Alle Sender');
   final FocusNode _historyCloseFocus = FocusNode(debugLabel: 'Verlauf schließen');
-  final FocusNode _currentEpisodeFocus = FocusNode(debugLabel: 'Aktuelle Episode');
   final ScrollController _episodeListScroll = ScrollController();
   static const double _navigationRowExtent = 72;
   // Invalidates pending scroll requests when a drawer/category changes.
@@ -66,7 +66,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       if (widget.episodes != null && _episodeListScroll.hasClients) {
         _jumpToNavigationIndex(_episodeListScroll, _currentEpisode);
       } else if (widget.channel != null && _channelListScroll.hasClients) {
-        final channels = context.read<ContentProvider>().channels;
+        final channels = context.read<ContentProvider>().channels
+            .where(_canPlayChannel).toList(growable: false);
         final visible = _selectedLiveCategory == null ? channels : channels
             .where((c) => (c.category ?? '') == _selectedLiveCategory).toList();
         final index = visible.indexWhere((c) => c.id == widget.channel!.id);
@@ -276,7 +277,122 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     });
   }
 
+  bool _canPlayChannel(Channel channel) {
+    final family = context.read<FamilySessionProvider>();
+    final library = context.read<ContentProvider>();
+    if (!family.isReady || channel.sourceKey != library.sourceKey) return false;
+    final current = library.channels.where((candidate) =>
+        candidate.id == channel.id &&
+        candidate.streamUrl == channel.streamUrl &&
+        candidate.categoryKey == channel.categoryKey &&
+        candidate.sourceKey == channel.sourceKey);
+    if (current.isEmpty) return false;
+    if (!family.isChild) return true;
+    return family.canAccessCategory(
+      sourceKey: channel.sourceKey ?? '',
+      contentType: 'live',
+      categoryKey: channel.categoryKey ?? '',
+    );
+  }
+
+  bool _canPlayVod(VodItem item) {
+    final family = context.read<FamilySessionProvider>();
+    final library = context.read<ContentProvider>();
+    if (!family.isReady) return false;
+    final current = library.vodItems.where((candidate) =>
+        candidate.id == item.id && candidate.streamUrl == item.streamUrl &&
+        candidate.categoryKey == item.categoryKey);
+    if (current.isEmpty) return false;
+    if (!family.isChild) return true;
+    return family.canAccessCategory(
+      sourceKey: library.sourceKey, contentType: 'vod',
+      categoryKey: item.categoryKey ?? '',
+    );
+  }
+
+  bool _canPlaySeries(Series item, {String? episodeUrl}) {
+    final family = context.read<FamilySessionProvider>();
+    final library = context.read<ContentProvider>();
+    if (!family.isReady) return false;
+    final current = library.series.where((candidate) =>
+        candidate.id == item.id && candidate.categoryKey == item.categoryKey &&
+        (episodeUrl == null || candidate.seasons.any((season) =>
+            season.episodes.any((episode) => episode.streamUrl == episodeUrl))));
+    if (current.isEmpty) return false;
+    if (!family.isChild) return true;
+    return family.canAccessCategory(
+      sourceKey: library.sourceKey, contentType: 'series',
+      categoryKey: item.categoryKey ?? '',
+    );
+  }
+
+  bool _canOpenRecent(RecentPlaybackEntry entry) {
+    final library = context.read<ContentProvider>();
+    if (entry.sourceKey != library.sourceKey) return false;
+    if (entry.channel != null) return _canPlayChannel(entry.channel!);
+    if (entry.vod != null) return _canPlayVod(entry.vod!);
+    if (entry.series != null) return _canPlaySeries(entry.series!);
+    return false;
+  }
+
   Future<void> _loadStream({bool reconnect = false}) async {
+    // A route into PlayerScreen is not an authorization grant.
+    // This check also runs for reconnects and episode changes.
+    final family = context.read<FamilySessionProvider>();
+    final content = context.read<ContentProvider>();
+    final channel = widget.channel;
+    bool permitted = family.isReady;
+
+    if (permitted && channel != null) {
+      permitted = _canPlayChannel(channel);
+    } else if (permitted && widget.episodes != null && widget.series != null) {
+      permitted = _canPlaySeries(widget.series!, episodeUrl: _currentUrl);
+    } else if (permitted && family.isChild) {
+      // A child may only play an item that is still present in the
+      // current source catalog with an explicitly permitted category.
+      // Bare URLs, downloaded files and stale history entries fail closed.
+      if (widget.episodes != null && widget.series != null) {
+        final series = widget.series!;
+        final currentSeries = content.series.where(
+          (item) => item.id == series.id &&
+              item.seasons.any((season) => season.episodes.any(
+                (episode) => episode.streamUrl == _currentUrl,
+              )),
+        );
+        permitted = currentSeries.isNotEmpty &&
+            family.canAccessCategory(
+              sourceKey: content.sourceKey,
+              contentType: 'series',
+              categoryKey: currentSeries.first.categoryKey ?? '',
+            );
+      } else if (widget.contentId != null && widget.streamUrl != null) {
+        final matching = content.vodItems.where(
+          (item) => item.id == widget.contentId &&
+              item.streamUrl == widget.streamUrl,
+        );
+        permitted = matching.isNotEmpty &&
+            family.canAccessCategory(
+              sourceKey: content.sourceKey,
+              contentType: 'vod',
+              categoryKey: matching.first.categoryKey ?? '',
+            );
+      } else {
+        permitted = false;
+      }
+    }
+
+    if (!permitted) {
+      ++_streamLoadGeneration;
+      await _player.stop();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text(
+            'Dieser Inhalt ist für das Profil nicht freigegeben.',
+          )),
+        );
+      }
+      return;
+    }
     final url = _currentUrl;
     if (url == null || url.isEmpty) {
       _handlePlaybackFailure();
@@ -462,7 +578,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _drawerCloseFocus.dispose();
     _categoryAllFocus.dispose();
     _historyCloseFocus.dispose();
-    _currentEpisodeFocus.dispose();
     _episodeListScroll.dispose();
     _playerSurfaceFocus.dispose();
     _subtitleButtonFocus.dispose();
@@ -986,7 +1101,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       Icons.movie_rounded,
       Icons.video_library_rounded,
     ];
-    final entries = lists[_selectedHistoryTab].take(10).toList(growable: false);
+    final entries = lists[_selectedHistoryTab]
+        .where(_canOpenRecent).take(10).toList(growable: false);
     return Positioned(
       right: 0,
       top: 0,
@@ -1159,6 +1275,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   Future<void> _openRecentEntry(RecentPlaybackEntry entry) async {
+    if (!_canOpenRecent(entry)) return;
     setState(() => _showHistory = false);
     if (entry.channel != null) {
       await Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => PlayerScreen(channel: entry.channel, isLive: true)));
@@ -1223,11 +1340,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   void _zapBy(int offset) {
     final library = context.read<ContentProvider>();
-    if (library.channels.isEmpty || widget.channel == null) return;
-    final current = library.channels.indexWhere((c) => c.id == widget.channel!.id);
-    final base = current < 0 ? 0 : current;
-    final next = (base + offset + library.channels.length) % library.channels.length;
-    final channel = library.channels[next];
+    if (widget.channel == null) return;
+    final allowed = library.channels.where(_canPlayChannel).toList(growable: false);
+    if (allowed.isEmpty) return;
+    final current = allowed.indexWhere((c) => c.id == widget.channel!.id);
+    if (current < 0) return;
+    final next = (current + offset + allowed.length) % allowed.length;
+    final channel = allowed[next];
     Navigator.pushReplacement(context, MaterialPageRoute(
       builder: (_) => PlayerScreen(channel: channel, isLive: true)));
   }
@@ -1274,14 +1393,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _hideTimer?.cancel();
     _scrollToCurrentNavigationItem();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_showDrawer) return;
-      if (widget.isLive) {
-        _categoryAllFocus.requestFocus();
-      } else if (widget.episodes != null) {
-        // The episode list has its own autofocus on the current episode.
-        // Do not leave focus on the video surface when opening the drawer.
-        _currentEpisodeFocus.requestFocus();
-      }
+      if (mounted && _showDrawer && widget.isLive) _categoryAllFocus.requestFocus();
     });
   }
 
@@ -1289,7 +1401,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   void _zapNext() => _zapBy(1);
 
   Widget _buildLiveNavigationDrawer() {
-    final channels = context.watch<ContentProvider>().channels;
+    context.watch<FamilySessionProvider>();
+    final channels = context.watch<ContentProvider>().channels
+        .where(_canPlayChannel).toList(growable: false);
     final categories = channels.map((c) => c.category ?? '')
         .where((c) => c.isNotEmpty).toSet().toList()..sort();
     final visible = _selectedLiveCategory == null
@@ -1427,9 +1541,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                   _keepFocusedNavigationRowVisible(rowContext, focused),
               child: InkWell(
               autofocus: i == _currentEpisode,
-              focusNode: i == _currentEpisode ? _currentEpisodeFocus : null,
               focusColor: AppTheme.electricBlue.withOpacity(0.38),
               onTap: () async {
+                if (widget.series == null ||
+                    !_canPlaySeries(widget.series!, episodeUrl: ep.streamUrl)) return;
                 await _saveProgress();
                 _navigationScrollEpoch++;
                 _focusedRowRequest++;
