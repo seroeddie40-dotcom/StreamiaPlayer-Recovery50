@@ -14,6 +14,8 @@ import 'providers/theme_provider.dart';
 import 'providers/locale_provider.dart';
 import 'providers/content_provider.dart';
 import 'providers/auth_provider.dart';
+import 'providers/family_session_provider.dart';
+import 'screens/family_profile_selection_screen.dart';
 import 'services/playlist_profile_store.dart';
 import 'services/playlist_switch_service.dart';
 
@@ -173,7 +175,15 @@ class _LandscapeDashboardState extends State<_LandscapeDashboard> {
   }
 
   @override
-  Widget build(BuildContext context) => const DashboardScreen();
+  Widget build(BuildContext context) {
+    // A fresh login or app restart must not reuse an unlocked family session.
+    // No playback route is exposed until a profile is explicitly selected.
+    final family = context.watch<FamilySessionProvider>();
+    if (!family.isReady) {
+      return const FamilyProfileSelectionScreen();
+    }
+    return const DashboardScreen();
+  }
 }
 
 /// Automatically routes returning users to their library or playlist setup.
