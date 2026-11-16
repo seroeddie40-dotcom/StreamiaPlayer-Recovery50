@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 import '../models/family_profile.dart';
@@ -55,6 +54,8 @@ class _FamilyChildCategoryPermissionsScreenState
 
   bool _loading = true;
   bool _saving = false;
+  final Set<String> _selectedKeys = <String>{};
+  String _search = '';
 
   String? _errorMessage;
 
@@ -214,6 +215,7 @@ class _FamilyChildCategoryPermissionsScreenState
 
       setState(() {
         _categories = categories;
+        _selectedKeys.clear();
         _loading = false;
       });
     } catch (_) {
@@ -348,6 +350,8 @@ class _FamilyChildCategoryPermissionsScreenState
 
     setState(() {
       _selectedSourceKey = sourceKey;
+      _selectedKeys.clear();
+      _search = '';
     });
 
     await _loadSelectedCategories();
@@ -364,6 +368,8 @@ class _FamilyChildCategoryPermissionsScreenState
 
     setState(() {
       _selectedContentType = type;
+      _selectedKeys.clear();
+      _search = '';
     });
 
     await _loadSelectedCategories();
@@ -436,100 +442,155 @@ class _FamilyChildCategoryPermissionsScreenState
     );
   }
 
+  Future<void> _applyBulk(bool visible) async {
+    if (_saving || _loading || _selectedKeys.isEmpty) return;
+    setState(() => _saving = true);
+    var updated = 0;
+    try {
+      if (!await _hasParentAuthorization()) {
+        throw const _FamilyPermissionError(
+          'Eltern-PIN-Sitzung abgelaufen. Bitte Verwaltung erneut entsperren.',
+        );
+      }
+      final chosen = _categories
+          .where((c) => _selectedKeys.contains(c.categoryKey))
+          .toList(growable: false);
+      for (final category in chosen) {
+        final ok = await _managementService.setChildCategoryVisibility(
+          parentAccessToken: widget.parentAccessToken,
+          childProfileId: widget.childProfile.id,
+          sourceKey: category.sourceKey,
+          contentType: category.contentTypeKey,
+          categoryKey: category.categoryKey,
+          isVisible: visible,
+        );
+        if (!ok) throw const _FamilyPermissionError(
+          'Der Server hat eine Änderung nicht bestätigt.',
+        );
+        updated++;
+      }
+      final rules = await _profileService.loadCategoryRules(widget.childProfile.id);
+      if (!mounted) return;
+      setState(() {
+        _rules = rules;
+        _selectedKeys.clear();
+      });
+      _showMessage('$updated Ordner ${visible ? 'entsperrt' : 'gesperrt'}.');
+    } catch (error) {
+      // Einzelne bereits bestätigte Änderungen bleiben gespeichert.
+      try {
+        final rules = await _profileService.loadCategoryRules(widget.childProfile.id);
+        if (mounted) setState(() => _rules = rules);
+      } catch (_) {}
+      _showMessage('Änderung unterbrochen ($updated erfolgreich). Bitte erneut prüfen.');
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   Widget _buildCategoryList() {
-    if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
-
+    if (_loading) return const Center(child: CircularProgressIndicator());
     if (_errorMessage != null) {
-      return Center(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(
-                Icons.info_outline,
-                size: 44,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                _errorMessage!,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: _saving
-                    ? null
-                    : _loadSelectedCategories,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Erneut versuchen'),
-              ),
-            ],
+      return Center(child: SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(_errorMessage!, textAlign: TextAlign.center),
+          OutlinedButton.icon(
+            onPressed: _loadSelectedCategories,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Erneut versuchen'),
           ),
-        ),
-      );
+        ]),
+      ));
     }
-
-    if (_categories.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(20),
-          child: Text(
-            'Für diesen Bereich wurden '
-            'keine Kategorien gefunden.',
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
-
+    final filtered = _categories.where((c) =>
+        c.displayName.toLowerCase().contains(_search.toLowerCase())).toList();
+    if (filtered.isEmpty) return const Center(child: Text('Keine Ordner gefunden.'));
     return ListView.builder(
-      padding: const EdgeInsets.only(
-        bottom: 24,
-      ),
-      itemCount: _categories.length,
+      padding: const EdgeInsets.only(bottom: 8),
+      itemCount: filtered.length,
       itemBuilder: (context, index) {
-        final category = _categories[index];
-
-        final visible =
-            _isCategoryVisible(category);
-
-        return Card(
-          margin: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 4,
-          ),
-          child: SwitchListTile(
-            title: Text(
-              category.displayName,
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-            subtitle: Text(
-              visible
-                  ? 'Für dieses Kind freigegeben'
-                  : 'Für dieses Kind gesperrt',
-            ),
-            secondary: Icon(
-              visible
-                  ? Icons.lock_open_outlined
-                  : Icons.lock_outline,
-            ),
-            value: visible,
-            onChanged: _saving
-                ? null
-                : (value) {
-                    _changeVisibility(
-                      category,
-                      value,
-                    );
-                  },
-          ),
+        final category = filtered[index];
+        final selected = _selectedKeys.contains(category.categoryKey);
+        final visible = _isCategoryVisible(category);
+        return CheckboxListTile(
+          dense: true,
+          controlAffinity: ListTileControlAffinity.leading,
+          value: selected,
+          onChanged: _saving ? null : (value) => setState(() {
+            if (value == true) {
+              _selectedKeys.add(category.categoryKey);
+            } else {
+              _selectedKeys.remove(category.categoryKey);
+            }
+          }),
+          title: Text(category.displayName, maxLines: 2, overflow: TextOverflow.ellipsis),
+          subtitle: Text(visible ? 'Sichtbar' : 'Gesperrt'),
+          secondary: Icon(visible ? Icons.lock_open_outlined : Icons.lock_outline),
         );
       },
+    );
+  }
+
+  Widget _buildControls() {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('Kinderprofil: ${widget.childProfile.displayName}',
+            style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 4),
+        const Text('Alle Ordner sind zunächst sichtbar. Markierte Ordner können gesperrt werden.'),
+        const SizedBox(height: 12),
+        _buildPlaylistSelector(),
+        const SizedBox(height: 12),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: _buildContentTypeSelector(),
+        ),
+        const SizedBox(height: 12),
+        TextField(
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search),
+            hintText: 'Ordner suchen',
+            border: OutlineInputBorder(),
+            isDense: true,
+          ),
+          onChanged: (value) => setState(() => _search = value),
+        ),
+      ]),
+    );
+  }
+
+  Widget _buildActions() {
+    final filtered = _categories.where((c) =>
+        c.displayName.toLowerCase().contains(_search.toLowerCase())).toList();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      child: Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text('${_selectedKeys.length} ausgewählt'),
+          OutlinedButton(
+            onPressed: _saving || _loading ? null : () => setState(() {
+              _selectedKeys.addAll(filtered.map((c) => c.categoryKey));
+            }),
+            child: const Text('Alle auswählen'),
+          ),
+          OutlinedButton(
+            onPressed: _saving || _loading ? null : () => setState(_selectedKeys.clear),
+            child: const Text('Auswahl löschen'),
+          ),
+          FilledButton.icon(
+            onPressed: _saving || _selectedKeys.isEmpty ? null : () => _applyBulk(false),
+            icon: const Icon(Icons.lock_outline),
+            label: const Text('Sperren'),
+          ),
+          OutlinedButton.icon(
+            onPressed: _saving || _selectedKeys.isEmpty ? null : () => _applyBulk(true),
+            icon: const Icon(Icons.lock_open_outlined),
+            label: const Text('Entsperren'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -537,62 +598,36 @@ class _FamilyChildCategoryPermissionsScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Kinder-Ordnerfreigaben'),
-        actions: [
-          IconButton(
-            tooltip: 'Aktualisieren',
-            onPressed: _loading || _saving
-                ? null
-                : _initialize,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
+        title: const Text('Kinder-Ordnersperren'),
+        actions: [IconButton(
+          tooltip: 'Aktualisieren',
+          onPressed: _loading || _saving ? null : _initialize,
+          icon: const Icon(Icons.refresh),
+        )],
       ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            if (_saving)
-              const LinearProgressIndicator(),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Kinderprofil: '
-                    '${widget.childProfile.displayName}',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Nur ausdrücklich freigegebene '
-                    'Ordner sollen für dieses '
-                    'Kinderprofil sichtbar sein.',
-                    style: Theme.of(context)
-                        .textTheme
-                        .bodySmall,
-                  ),
-                  const SizedBox(height: 16),
-                  _buildPlaylistSelector(),
-                  const SizedBox(height: 16),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: _buildContentTypeSelector(),
-                  ),
-                ],
-              ),
-            ),
-            Expanded(
-              child: _buildCategoryList(),
-            ),
-          ],
-        ),
-      ),
+      body: SafeArea(child: LayoutBuilder(builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 680;
+        final controls = SingleChildScrollView(child: _buildControls());
+        final list = Column(children: [
+          if (_saving) const LinearProgressIndicator(),
+          _buildActions(),
+          Expanded(child: _buildCategoryList()),
+        ]);
+        if (wide) {
+          return Row(children: [
+            SizedBox(width: constraints.maxWidth * 0.38, child: controls),
+            const VerticalDivider(width: 1),
+            Expanded(child: list),
+          ]);
+        }
+        return Column(children: [
+          SizedBox(height: constraints.maxHeight * 0.43, child: controls),
+          Expanded(child: list),
+        ]);
+      })),
     );
   }
+
 }
 
 class _FamilyPermissionError
