@@ -278,8 +278,21 @@ class _VodScreenState extends State<VodScreen> {
         ),
         title: Text(_vodText(context, 'movies')),
       ),
-      body: items.isEmpty
-          ? Center(child: Text(_vodText(context, 'empty')))
+      body: !family.isReady
+          ? Center(child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Profilberechtigungen konnten nicht geladen werden.'),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  onPressed: family.isRefreshingPermissions
+                      ? null : () => family.refreshPermissions(),
+                  child: const Text('Erneut versuchen'),
+                ),
+              ],
+            ))
+          : items.isEmpty
+          ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Text(_vodText(context, 'empty')), if (family.isChild && family.snapshot != null) Padding(padding: const EdgeInsets.all(12), child: Text(family.snapshot!.catalogDiagnostics<VodItem>(items: content.vodItems, sourceKey: content.sourceKey, contentType: 'vod', categoryKeyOf: (item) => item.categoryKey), textAlign: TextAlign.center))]))
           : LayoutBuilder(
               builder: (context, constraints) {
                 final wide = constraints.maxWidth >= 750;

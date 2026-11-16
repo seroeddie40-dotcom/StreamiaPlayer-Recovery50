@@ -226,7 +226,20 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
         endDrawer: compact ? Drawer(
           child: SafeArea(child: _categoryPanel(channels, inDrawer: true)),
         ) : null,
-        body: Row(children: [
+        body: !family.isReady
+          ? Center(child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Profilberechtigungen konnten nicht geladen werden.'),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  onPressed: family.isRefreshingPermissions
+                      ? null : () => family.refreshPermissions(),
+                  child: const Text('Erneut versuchen'),
+                ),
+              ],
+            ))
+          : Row(children: [
           if (!compact)
             AnimatedContainer(
               duration: const Duration(milliseconds: 220),
@@ -295,7 +308,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
             Expanded(child: filtered.isEmpty
               ? Center(child: Text(
                   channels.isEmpty
-                      ? _text('Keine Sender vorhanden', 'Kanal bulunamadı', 'No channels available')
+                      ? '${_text('Keine Sender vorhanden', 'Kanal bulunamadı', 'No channels available')}\n${family.isChild && family.snapshot != null ? family.snapshot!.catalogDiagnostics<Channel>(items: allChannels, sourceKey: content.sourceKey, contentType: 'live', categoryKeyOf: (item) => item.categoryKey) : ''}'
                       : _text('Keine passenden Sender', 'Eşleşen kanal yok', 'No matching channels'),
                   textAlign: TextAlign.center,
                 ))
