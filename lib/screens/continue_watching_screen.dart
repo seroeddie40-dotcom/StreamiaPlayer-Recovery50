@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
-import '../core/platform/device_layout.dart';
 import '../core/localization/app_localizations.dart';
 import '../providers/content_provider.dart';
+import '../providers/family_session_provider.dart';
 import '../services/watch_progress_service.dart';
 import 'player_screen.dart';
 
@@ -80,7 +80,7 @@ class _ContinueWatchingScreenState
           if (snapshot.hasError) {
             return Center(
               child: TextButton.icon(
-                autofocus: DeviceLayout.isTelevision,
+                autofocus: true,
                 style: TextButton.styleFrom(
                   overlayColor: focusColor,
                 ),
@@ -93,7 +93,11 @@ class _ContinueWatchingScreenState
             );
           }
 
-          final rows = snapshot.data ?? const [];
+          final content = context.watch<ContentProvider>();
+          final family = context.watch<FamilySessionProvider>();
+          final rows = (snapshot.data ?? const <Map<String, dynamic>>[])
+              .where((row) => _isAllowed(row, content, family))
+              .toList(growable: false);
 
           if (rows.isEmpty) {
             return RefreshIndicator(
@@ -150,7 +154,7 @@ class _ContinueWatchingScreenState
                       : 0.0;
 
                   return ListTile(
-                    autofocus: DeviceLayout.isTelevision && index == 0,
+                    autofocus: index == 0,
                     focusColor: Theme.of(context)
                         .colorScheme
                         .primary
@@ -196,10 +200,60 @@ class _ContinueWatchingScreenState
     );
   }
 
+  bool _isAllowed(
+    Map<String, dynamic> row,
+    ContentProvider content,
+    FamilySessionProvider family,
+  ) {
+    if (!family.isReady) return false;
+    if (!family.isChild) return true;
+
+    final type = row['content_type']?.toString() ?? '';
+    final id = row['content_id']?.toString() ?? '';
+    if (id.isEmpty || content.sourceKey.isEmpty) return false;
+
+    if (type == 'vod') {
+      for (final item in content.vodItems) {
+        if (item.id == id) {
+          return family.canAccessCategory(
+            sourceKey: content.sourceKey,
+            contentType: 'vod',
+            categoryKey: item.categoryKey ?? '',
+          );
+        }
+      }
+      return false;
+    }
+    if (type == 'series') {
+      final parts = id.split('::');
+      if (parts.length < 2) return false;
+      final seriesId = parts.first;
+      final episodeId = parts.sublist(1).join('::');
+      for (final item in content.series) {
+        if (item.id != seriesId) continue;
+        final hasEpisode = item.seasons.any(
+          (season) => season.episodes.any((episode) => episode.id == episodeId),
+        );
+        return hasEpisode && family.canAccessCategory(
+          sourceKey: content.sourceKey,
+          contentType: 'series',
+          categoryKey: item.categoryKey ?? '',
+        );
+      }
+      return false;
+    }
+    return false;
+  }
+
   Future<void> _resume(
     Map<String, dynamic> row,
   ) async {
     final content = context.read<ContentProvider>();
+    final family = context.read<FamilySessionProvider>();
+    if (!_isAllowed(row, content, family)) {
+      _missingSource();
+      return;
+    }
 
     final type =
         row['content_type']?.toString();
