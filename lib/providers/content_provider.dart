@@ -87,7 +87,12 @@ class ContentProvider extends ChangeNotifier {
     final cached = _libraryCache.remove(key);
     if (cached == null) return false;
     _rememberLibrary(_sourceKey);
-    _channels = cached.channels;
+    _channels = List<Channel>.unmodifiable(
+      cached.channels.map((channel) => channel.copyWith(
+        sourceKey: key,
+        categoryKey: channel.categoryKey ?? channel.category,
+      )),
+    );
     _vodItems = cached.vod;
     _series = cached.series;
     _sourceKey = key;
@@ -259,7 +264,13 @@ class ContentProvider extends ChangeNotifier {
     if (activationGeneration != null && !isLibraryActivationCurrent(activationGeneration)) return false;
     if (_sourceKey != sourceKey) _rememberLibrary(_sourceKey);
     if (sourceKey != null) _libraryCache.remove(sourceKey);
-    _channels = List.unmodifiable(channels);
+    _channels = List<Channel>.unmodifiable(
+      channels.map((channel) => channel.copyWith(
+        sourceKey: (sourceKey != null && sourceKey.isNotEmpty)
+            ? sourceKey : (channel.sourceKey ?? _sourceKey),
+        categoryKey: channel.categoryKey ?? channel.category,
+      )),
+    );
     _vodItems = List.unmodifiable(vod);
     _series = List.unmodifiable(series);
     if (sourceKey != null && sourceKey.isNotEmpty) _sourceKey = sourceKey;
