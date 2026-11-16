@@ -40,6 +40,8 @@ enum PlaybackStartChoice { resume, fromBeginning, cancel }
 class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver {
   late final Player _player;
   late final VideoController _videoController;
+  late final FamilySessionProvider _familySession;
+  bool _playbackRevoked = false;
   StreamSubscription? _posSub, _durSub, _playSub, _errorSub, _bufferingSub;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -166,6 +168,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     WidgetsBinding.instance.addObserver(this);
     _player = Player();
     _videoController = VideoController(_player);
+    _familySession = context.read<FamilySessionProvider>();
+    _familySession.addListener(_onFamilySessionChanged);
     _currentEpisode = widget.initialEpisodeIndex ?? 0;
     _posSub = _player.stream.position.listen((p) {
       if (!mounted) return;
@@ -277,6 +281,33 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     });
   }
 
+  void _onFamilySessionChanged() {
+    if (!mounted || _playbackRevoked) return;
+    if (_isCurrentStreamAuthorized()) return;
+
+    // A revoked permission must stop an already opened media stream,
+    // including while a reconnect or asynchronous open is in flight.
+    _playbackRevoked = true;
+    ++_streamLoadGeneration;
+    _reconnectTimer?.cancel();
+    _stallMonitor?.cancel();
+    _hideTimer?.cancel();
+    unawaited(_player.stop());
+    if (mounted) {
+      setState(() {
+        _playing = false;
+        _reconnecting = false;
+        _streamFailed = true;
+        _showControls = true;
+      });
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text(
+          'Die Wiedergabe wurde wegen geänderter Profilberechtigungen beendet.',
+        )),
+      );
+    }
+  }
+
   bool _canPlayChannel(Channel channel) {
     final family = context.read<FamilySessionProvider>();
     final library = context.read<ContentProvider>();
@@ -335,9 +366,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     return false;
   }
 
-  Future<void> _loadStream({bool reconnect = false}) async {
-    // A route into PlayerScreen is not an authorization grant.
-    // This check also runs for reconnects and episode changes.
+  bool _isCurrentStreamAuthorized() {
     final family = context.read<FamilySessionProvider>();
     final content = context.read<ContentProvider>();
     final channel = widget.channel;
@@ -381,6 +410,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       }
     }
 
+    return permitted;
+  }
+
+  Future<void> _loadStream({bool reconnect = false}) async {
+    final permitted = !_playbackRevoked && _isCurrentStreamAuthorized();
+
     if (!permitted) {
       ++_streamLoadGeneration;
       await _player.stop();
@@ -413,7 +448,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (mounted) setState(() { _reconnecting = reconnect; _streamFailed = false; });
     try {
       await _player.open(Media(url));
-      if (!mounted || generation != _streamLoadGeneration) return;
+      if (!mounted || generation != _streamLoadGeneration) {
+        if (_playbackRevoked) await _player.stop();
+        return;
+      }
       // Reconnect always takes precedence over stored progress. A first open
       // may fail before the initial progress lookup; in that case the retry
       // must still resume at the position captured before Media.open.
@@ -567,6 +605,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   @override
   void dispose() {
+    _familySession.removeListener(_onFamilySessionChanged);
     _hideTimer?.cancel();
     _progressTimer?.cancel();
     _queueSyncTimer?.cancel();
