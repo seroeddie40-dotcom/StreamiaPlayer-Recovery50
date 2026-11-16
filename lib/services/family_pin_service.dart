@@ -1,13 +1,18 @@
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// The parent scope is used for:
+/// - Unlocking adult profiles
+/// - Family profile management
+/// - Managing child category restrictions
+///
+/// The adult scope remains available for compatibility
+/// with existing database functions and older app code.
 enum FamilyPinScope {
   parent,
   adult,
 }
 
-/// Result of checking whether the account
-/// already has a configured parent PIN.
 enum FamilyParentPinStatus {
   configured,
   notConfigured,
@@ -39,6 +44,26 @@ class FamilyPinService {
   FamilyPinService({SupabaseClient? client})
       : _client = client ?? Supabase.instance.client;
 
+  static final RegExp _newPinPattern =
+      RegExp(r'^[0-9]{6,10}$');
+
+  // Existing PINs may have been created under older
+  // rules. Verification must not reject them locally
+  // before the server can check them.
+  static final RegExp _existingPinPattern =
+      RegExp(r'^[0-9]{4,12}$');
+
+  static final RegExp _tokenPattern =
+      RegExp(r'^[0-9a-f]{64}$');
+
+  static final RegExp _uuidPattern = RegExp(
+    r'^[0-9a-fA-F]{8}-'
+    r'[0-9a-fA-F]{4}-'
+    r'[0-9a-fA-F]{4}-'
+    r'[0-9a-fA-F]{4}-'
+    r'[0-9a-fA-F]{12}$',
+  );
+
   String _scopeValue(FamilyPinScope scope) {
     switch (scope) {
       case FamilyPinScope.parent:
@@ -63,38 +88,33 @@ class FamilyPinService {
         (familyProfileId == null ||
             familyProfileId.trim().isEmpty)) {
       throw ArgumentError(
-        'Für die Erwachsenen-PIN ist eine '
-        'Profil-ID erforderlich.',
+        'Für die bisherige Erwachsenen-PIN '
+        'ist eine Profil-ID erforderlich.',
       );
     }
   }
 
   bool _isValidNewPin(String pin) {
-    return RegExp(r'^[0-9]{6,12}$').hasMatch(pin);
+    return _newPinPattern.hasMatch(pin);
   }
 
-  bool _isValidParentToken(String token) {
-    return RegExp(r'^[0-9a-f]{64}$').hasMatch(token);
+  bool _isValidExistingPin(String pin) {
+    return _existingPinPattern.hasMatch(pin);
+  }
+
+  bool _isValidToken(String token) {
+    return _tokenPattern.hasMatch(token);
   }
 
   bool _isValidUuid(String value) {
-    return RegExp(
-      r'^[0-9a-fA-F]{8}-'
-      r'[0-9a-fA-F]{4}-'
-      r'[0-9a-fA-F]{4}-'
-      r'[0-9a-fA-F]{4}-'
-      r'[0-9a-fA-F]{12}$',
-    ).hasMatch(value);
+    return _uuidPattern.hasMatch(value);
   }
 
-  /// Checks whether the authenticated account
-  /// already has a parent PIN.
+  /// Checks whether the signed-in account already
+  /// has a configured parent PIN.
   ///
-  /// The Supabase RPC returns only a status.
-  /// No PIN, PIN hash or session token is exposed.
-  ///
-  /// A server error is not treated as
-  /// "not configured".
+  /// Server errors must never be interpreted
+  /// as an unconfigured PIN.
   Future<FamilyParentPinStatus>
       getParentPinStatus() async {
     if (_client.auth.currentUser == null) {
@@ -127,16 +147,12 @@ class FamilyPinService {
     }
   }
 
-  /// Initializes the parent PIN for the first time.
+  /// Creates the single account-level parent PIN.
   ///
-  /// Supabase allows this operation only if
-  /// the authenticated account does not
-  /// already have a parent PIN.
+  /// New PINs must contain 6–10 digits.
   ///
-  /// An existing PIN cannot be overwritten
-  /// or reset using this method.
-  ///
-  /// Valid PIN length: 6 to 12 digits.
+  /// An existing parent PIN is never overwritten.
+  /// Supabase remains authoritative.
   Future<String> initializeParentPin(
     String newPin,
   ) async {
@@ -179,32 +195,19 @@ class FamilyPinService {
     return response;
   }
 
-  /// Initializes an adult profile PIN
-  /// for the first time.
+  /// Legacy compatibility only.
   ///
-  /// A valid, server-verified parent PIN
-  /// session is required.
+  /// The current family UI must not call this method.
+  /// New adult profiles use the account-level parent PIN.
   ///
-  /// Supabase also checks:
-  /// - Account ownership
-  /// - Adult profile type
-  /// - Whether a PIN already exists
+  /// This method is retained so older callers do not
+  /// fail to compile during the migration.
   ///
-  /// An existing adult PIN cannot be
-  /// overwritten using this method.
-  ///
-  /// Valid PIN length: 6 to 12 digits.
-  ///
-  /// Possible results:
-  /// - success
-  /// - already_configured
-  /// - invalid_pin
-  /// - invalid_profile
-  /// - invalid_parent_session
-  /// - unauthorized
-  ///
-  /// Never log or locally store PINs
-  /// or parent access tokens.
+  /// It does not change or remove any existing PIN.
+  @Deprecated(
+    'Separate adult PINs are no longer used. '
+    'Use the account-level parent PIN.',
+  )
   Future<String> initializeAdultPin({
     required String parentAccessToken,
     required String familyProfileId,
@@ -222,13 +225,10 @@ class FamilyPinService {
       return 'invalid_profile';
     }
 
-    if (!_isValidParentToken(parentAccessToken)) {
+    if (!_isValidToken(parentAccessToken)) {
       return 'invalid_parent_session';
     }
 
-    // The server is authoritative.
-    // Local token validation alone is
-    // never considered authorization.
     final response = await _client.rpc(
       'initialize_family_adult_pin',
       params: {
@@ -241,7 +241,7 @@ class FamilyPinService {
     if (response is! String) {
       throw const FormatException(
         'Unerwartete Antwort bei der '
-        'Erwachsenenprofil-PIN-Einrichtung.',
+        'bisherigen Erwachsenen-PIN-Einrichtung.',
       );
     }
 
@@ -257,20 +257,24 @@ class FamilyPinService {
     if (!allowedStatuses.contains(response)) {
       throw FormatException(
         'Unbekannter Status bei der '
-        'Erwachsenenprofil-PIN-Einrichtung: '
-        '$response',
+        'Erwachsenen-PIN-Einrichtung: $response',
       );
     }
 
     return response;
   }
 
-  /// Verifies a parent or adult PIN
-  /// using the Supabase server.
+  /// Verifies a PIN using Supabase.
   ///
-  /// PINs and session tokens must never
-  /// be written to logs or unprotected
-  /// local preferences.
+  /// Current adult profile activation must use:
+  ///
+  /// scope: FamilyPinScope.parent
+  ///
+  /// without a familyProfileId.
+  ///
+  /// Existing PIN lengths are accepted locally
+  /// for backward compatibility. The server
+  /// decides whether the PIN is correct.
   Future<FamilyPinVerification> verifyPin({
     required FamilyPinScope scope,
     required String pin,
@@ -281,7 +285,7 @@ class FamilyPinService {
       familyProfileId: familyProfileId,
     );
 
-    if (!RegExp(r'^[0-9]{4,12}$').hasMatch(pin)) {
+    if (!_isValidExistingPin(pin)) {
       return const FamilyPinVerification(
         status: 'invalid_pin',
       );
@@ -308,26 +312,57 @@ class FamilyPinService {
       );
     }
 
-    final result = Map<String, dynamic>.from(
-      response.first as Map,
-    );
+    final first = response.first;
+
+    if (first is! Map) {
+      throw const FormatException(
+        'Ungültiges Format der PIN-Verifizierung.',
+      );
+    }
+
+    final result = Map<String, dynamic>.from(first);
+
+    final status =
+        result['verification_status']?.toString() ??
+            'unknown';
+
+    final token =
+        result['access_token']?.toString();
 
     final rawExpiry = result['valid_until'];
 
+    final expiry = rawExpiry == null
+        ? null
+        : DateTime.tryParse(rawExpiry.toString());
+
+    // A failed verification must not expose
+    // a token to the calling screen.
+    if (status != 'success') {
+      return FamilyPinVerification(
+        status: status,
+      );
+    }
+
+    if (token == null ||
+        !_isValidToken(token) ||
+        expiry == null ||
+        !expiry.isAfter(DateTime.now())) {
+      return const FamilyPinVerification(
+        status: 'invalid_session',
+      );
+    }
+
     return FamilyPinVerification(
-      status:
-          result['verification_status']?.toString() ??
-              'unknown',
-      accessToken:
-          result['access_token']?.toString(),
-      validUntil: rawExpiry == null
-          ? null
-          : DateTime.tryParse(rawExpiry.toString()),
+      status: 'success',
+      accessToken: token,
+      validUntil: expiry,
     );
   }
 
-  /// Checks whether an existing PIN session
-  /// remains valid on the Supabase server.
+  /// Checks a PIN session on the Supabase server.
+  ///
+  /// A locally valid token format does not
+  /// grant access by itself.
   Future<bool> checkSession({
     required FamilyPinScope scope,
     required String accessToken,
@@ -339,7 +374,7 @@ class FamilyPinService {
     );
 
     if (_client.auth.currentUser == null ||
-        !_isValidParentToken(accessToken)) {
+        !_isValidToken(accessToken)) {
       return false;
     }
 
