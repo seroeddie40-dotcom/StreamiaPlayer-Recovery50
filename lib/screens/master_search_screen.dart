@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
-import '../core/platform/device_layout.dart';
 import '../core/localization/app_localizations.dart';
 import '../providers/content_provider.dart';
+import '../providers/family_session_provider.dart';
 import '../models/channel.dart';
 import '../models/vod_item.dart';
 import '../models/series.dart';
@@ -94,19 +94,35 @@ class _MasterSearchScreenState
   @override
   Widget build(BuildContext context) {
     final content = context.watch<ContentProvider>();
+    final family = context.watch<FamilySessionProvider>();
     final l10n = AppLocalizations.of(context);
 
-    final channels = content.channels
-        .where((c) => _matches([c.name, c.category]))
-        .toList();
+    final channels = family.isReady && family.isChild
+        ? family.filterItems<Channel>(
+            items: content.channels,
+            sourceKey: content.sourceKey,
+            contentType: 'live',
+            categoryKeyOf: (item) => item.categoryKey,
+          ).where((c) => _matches([c.name, c.category])).toList()
+        : family.isReady ? content.channels.where((c) => _matches([c.name, c.category])).toList() : <Channel>[];
 
-    final movies = content.vodItems
-        .where((v) => _matches([v.title, v.plot]))
-        .toList();
+    final movies = family.isReady && family.isChild
+        ? family.filterItems<VodItem>(
+            items: content.vodItems,
+            sourceKey: content.sourceKey,
+            contentType: 'vod',
+            categoryKeyOf: (item) => item.categoryKey,
+          ).where((v) => _matches([v.title, v.plot])).toList()
+        : family.isReady ? content.vodItems.where((v) => _matches([v.title, v.plot])).toList() : <VodItem>[];
 
-    final series = content.series
-        .where((s) => _matches([s.title, s.plot]))
-        .toList();
+    final series = family.isReady && family.isChild
+        ? family.filterItems<Series>(
+            items: content.series,
+            sourceKey: content.sourceKey,
+            contentType: 'series',
+            categoryKeyOf: (item) => item.categoryKey,
+          ).where((s) => _matches([s.title, s.plot])).toList()
+        : family.isReady ? content.series.where((s) => _matches([s.title, s.plot])).toList() : <Series>[];
 
     final hasQuery = _query.trim().isNotEmpty;
     final total =
@@ -116,12 +132,7 @@ class _MasterSearchScreenState
       appBar: AppBar(
         title: Text(l10n.t('search_all')),
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: DeviceLayout.isTelevision ? 1100 : double.infinity,
-          ),
-          child: FocusTraversalGroup(
+      body: FocusTraversalGroup(
         child: Column(
           children: [
             Padding(
@@ -153,7 +164,6 @@ class _MasterSearchScreenState
                         )
                       : ListView(
                           padding:
-
                               const EdgeInsets.only(
                             bottom: 24,
                           ),
@@ -181,8 +191,6 @@ class _MasterSearchScreenState
             ),
           ],
         ),
-          ),
-        ),
       ),
     );
   }
@@ -209,7 +217,7 @@ class _MasterSearchScreenState
       focusColor: Theme.of(context)
           .colorScheme
           .primary
-          .withValues(alpha: 0.28),
+          .withOpacity(0.14),
       leading: const Icon(Icons.live_tv),
       title: Text(channel.name),
       subtitle: Text(
@@ -234,7 +242,7 @@ class _MasterSearchScreenState
       focusColor: Theme.of(context)
           .colorScheme
           .primary
-          .withValues(alpha: 0.28),
+          .withOpacity(0.14),
       leading: const Icon(Icons.movie),
       title: Text(movie.title),
       subtitle: Text(l10n.t('nav_vod')),
@@ -258,7 +266,7 @@ class _MasterSearchScreenState
       focusColor: Theme.of(context)
           .colorScheme
           .primary
-          .withValues(alpha: 0.28),
+          .withOpacity(0.14),
       leading: const Icon(Icons.video_library),
       title: Text(series.title),
       subtitle: Text(l10n.t('nav_series')),
