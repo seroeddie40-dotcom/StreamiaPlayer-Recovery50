@@ -263,7 +263,6 @@ class ContentProvider extends ChangeNotifier {
         ? sourceKey : _sourceKey;
     for (final channel in channels) {
       channel.sourceKey = effectiveSourceKey;
-      channel.categoryKey ??= channel.category;
     }
     _channels = List<Channel>.unmodifiable(channels);
     _vodItems = List.unmodifiable(vod);
