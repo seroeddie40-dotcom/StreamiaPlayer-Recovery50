@@ -168,32 +168,37 @@ class FamilyContentAccessSnapshot {
         contentType.trim().toLowerCase();
     final normalizedCategoryKey = categoryKey.trim();
 
-    // A snapshot must be loaded before granting any access.
-    if (!rulesLoaded) return false;
-
-    // Adult profiles must never lose channels because imported
-    // Xtream entries lack category/source metadata.
-    if (!isChild) return true;
-
-    // A child needs valid identifiers to apply folder restrictions.
+    // Invalid identifiers never grant access.
     if (normalizedSourceKey.isEmpty ||
         normalizedCategoryKey.isEmpty ||
-        !_validContentTypes.contains(normalizedContentType)) {
+        !_validContentTypes.contains(
+          normalizedContentType,
+        )) {
       return false;
     }
 
-    // Only an explicit false rule blocks a folder.
+    // No permissions loaded: fail closed.
+    if (!rulesLoaded) {
+      return false;
+    }
+
+    // Adult profiles are not restricted
+    // by child category permissions.
+    if (!isChild) {
+      return true;
+    }
+
+    // Explicit blocks override the default-visible policy.
     for (final rule in rules) {
       if (rule['source_key'] == normalizedSourceKey &&
           rule['content_type'] ==
               normalizedContentType &&
           rule['category_key'] ==
               normalizedCategoryKey) {
-        return rule['is_visible'] == true;
+        return rule['is_visible'] != false;
       }
     }
 
-    // Unlisted categories are visible by default.
     return true;
   }
 
@@ -214,14 +219,14 @@ class FamilyContentAccessSnapshot {
     for (final item in items) {
       final categoryKey = categoryKeyOf(item);
 
-      if (categoryKey == null && isChild) {
+      if (categoryKey == null) {
         continue;
       }
 
       if (canAccessCategory(
         sourceKey: sourceKey,
         contentType: contentType,
-        categoryKey: categoryKey ?? '',
+        categoryKey: categoryKey,
       )) {
         result.add(item);
       }
