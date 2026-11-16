@@ -1,5 +1,7 @@
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/family_session_provider.dart';
 import 'package:flutter/services.dart';
 
 import '../models/family_profile.dart';
@@ -118,6 +120,7 @@ class _FamilyProfileManagementScreenState
   }
 
   Future<void> _unlockManagement() async {
+    if (context.read<FamilySessionProvider>().isChild) return;
     if (_unlocking || _busy || !mounted) return;
 
     setState(() {
@@ -1056,6 +1059,18 @@ class _FamilyProfileManagementScreenState
 
   @override
   Widget build(BuildContext context) {
+    final isChild = context.watch<FamilySessionProvider>().isChild;
+    if (isChild) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Familienprofile verwalten')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text('Die Familienverwaltung ist nur im Erwachsenenprofil verfügbar.'),
+          ),
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: const Text('Familienprofile verwalten'),
