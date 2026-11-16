@@ -1,13 +1,12 @@
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
-import '../core/platform/device_layout.dart';
 import '../core/theme/app_theme.dart';
 import '../models/channel.dart';
 import '../providers/content_provider.dart';
+import '../providers/family_session_provider.dart';
 import '../providers/locale_provider.dart';
 import '../widgets/favorite_toggle_button.dart';
 import '../widgets/voice_input_field.dart';
@@ -154,7 +153,6 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                                     _label(category),
                                     maxLines: 1,
                                     softWrap: false,
-
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
@@ -185,7 +183,15 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final channels = context.watch<ContentProvider>().channels;
+    final family = context.watch<FamilySessionProvider>();
+    final allChannels = context.watch<ContentProvider>().channels;
+    final channels = family.isReady
+        ? allChannels.where((channel) => family.canAccessCategory(
+            sourceKey: channel.sourceKey ?? '',
+            contentType: 'live',
+            categoryKey: channel.categoryKey ?? '',
+          )).toList(growable: false)
+        : <Channel>[];
     _updateCategories(channels);
     final category = _cachedCategories.contains(_selectedCategory)
         ? _selectedCategory : _all;
@@ -270,7 +276,6 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                       ),
                     ),
                   ),
-
                 )),
               ]),
             ),
@@ -310,7 +315,6 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                       itemCount: filtered.length,
                       itemBuilder: (context, index) => _ChannelTile(
                         channel: filtered[index],
-                        autofocus: DeviceLayout.isTelevision && index == 0,
                       ),
                     ),
                   );
@@ -322,42 +326,35 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
   }
 }
 
-class _ChannelTile extends StatefulWidget {
+class _ChannelTile extends StatelessWidget {
   final Channel channel;
-  final bool autofocus;
-  const _ChannelTile({required this.channel, this.autofocus = false});
-
-  @override
-  State<_ChannelTile> createState() => _ChannelTileState();
-}
-
-class _ChannelTileState extends State<_ChannelTile> {
-  bool _focused = false;
+  const _ChannelTile({required this.channel});
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final logo = widget.channel.logoUrl?.trim();
+    final logo = channel.logoUrl?.trim();
     return InkWell(
-      autofocus: widget.autofocus,
-      onFocusChange: (focused) {
-        if (mounted) setState(() => _focused = focused);
-      },
       borderRadius: BorderRadius.circular(12),
       focusColor: AppTheme.electricBlue.withValues(alpha: 0.22),
-      onTap: () => pushWithFocusRestore(
-        context,
-        MaterialPageRoute(builder: (_) => PlayerScreen(channel: widget.channel, isLive: true)),
-      ),
+      onTap: () {
+        final family = context.read<FamilySessionProvider>();
+        if (!family.isReady || !family.canAccessCategory(
+          sourceKey: channel.sourceKey ?? '',
+          contentType: 'live',
+          categoryKey: channel.categoryKey ?? '',
+        )) return;
+        pushWithFocusRestore(
+          context,
+          MaterialPageRoute(builder: (_) => PlayerScreen(channel: channel, isLive: true)),
+        );
+      },
       child: Container(
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
           color: isDark ? AppTheme.darkSurface : AppTheme.lightSurface,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: _focused ? AppTheme.electricBlue : AppTheme.electricBlue.withValues(alpha: 0.22),
-            width: _focused ? 3 : 1,
-          ),
+          border: Border.all(color: AppTheme.electricBlue.withValues(alpha: 0.22)),
         ),
         child: Stack(children: [
           Column(children: [
@@ -376,7 +373,7 @@ class _ChannelTileState extends State<_ChannelTile> {
             SizedBox(height: 39, child: Padding(
               padding: const EdgeInsets.fromLTRB(7, 1, 7, 5),
               child: Center(child: Text(
-                widget.channel.name,
+                channel.name,
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -385,9 +382,9 @@ class _ChannelTileState extends State<_ChannelTile> {
             )),
           ]),
           Positioned(top: 0, right: 0, child: FavoriteToggleButton(
-            contentId: widget.channel.id,
+            contentId: channel.id,
             contentType: 'live',
-            title: widget.channel.name,
+            title: channel.name,
           )),
         ]),
       ),
