@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -6,12 +7,10 @@ import '../services/family_profile_service.dart';
 import '../services/family_pin_service.dart';
 import '../services/family_profile_management_service.dart';
 import 'family_child_category_permissions_screen.dart';
+import 'family_parent_pin_setup_screen.dart';
 
-class FamilyProfileManagementScreen
-    extends StatefulWidget {
-  const FamilyProfileManagementScreen({
-    super.key,
-  });
+class FamilyProfileManagementScreen extends StatefulWidget {
+  const FamilyProfileManagementScreen({super.key});
 
   @override
   State<FamilyProfileManagementScreen> createState() =>
@@ -26,8 +25,7 @@ class _FamilyProfileManagementScreenState
   final FamilyPinService _pinService =
       FamilyPinService();
 
-  final FamilyProfileManagementService
-      _managementService =
+  final FamilyProfileManagementService _managementService =
       FamilyProfileManagementService();
 
   List<FamilyProfile> _profiles = [];
@@ -36,16 +34,21 @@ class _FamilyProfileManagementScreenState
   bool _accessGranted = false;
   bool _unlocking = false;
   bool _busy = false;
+
   String? _error;
   String? _parentToken;
   DateTime? _parentTokenExpiry;
+
   int _profileLimit = 0;
 
   @override
   void initState() {
     super.initState();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _unlockManagement();
+      if (mounted) {
+        _unlockManagement();
+      }
     });
   }
 
@@ -56,84 +59,6 @@ class _FamilyProfileManagementScreenState
     super.dispose();
   }
 
-  Future<void> _unlockManagement() async {
-    if (_unlocking || !mounted) return;
-    setState(() => _unlocking = true);
-    try {
-      final token = await _requireParentToken();
-      if (!mounted) return;
-      if (token == null) {
-        setState(() => _loading = false);
-        return;
-      }
-      setState(() => _accessGranted = true);
-      await _loadData();
-    } finally {
-      if (mounted) setState(() => _unlocking = false);
-    }
-  }
-
-  Future<void> _openChildPermissions(FamilyProfile profile) async {
-    if (_busy || !_accessGranted ||
-        profile.type != FamilyProfileType.child) return;
-    final token = await _requireParentToken();
-    if (token == null || !mounted) return;
-    final valid = await _pinService.checkSession(
-      scope: FamilyPinScope.parent,
-      accessToken: token,
-    );
-    if (!mounted) return;
-    if (!valid) {
-      _parentToken = null;
-      _parentTokenExpiry = null;
-      _showMessage('Eltern-PIN-Sitzung abgelaufen.');
-      return;
-    }
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => FamilyChildCategoryPermissionsScreen(
-          childProfile: profile,
-          parentAccessToken: token,
-        ),
-      ),
-    );
-    if (mounted) await _loadData();
-  }
-
-  Future<void> _loadData() async {
-    if (!mounted) return;
-
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-
-    try {
-      final profiles =
-          await _profileService.loadProfiles();
-
-      final limit =
-          await _managementService.loadProfileLimit();
-
-      if (!mounted) return;
-
-      setState(() {
-        _profiles = profiles;
-        _profileLimit = limit;
-        _loading = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-
-      setState(() {
-        _loading = false;
-        _error =
-            'Die Familienprofile konnten nicht '
-            'geladen werden.';
-      });
-    }
-  }
-
   void _showMessage(String message) {
     if (!mounted) return;
 
@@ -142,7 +67,105 @@ class _FamilyProfileManagementScreenState
     );
   }
 
+  Future<bool> _ensureParentPinConfigured() async {
+    final status = await _pinService.getParentPinStatus();
+
+    if (!mounted) return false;
+
+    switch (status) {
+      case FamilyParentPinStatus.configured:
+        return true;
+
+      case FamilyParentPinStatus.notConfigured:
+        final created = await Navigator.of(context).push<bool>(
+          MaterialPageRoute(
+            builder: (_) =>
+                const FamilyParentPinSetupScreen(),
+          ),
+        );
+
+        if (!mounted || created != true) {
+          return false;
+        }
+
+        final updatedStatus =
+            await _pinService.getParentPinStatus();
+
+        if (!mounted) return false;
+
+        if (updatedStatus ==
+            FamilyParentPinStatus.configured) {
+          _showMessage(
+            'Eltern-PIN eingerichtet. '
+            'Bitte jetzt zur Bestätigung eingeben.',
+          );
+          return true;
+        }
+
+        _showMessage(
+          'Die Einrichtung konnte nicht '
+          'bestätigt werden.',
+        );
+        return false;
+
+      case FamilyParentPinStatus.unauthorized:
+        _showMessage(
+          'Bitte zuerst mit deinem Konto anmelden.',
+        );
+        return false;
+
+      case FamilyParentPinStatus.unknown:
+        _showMessage(
+          'Der Eltern-PIN-Status konnte '
+          'nicht erkannt werden.',
+        );
+        return false;
+    }
+  }
+
+  Future<void> _unlockManagement() async {
+    if (_unlocking || _busy || !mounted) return;
+
+    setState(() {
+      _unlocking = true;
+      _error = null;
+    });
+
+    try {
+      final configured =
+          await _ensureParentPinConfigured();
+
+      if (!configured || !mounted) return;
+
+      final token = await _requireParentToken();
+
+      if (token == null || !mounted) return;
+
+      setState(() {
+        _accessGranted = true;
+      });
+
+      await _loadData();
+    } catch (_) {
+      if (mounted) {
+        _showMessage(
+          'Die Familienverwaltung konnte '
+          'nicht entsperrt werden.',
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _unlocking = false;
+          _loading = false;
+        });
+      }
+    }
+  }
+
   Future<String?> _requireParentToken() async {
+    if (!mounted) return null;
+
     final existingToken = _parentToken;
     final expiry = _parentTokenExpiry;
 
@@ -157,7 +180,7 @@ class _FamilyProfileManagementScreenState
 
         if (valid) return existingToken;
       } catch (_) {
-        // Reverification required.
+        // A fresh PIN verification is required.
       }
     }
 
@@ -167,6 +190,7 @@ class _FamilyProfileManagementScreenState
     if (!mounted) return null;
 
     final controller = TextEditingController();
+
     bool checking = false;
     bool showPin = false;
     String? errorMessage;
@@ -222,18 +246,26 @@ class _FamilyProfileManagementScreenState
                     switch (verification.status) {
                       case 'not_configured':
                         errorMessage =
-                            'Bitte zuerst eine Eltern-PIN '
-                            'einrichten.';
+                            'Die Eltern-PIN ist noch '
+                            'nicht eingerichtet.';
                         break;
+
                       case 'locked':
                         errorMessage =
                             'Zu viele Fehlversuche. '
                             'Bitte später erneut versuchen.';
                         break;
+
                       case 'invalid_pin':
                         errorMessage =
                             'Die Eltern-PIN ist falsch.';
                         break;
+
+                      case 'unauthorized':
+                        errorMessage =
+                            'Die Anmeldung ist abgelaufen.';
+                        break;
+
                       default:
                         errorMessage =
                             'PIN-Prüfung fehlgeschlagen.';
@@ -294,7 +326,8 @@ class _FamilyProfileManagementScreenState
                               ? null
                               : (value) {
                                   updateDialog(() {
-                                    showPin = value ?? false;
+                                    showPin =
+                                        value ?? false;
                                   });
                                 },
                         ),
@@ -315,9 +348,10 @@ class _FamilyProfileManagementScreenState
                   TextButton(
                     onPressed: checking
                         ? null
-                        : () => Navigator.of(
-                          dialogContext,
-                        ).pop(),
+                        : () {
+                            Navigator.of(dialogContext)
+                                .pop();
+                          },
                     child: const Text('Abbrechen'),
                   ),
                   FilledButton(
@@ -326,7 +360,8 @@ class _FamilyProfileManagementScreenState
                         ? const SizedBox(
                             height: 18,
                             width: 18,
-                            child: CircularProgressIndicator(
+                            child:
+                                CircularProgressIndicator(
                               strokeWidth: 2,
                             ),
                           )
@@ -345,71 +380,159 @@ class _FamilyProfileManagementScreenState
     }
   }
 
+  Future<void> _loadData() async {
+    if (!mounted || !_accessGranted) return;
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final token = await _requireParentToken();
+
+      if (token == null || !mounted) {
+        if (mounted) {
+          setState(() {
+            _accessGranted = false;
+            _loading = false;
+          });
+        }
+        return;
+      }
+
+      final profiles =
+          await _profileService.loadProfiles();
+
+      final limit =
+          await _managementService.loadProfileLimit();
+
+      if (!mounted) return;
+
+      setState(() {
+        _profiles = profiles;
+        _profileLimit = limit;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _loading = false;
+        _error =
+            'Die Familienprofile konnten '
+            'nicht geladen werden.';
+      });
+    }
+  }
+
   Future<void> _createProfile() async {
-    if (_busy || _profiles.length >= _profileLimit) {
+    if (_busy ||
+        !_accessGranted ||
+        _profileLimit <= 0 ||
+        _profiles.length >= _profileLimit) {
       return;
     }
 
     final token = await _requireParentToken();
+
     if (token == null || !mounted) return;
 
+    final firstProfile = _profiles.isEmpty;
+
     final nameController = TextEditingController();
-    String type = 'child';
+
+    String type = firstProfile ? 'adult' : 'child';
 
     try {
-      final input = await showDialog<Map<String, String>>(
+      final input =
+          await showDialog<Map<String, String>>(
         context: context,
         builder: (dialogContext) {
           return StatefulBuilder(
             builder: (dialogContext, updateDialog) {
               return AlertDialog(
-                title: const Text('Profil hinzufügen'),
+                title: Text(
+                  firstProfile
+                      ? 'Erstes Erwachsenenprofil'
+                      : 'Profil hinzufügen',
+                ),
                 content: SizedBox(
                   width: 360,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TextField(
-                        controller: nameController,
-                        autofocus: true,
-                        maxLength: 60,
-                        decoration: const InputDecoration(
-                          labelText: 'Profilname',
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: type,
-                        decoration: const InputDecoration(
-                          labelText: 'Profiltyp',
-                          border: OutlineInputBorder(),
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'adult',
-                            child: Text('Erwachsenenprofil'),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (firstProfile) ...[
+                          const Text(
+                            'Das erste Familienprofil '
+                            'muss ein Erwachsenenprofil '
+                            'sein. Danach können weitere '
+                            'Erwachsenen- und Kinderprofile '
+                            'hinzugefügt werden.',
                           ),
-                          DropdownMenuItem(
-                            value: 'child',
-                            child: Text('Kinderprofil'),
-                          ),
+                          const SizedBox(height: 16),
                         ],
-                        onChanged: (value) {
-                          if (value != null) {
-                            updateDialog(() {
-                              type = value;
-                            });
-                          }
-                        },
-                      ),
-                    ],
+                        TextField(
+                          controller: nameController,
+                          autofocus: true,
+                          maxLength: 60,
+                          decoration:
+                              const InputDecoration(
+                            labelText: 'Profilname',
+                            border: OutlineInputBorder(),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        if (firstProfile)
+                          const InputDecorator(
+                            decoration: InputDecoration(
+                              labelText: 'Profiltyp',
+                              border: OutlineInputBorder(),
+                            ),
+                            child: Text(
+                              'Erwachsenenprofil',
+                            ),
+                          )
+                        else
+                          DropdownButtonFormField<String>(
+                            initialValue: type,
+                            decoration:
+                                const InputDecoration(
+                              labelText: 'Profiltyp',
+                              border: OutlineInputBorder(),
+                            ),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'adult',
+                                child: Text(
+                                  'Erwachsenenprofil',
+                                ),
+                              ),
+                              DropdownMenuItem(
+                                value: 'child',
+                                child: Text(
+                                  'Kinderprofil',
+                                ),
+                              ),
+                            ],
+                            onChanged: (value) {
+                              if (value != null) {
+                                updateDialog(() {
+                                  type = value;
+                                });
+                              }
+                            },
+                          ),
+                      ],
+                    ),
                   ),
                 ),
                 actions: [
                   TextButton(
-                    onPressed: () =>
-                        Navigator.of(dialogContext).pop(),
+                    onPressed: () {
+                      Navigator.of(dialogContext).pop();
+                    },
                     child: const Text('Abbrechen'),
                   ),
                   FilledButton(
@@ -421,7 +544,8 @@ class _FamilyProfileManagementScreenState
 
                       Navigator.of(dialogContext).pop({
                         'name': name,
-                        'type': type,
+                        'type':
+                            firstProfile ? 'adult' : type,
                       });
                     },
                     child: const Text('Erstellen'),
@@ -446,13 +570,16 @@ class _FamilyProfileManagementScreenState
       if (!mounted) return;
 
       _showMessage('Familienprofil erstellt.');
+
       await _loadData();
     } catch (_) {
       _showMessage(
         'Das Profil konnte nicht erstellt werden.',
       );
     } finally {
-      nameController.dispose();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        nameController.dispose();
+      });
 
       if (mounted) {
         setState(() => _busy = false);
@@ -463,9 +590,10 @@ class _FamilyProfileManagementScreenState
   Future<void> _renameProfile(
     FamilyProfile profile,
   ) async {
-    if (_busy) return;
+    if (_busy || !_accessGranted) return;
 
     final token = await _requireParentToken();
+
     if (token == null || !mounted) return;
 
     final controller = TextEditingController(
@@ -489,8 +617,9 @@ class _FamilyProfileManagementScreenState
             ),
             actions: [
               TextButton(
-                onPressed: () =>
-                    Navigator.of(dialogContext).pop(),
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                },
                 child: const Text('Abbrechen'),
               ),
               FilledButton(
@@ -533,7 +662,9 @@ class _FamilyProfileManagementScreenState
         'Das Profil konnte nicht geändert werden.',
       );
     } finally {
-      controller.dispose();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        controller.dispose();
+      });
 
       if (mounted) {
         setState(() => _busy = false);
@@ -544,9 +675,15 @@ class _FamilyProfileManagementScreenState
   Future<void> _setDefault(
     FamilyProfile profile,
   ) async {
-    if (_busy || profile.isDefault) return;
+    if (_busy ||
+        !_accessGranted ||
+        profile.isDefault ||
+        profile.type != FamilyProfileType.adult) {
+      return;
+    }
 
     final token = await _requireParentToken();
+
     if (token == null || !mounted) return;
 
     setState(() => _busy = true);
@@ -570,7 +707,8 @@ class _FamilyProfileManagementScreenState
       }
     } catch (_) {
       _showMessage(
-        'Standardprofil konnte nicht geändert werden.',
+        'Standardprofil konnte nicht '
+        'geändert werden.',
       );
     } finally {
       if (mounted) {
@@ -582,9 +720,14 @@ class _FamilyProfileManagementScreenState
   Future<void> _deleteProfile(
     FamilyProfile profile,
   ) async {
-    if (_busy) return;
+    if (_busy ||
+        !_accessGranted ||
+        profile.isDefault) {
+      return;
+    }
 
     final token = await _requireParentToken();
+
     if (token == null || !mounted) return;
 
     final confirmed = await showDialog<bool>(
@@ -600,13 +743,15 @@ class _FamilyProfileManagementScreenState
           ),
           actions: [
             TextButton(
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(false),
+              onPressed: () {
+                Navigator.of(dialogContext).pop(false);
+              },
               child: const Text('Abbrechen'),
             ),
             FilledButton(
-              onPressed: () =>
-                  Navigator.of(dialogContext).pop(true),
+              onPressed: () {
+                Navigator.of(dialogContext).pop(true);
+              },
               child: const Text('Löschen'),
             ),
           ],
@@ -646,9 +791,59 @@ class _FamilyProfileManagementScreenState
     }
   }
 
-  Widget _buildProfileTile(
+  Future<void> _openChildPermissions(
     FamilyProfile profile,
-  ) {
+  ) async {
+    if (_busy ||
+        !_accessGranted ||
+        profile.type != FamilyProfileType.child) {
+      return;
+    }
+
+    final token = await _requireParentToken();
+
+    if (token == null || !mounted) return;
+
+    try {
+      final valid = await _pinService.checkSession(
+        scope: FamilyPinScope.parent,
+        accessToken: token,
+      );
+
+      if (!mounted) return;
+
+      if (!valid) {
+        _parentToken = null;
+        _parentTokenExpiry = null;
+
+        _showMessage(
+          'Eltern-PIN-Sitzung abgelaufen.',
+        );
+        return;
+      }
+
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) =>
+              FamilyChildCategoryPermissionsScreen(
+            childProfile: profile,
+            parentAccessToken: token,
+          ),
+        ),
+      );
+
+      if (mounted) {
+        await _loadData();
+      }
+    } catch (_) {
+      _showMessage(
+        'Die Ordnerfreigaben konnten '
+        'nicht geöffnet werden.',
+      );
+    }
+  }
+
+  Widget _buildProfileTile(FamilyProfile profile) {
     final isAdult =
         profile.type == FamilyProfileType.adult;
 
@@ -689,7 +884,9 @@ class _FamilyProfileManagementScreenState
             if (!isAdult)
               const PopupMenuItem(
                 value: 'permissions',
-                child: Text('Ordnerfreigaben verwalten'),
+                child: Text(
+                  'Ordnerfreigaben verwalten',
+                ),
               ),
             const PopupMenuItem(
               value: 'rename',
@@ -698,7 +895,9 @@ class _FamilyProfileManagementScreenState
             if (isAdult && !profile.isDefault)
               const PopupMenuItem(
                 value: 'default',
-                child: Text('Als Standard festlegen'),
+                child: Text(
+                  'Als Standard festlegen',
+                ),
               ),
             if (!profile.isDefault)
               const PopupMenuItem(
@@ -711,104 +910,189 @@ class _FamilyProfileManagementScreenState
     );
   }
 
+  Widget _buildLockedContent() {
+    if (_unlocking) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.admin_panel_settings_outlined,
+              size: 56,
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'Familienverwaltung geschützt',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Richte deine Eltern-PIN ein oder '
+              'entsperre die Verwaltung mit '
+              'deiner bestehenden PIN.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            FilledButton.icon(
+              onPressed: _unlockManagement,
+              icon: const Icon(Icons.lock_open),
+              label: const Text(
+                'Familienverwaltung entsperren',
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildManagementContent() {
+    if (_loading) {
+      return const Center(
+        child: CircularProgressIndicator(),
+      );
+    }
+
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _error!,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              FilledButton(
+                onPressed: _loadData,
+                child: const Text('Erneut versuchen'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: [
+        if (_busy)
+          const LinearProgressIndicator(),
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            crossAxisAlignment:
+                WrapCrossAlignment.center,
+            children: [
+              Text(
+                'Profile: ${_profiles.length} '
+                '/ $_profileLimit',
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium,
+              ),
+              FilledButton.icon(
+                onPressed: _busy ||
+                        _profileLimit <= 0 ||
+                        _profiles.length >= _profileLimit
+                    ? null
+                    : _createProfile,
+                icon: const Icon(Icons.add),
+                label: Text(
+                  _profiles.isEmpty
+                      ? 'Erstes Profil erstellen'
+                      : 'Profil hinzufügen',
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _profiles.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding:
+                        const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize:
+                          MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.family_restroom,
+                          size: 56,
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Noch keine Familienprofile '
+                          'vorhanden.',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Erstelle zuerst ein '
+                          'Erwachsenenprofil.',
+                          textAlign: TextAlign.center,
+                        ),
+                        if (_profileLimit <= 0) ...[
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Der Server hat derzeit '
+                            'keinen verfügbaren '
+                            'Profilplatz gemeldet.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _profiles.length,
+                  itemBuilder: (context, index) {
+                    return _buildProfileTile(
+                      _profiles[index],
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Familienprofile verwalten'),
+        title: const Text(
+          'Familienprofile verwalten',
+        ),
         actions: [
           IconButton(
             tooltip: 'Aktualisieren',
-            onPressed: _busy ? null : _loadData,
+            onPressed: _busy || _unlocking
+                ? null
+                : _accessGranted
+                    ? _loadData
+                    : _unlockManagement,
             icon: const Icon(Icons.refresh),
           ),
         ],
       ),
       body: SafeArea(
-        child: !_accessGranted
-            ? Center(
-                child: _unlocking
-                    ? const CircularProgressIndicator()
-                    : FilledButton.icon(
-                        onPressed: _unlockManagement,
-                        icon: const Icon(Icons.lock_open),
-                        label: const Text('Mit Eltern-PIN entsperren'),
-                      ),
-              )
-            : _loading
-            ? const Center(
-                child: CircularProgressIndicator(),
-              )
-            : _error != null
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(_error!),
-                        const SizedBox(height: 16),
-                        FilledButton(
-                          onPressed: _loadData,
-                          child: const Text(
-                            'Erneut versuchen',
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : Column(
-                    children: [
-                      if (_busy)
-                        const LinearProgressIndicator(),
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                'Profile: '
-                                '${_profiles.length}'
-                                ' / $_profileLimit',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium,
-                              ),
-                            ),
-                            FilledButton.icon(
-                              onPressed: _busy ||
-                                      _profileLimit == 0 ||
-                                      _profiles.length >=
-                                          _profileLimit
-                                  ? null
-                                  : _createProfile,
-                              icon: const Icon(Icons.add),
-                              label: const Text(
-                                'Profil hinzufügen',
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Expanded(
-                        child: _profiles.isEmpty
-                            ? const Center(
-                                child: Text(
-                                  'Noch keine '
-                                  'Familienprofile vorhanden.',
-                                ),
-                              )
-                            : ListView.builder(
-                                padding:
-                                    const EdgeInsets.all(12),
-                                itemCount: _profiles.length,
-                                itemBuilder: (context, index) {
-                                  return _buildProfileTile(
-                                    _profiles[index],
-                                  );
-                                },
-                              ),
-                      ),
-                    ],
-                  ),
+        child: _accessGranted
+            ? _buildManagementContent()
+            : _buildLockedContent(),
       ),
     );
   }
