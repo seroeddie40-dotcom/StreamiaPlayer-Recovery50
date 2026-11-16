@@ -1,5 +1,7 @@
 class Series {
   final String id;
+  /// Original playlist group or Xtream category ID.
+  final String? categoryKey;
   final String title;
   final String? plot;
   final String? posterUrl;
@@ -20,6 +22,7 @@ class Series {
 
   Series({
     required this.id,
+    this.categoryKey,
     required this.title,
     this.plot,
     this.posterUrl,
@@ -56,7 +59,7 @@ class Series {
     String? metadataLicense,
     String? metadataSourceUrl,
   }) => Series(
-    id: id,
+    id: id, categoryKey: categoryKey,
     title: title,
     plot: plot ?? this.plot,
     posterUrl: posterUrl ?? this.posterUrl,
