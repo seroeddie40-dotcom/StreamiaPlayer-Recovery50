@@ -422,9 +422,19 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     if (replaceTrial == null || !mounted) return;
 
     setState(() { _isLoading = true; _importError = null; _loadingMessage = null; });
+    // Der Schlüssel muss vor dem Import feststehen, damit jeder Sender
+    // die korrekte Playlistkennung erhält.
+    final sourceIdentity =
+        'xtream:v2:${server.trim().replaceFirst(RegExp(r'/+$'), '').toLowerCase()}|${user.trim()}';
+    final sourceKey = 'src:v1:${sha256.convert(utf8.encode(sourceIdentity)).toString()}';
     XtreamService? service;
     try {
-      service = XtreamService(baseUrl: server, username: user, password: pass);
+      service = XtreamService(
+        baseUrl: server,
+        username: user,
+        password: pass,
+        sourceKey: sourceKey,
+      );
       // Fetch the complete library before replacing the currently displayed data.
       setState(() => _loadingMessage = _tr('Live-TV wird geladen…', 'Canlı TV yükleniyor…', 'Loading live TV…'));
       final live = await service.getLiveStreams().timeout(const Duration(seconds: 45));
@@ -435,11 +445,6 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       setState(() => _loadingMessage = _tr('Serien werden geladen…', 'Diziler yükleniyor…', 'Loading series…'));
       final series = await service.getSeries().timeout(const Duration(seconds: 45));
       if (!mounted) return;
-      // Stable source identity excludes the password: changing credentials must not
-      // silently create a different favorites namespace, and secrets must never
-      // be included in a value later hashed or exported.
-      final sourceIdentity = 'xtream:v2:${server.trim().replaceFirst(RegExp(r'/+$'), '').toLowerCase()}|${user.trim()}';
-      final sourceKey = 'src:v1:${sha256.convert(utf8.encode(sourceIdentity)).toString()}';
       await _persistImportedPlaylist(
         source: PlaylistSourceConfig(
           sourceKey: sourceKey, type: 'xtream', serverUrl: server.trim(),
