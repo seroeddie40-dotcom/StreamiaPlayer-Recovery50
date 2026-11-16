@@ -57,8 +57,7 @@ class FamilyProfileService {
   /// Lädt die gespeicherten Sichtbarkeitsregeln eines Profils.
   /// Das Ergebnis ist keine Wiedergabeberechtigung.
   ///
-  /// Fehlende Regeln müssen bei Kinderprofilen als
-  /// nicht freigegeben behandelt werden.
+  /// Fehlende Regeln bedeuten standardmäßig sichtbar.
   Future<List<Map<String, dynamic>>> loadCategoryRules(
     String familyProfileId,
   ) async {
@@ -104,11 +103,11 @@ class FamilyProfileService {
       if (rule['source_key'] == sourceKey &&
           rule['content_type'] == contentType &&
           rule['category_key'] == categoryKey) {
-        return rule['is_visible'] == true;
+        return rule['is_visible'] != false;
       }
     }
 
-    // Ohne ausdrückliche Sperre ist der Ordner sichtbar.
+    // Ohne explizite Sperre ist der Ordner sichtbar.
     return true;
   }
 }
