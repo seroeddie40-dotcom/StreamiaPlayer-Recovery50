@@ -1,95 +1,151 @@
 
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/family_profile.dart';
 import '../services/family_content_access_service.dart';
 import '../services/family_pin_service.dart';
 import '../services/family_profile_service.dart';
 
-/// Manages the active family profile during this app session.
+/// Manages the active family profile for the
+/// currently authenticated Supabase account.
 ///
 /// Adult profiles require successful PIN verification.
 /// Child profiles require successfully loaded permissions.
 ///
-/// No profile is automatically activated after app restart.
+/// No profile is automatically activated after restart.
 ///
 /// IMPORTANT:
 /// This is client-side access control.
-/// Server-side authorization remains necessary.
+/// Playback and server-side authorization must
+/// also enforce the relevant restrictions.
 class FamilySessionProvider extends ChangeNotifier {
   FamilySessionProvider({
     FamilyContentAccessService? accessService,
     FamilyPinService? pinService,
     FamilyProfileService? profileService,
+    SupabaseClient? client,
   })  : _accessService =
             accessService ?? FamilyContentAccessService(),
         _pinService = pinService ?? FamilyPinService(),
         _profileService =
-            profileService ?? FamilyProfileService();
+            profileService ?? FamilyProfileService(),
+        _client = client ?? Supabase.instance.client {
+    _authSubscription =
+        _client.auth.onAuthStateChange.listen((event) {
+      final currentAccountId =
+          _client.auth.currentUser?.id;
+
+      // Never retain a session after sign-out
+      // or after switching to another account.
+      if (event.event == AuthChangeEvent.signedOut ||
+          (_sessionAccountId != null &&
+              currentAccountId != _sessionAccountId)) {
+        clearSession();
+      }
+    });
+  }
 
   final FamilyContentAccessService _accessService;
   final FamilyPinService _pinService;
   final FamilyProfileService _profileService;
+  final SupabaseClient _client;
+
+  StreamSubscription<AuthState>? _authSubscription;
 
   FamilyProfile? _activeProfile;
   FamilyContentAccessSnapshot? _snapshot;
 
+  String? _sessionAccountId;
+
   bool _isLoading = false;
+  bool _disposed = false;
   int _generation = 0;
 
-  FamilyProfile? get activeProfile => _activeProfile;
+  FamilyProfile? get activeProfile {
+    if (!_belongsToCurrentAccount) return null;
+    return _activeProfile;
+  }
 
-  FamilyContentAccessSnapshot? get snapshot => _snapshot;
+  FamilyContentAccessSnapshot? get snapshot {
+    if (!_belongsToCurrentAccount) return null;
+    return _snapshot;
+  }
 
-  bool get hasActiveProfile => _activeProfile != null;
+  bool get hasActiveProfile => activeProfile != null;
 
   bool get isLoading => _isLoading;
 
   bool get isChild =>
-      _activeProfile?.type == FamilyProfileType.child;
+      activeProfile?.type == FamilyProfileType.child;
 
   bool get isAdult =>
-      _activeProfile?.type == FamilyProfileType.adult;
+      activeProfile?.type == FamilyProfileType.adult;
+
+  bool get _belongsToCurrentAccount {
+    final currentAccountId =
+        _client.auth.currentUser?.id;
+
+    return currentAccountId != null &&
+        _sessionAccountId != null &&
+        currentAccountId == _sessionAccountId &&
+        _activeProfile != null &&
+        _activeProfile!.accountUserId ==
+            currentAccountId;
+  }
 
   bool get isReady =>
       !_isLoading &&
-      _activeProfile != null &&
+      _belongsToCurrentAccount &&
       _snapshot != null &&
       _snapshot!.profileId == _activeProfile!.id &&
       _snapshot!.isReady;
 
-  /// Activates a profile.
+  void _notify() {
+    if (!_disposed) {
+      notifyListeners();
+    }
+  }
+
+  /// Activates a profile for the currently
+  /// authenticated Supabase account.
   ///
   /// Adult profiles require their PIN.
-  /// Child profiles do not require an adult PIN,
-  /// but their category permissions must load.
-  ///
-  /// Returns false if activation is not permitted.
+  /// Child profiles require valid permissions.
   Future<bool> activateProfile(
     FamilyProfile profile, {
     String? adultPin,
   }) async {
     final generation = ++_generation;
 
-    // Invalidate the previous session immediately.
     _activeProfile = null;
     _snapshot = null;
+    _sessionAccountId = null;
     _isLoading = true;
-    notifyListeners();
+    _notify();
 
     try {
-      // Ensure the selected profile still belongs
-      // to the currently authenticated account.
-      final profiles = await _profileService.loadProfiles();
+      final accountId = _client.auth.currentUser?.id;
 
-      if (generation != _generation) {
+      if (accountId == null) {
+        _finishFailedActivation(generation);
+        return false;
+      }
+
+      final profiles =
+          await _profileService.loadProfiles();
+
+      if (generation != _generation ||
+          _client.auth.currentUser?.id != accountId) {
+        _finishFailedActivation(generation);
         return false;
       }
 
       FamilyProfile? verifiedProfile;
 
       for (final candidate in profiles) {
-        if (candidate.id == profile.id) {
+        if (candidate.id == profile.id &&
+            candidate.accountUserId == accountId) {
           verifiedProfile = candidate;
           break;
         }
@@ -100,22 +156,25 @@ class FamilySessionProvider extends ChangeNotifier {
         return false;
       }
 
-      // Use the fresh server-loaded profile type,
-      // not a potentially outdated UI object.
-      if (verifiedProfile.type == FamilyProfileType.adult) {
+      if (verifiedProfile.type ==
+          FamilyProfileType.adult) {
         if (adultPin == null ||
-            !RegExp(r'^[0-9]{4,12}$').hasMatch(adultPin)) {
+            !RegExp(r'^[0-9]{4,12}$')
+                .hasMatch(adultPin)) {
           _finishFailedActivation(generation);
           return false;
         }
 
-        final verification = await _pinService.verifyPin(
+        final verification =
+            await _pinService.verifyPin(
           scope: FamilyPinScope.adult,
           pin: adultPin,
           familyProfileId: verifiedProfile.id,
         );
 
-        if (generation != _generation) {
+        if (generation != _generation ||
+            _client.auth.currentUser?.id != accountId) {
+          _finishFailedActivation(generation);
           return false;
         }
 
@@ -129,11 +188,14 @@ class FamilySessionProvider extends ChangeNotifier {
         return false;
       }
 
-      final loaded = await _accessService.loadSnapshot(
+      final loaded =
+          await _accessService.loadSnapshot(
         profile: verifiedProfile,
       );
 
-      if (generation != _generation) {
+      if (generation != _generation ||
+          _client.auth.currentUser?.id != accountId) {
+        _finishFailedActivation(generation);
         return false;
       }
 
@@ -148,8 +210,9 @@ class FamilySessionProvider extends ChangeNotifier {
 
       _activeProfile = verifiedProfile;
       _snapshot = loaded;
+      _sessionAccountId = accountId;
       _isLoading = false;
-      notifyListeners();
+      _notify();
 
       return true;
     } catch (_) {
@@ -163,39 +226,46 @@ class FamilySessionProvider extends ChangeNotifier {
 
     _activeProfile = null;
     _snapshot = null;
+    _sessionAccountId = null;
     _isLoading = false;
-    notifyListeners();
+    _notify();
   }
 
-  /// Reloads the active profile and its permissions.
+  /// Reloads the active profile and its
+  /// category permissions.
   ///
-  /// Adult PIN verification is not repeated within
-  /// an already active adult session.
-  ///
-  /// The session is cleared if the profile is removed
-  /// or its type changes.
+  /// Previous permissions are invalidated
+  /// before requesting fresh data.
   Future<bool> refreshPermissions() async {
-    final profile = _activeProfile;
+    final profile = activeProfile;
+    final accountId = _sessionAccountId;
 
-    if (profile == null) return false;
+    if (profile == null || accountId == null) {
+      clearSession();
+      return false;
+    }
 
     final generation = ++_generation;
 
     _snapshot = null;
     _isLoading = true;
-    notifyListeners();
+    _notify();
 
     try {
-      final profiles = await _profileService.loadProfiles();
+      final profiles =
+          await _profileService.loadProfiles();
 
-      if (generation != _generation) {
+      if (generation != _generation ||
+          _client.auth.currentUser?.id != accountId) {
+        _finishFailedActivation(generation);
         return false;
       }
 
       FamilyProfile? currentProfile;
 
       for (final candidate in profiles) {
-        if (candidate.id == profile.id) {
+        if (candidate.id == profile.id &&
+            candidate.accountUserId == accountId) {
           currentProfile = candidate;
           break;
         }
@@ -207,11 +277,14 @@ class FamilySessionProvider extends ChangeNotifier {
         return false;
       }
 
-      final loaded = await _accessService.loadSnapshot(
+      final loaded =
+          await _accessService.loadSnapshot(
         profile: currentProfile,
       );
 
-      if (generation != _generation) {
+      if (generation != _generation ||
+          _client.auth.currentUser?.id != accountId) {
+        _finishFailedActivation(generation);
         return false;
       }
 
@@ -226,8 +299,9 @@ class FamilySessionProvider extends ChangeNotifier {
 
       _activeProfile = currentProfile;
       _snapshot = loaded;
+      _sessionAccountId = accountId;
       _isLoading = false;
-      notifyListeners();
+      _notify();
 
       return true;
     } catch (_) {
@@ -236,9 +310,7 @@ class FamilySessionProvider extends ChangeNotifier {
     }
   }
 
-  /// Checks category visibility for the active profile.
-  ///
-  /// No active or ready session means no access.
+  /// Checks category access for the active session.
   bool canAccessCategory({
     required String sourceKey,
     required String contentType,
@@ -253,7 +325,8 @@ class FamilySessionProvider extends ChangeNotifier {
     );
   }
 
-  /// Filters items using the current permission snapshot.
+  /// Filters content using the active
+  /// profile's permission snapshot.
   List<T> filterItems<T>({
     required Iterable<T> items,
     required String sourceKey,
@@ -272,18 +345,24 @@ class FamilySessionProvider extends ChangeNotifier {
     );
   }
 
-  /// Immediately ends the active family session.
+  /// Immediately invalidates the current
+  /// family session and pending requests.
   void clearSession() {
     ++_generation;
+
     _activeProfile = null;
     _snapshot = null;
+    _sessionAccountId = null;
     _isLoading = false;
-    notifyListeners();
+
+    _notify();
   }
 
   @override
   void dispose() {
+    _disposed = true;
     ++_generation;
+    _authSubscription?.cancel();
     super.dispose();
   }
 }
