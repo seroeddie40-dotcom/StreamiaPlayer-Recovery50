@@ -1,6 +1,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -9,13 +10,18 @@ import '../services/family_content_access_service.dart';
 import '../services/family_pin_service.dart';
 import '../services/family_profile_service.dart';
 
-/// Manages the active family profile for the signed-in account.
+/// Controls the active family profile.
 ///
-/// Adult profiles require a server-verified parent PIN session.
+/// Adult profiles use the account-level parent PIN.
 /// Child profiles do not require a PIN.
 ///
-/// Child permissions must be successfully loaded before activation.
-class FamilySessionProvider extends ChangeNotifier {
+/// Child permissions are refreshed every 60 seconds
+/// and when the application returns to the foreground.
+///
+/// If a permission refresh fails, child content is
+/// denied until a successful refresh completes.
+class FamilySessionProvider extends ChangeNotifier
+    with WidgetsBindingObserver {
   FamilySessionProvider({
     FamilyContentAccessService? accessService,
     FamilyPinService? pinService,
@@ -26,6 +32,8 @@ class FamilySessionProvider extends ChangeNotifier {
         _pinService = pinService ?? FamilyPinService(),
         _profileService = profileService ?? FamilyProfileService(),
         _client = client ?? Supabase.instance.client {
+    WidgetsBinding.instance.addObserver(this);
+
     _authSubscription =
         _client.auth.onAuthStateChange.listen((event) {
       final currentAccountId =
@@ -39,13 +47,18 @@ class FamilySessionProvider extends ChangeNotifier {
     });
   }
 
+  static const Duration _childRefreshInterval =
+      Duration(seconds: 60);
+
   final FamilyContentAccessService _accessService;
   final FamilyPinService _pinService;
   final FamilyProfileService _profileService;
   final SupabaseClient _client;
 
   StreamSubscription<AuthState>? _authSubscription;
+
   Timer? _adultExpiryTimer;
+  Timer? _childRefreshTimer;
 
   FamilyProfile? _activeProfile;
   FamilyContentAccessSnapshot? _snapshot;
@@ -55,23 +68,22 @@ class FamilySessionProvider extends ChangeNotifier {
   DateTime? _adultValidUntil;
 
   bool _isLoading = false;
+  bool _refreshing = false;
   bool _disposed = false;
+
   int _generation = 0;
 
   bool get _belongsToCurrentAccount {
-    final currentAccountId =
-        _client.auth.currentUser?.id;
+    final accountId = _client.auth.currentUser?.id;
 
-    return currentAccountId != null &&
-        _sessionAccountId == currentAccountId &&
+    return accountId != null &&
+        _sessionAccountId == accountId &&
         _activeProfile != null &&
-        _activeProfile!.accountUserId ==
-            currentAccountId;
+        _activeProfile!.accountUserId == accountId;
   }
 
   bool get _adultSessionCurrent {
-    if (_activeProfile?.type !=
-        FamilyProfileType.adult) {
+    if (_activeProfile?.type != FamilyProfileType.adult) {
       return true;
     }
 
@@ -101,7 +113,10 @@ class FamilySessionProvider extends ChangeNotifier {
   }
 
   bool get hasActiveProfile => activeProfile != null;
+
   bool get isLoading => _isLoading;
+
+  bool get isRefreshingPermissions => _refreshing;
 
   bool get isChild =>
       activeProfile?.type == FamilyProfileType.child;
@@ -109,13 +124,23 @@ class FamilySessionProvider extends ChangeNotifier {
   bool get isAdult =>
       activeProfile?.type == FamilyProfileType.adult;
 
-  bool get isReady =>
-      !_isLoading &&
-      _belongsToCurrentAccount &&
-      _adultSessionCurrent &&
-      _snapshot != null &&
-      _snapshot!.profileId == _activeProfile!.id &&
-      _snapshot!.isReady;
+  bool get isReady {
+    final profile = activeProfile;
+    final currentSnapshot = snapshot;
+
+    if (profile == null ||
+        currentSnapshot == null ||
+        _isLoading ||
+        _refreshing ||
+        !currentSnapshot.isReady ||
+        currentSnapshot.profileId != profile.id ||
+        currentSnapshot.isChild !=
+            (profile.type == FamilyProfileType.child)) {
+      return false;
+    }
+
+    return true;
+  }
 
   void _notify() {
     if (!_disposed) {
@@ -126,45 +151,101 @@ class FamilySessionProvider extends ChangeNotifier {
   void _cancelAdultExpiry() {
     _adultExpiryTimer?.cancel();
     _adultExpiryTimer = null;
+
     _adultAccessToken = null;
     _adultValidUntil = null;
+  }
+
+  void _stopChildRefresh() {
+    _childRefreshTimer?.cancel();
+    _childRefreshTimer = null;
   }
 
   void _scheduleAdultExpiry(DateTime expiry) {
     _adultExpiryTimer?.cancel();
 
-    final remaining =
-        expiry.difference(DateTime.now());
+    final remaining = expiry.difference(DateTime.now());
 
     if (remaining <= Duration.zero) {
       clearSession();
       return;
     }
 
-    _adultExpiryTimer =
-        Timer(remaining, clearSession);
+    _adultExpiryTimer = Timer(
+      remaining,
+      clearSession,
+    );
   }
 
-  /// Activates a profile after checking account ownership.
+  void _startChildRefresh() {
+    _stopChildRefresh();
+
+    if (_disposed ||
+        !_belongsToCurrentAccount ||
+        _activeProfile?.type != FamilyProfileType.child) {
+      return;
+    }
+
+    _childRefreshTimer = Timer.periodic(
+      _childRefreshInterval,
+      (_) {
+        if (_disposed || _refreshing || _isLoading) {
+          return;
+        }
+
+        if (_activeProfile?.type != FamilyProfileType.child ||
+            !_belongsToCurrentAccount) {
+          _stopChildRefresh();
+          return;
+        }
+
+        // Timer callbacks cannot await a Future.
+        // refreshPermissions handles errors internally.
+        unawaited(refreshPermissions());
+      },
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(
+    AppLifecycleState state,
+  ) {
+    if (_disposed) return;
+
+    if (state == AppLifecycleState.resumed) {
+      if (_activeProfile?.type == FamilyProfileType.child &&
+          _belongsToCurrentAccount &&
+          !_isLoading &&
+          !_refreshing) {
+        unawaited(refreshPermissions());
+      }
+    }
+  }
+
+  /// Activates a profile after verifying account ownership.
   ///
-  /// The existing adultPin argument is retained for compatibility
-  /// with callers. Its value is now the PARENT PIN.
+  /// The parameter adultPin is retained for compatibility
+  /// with existing screens. It contains the PARENT PIN.
   Future<bool> activateProfile(
     FamilyProfile profile, {
     String? adultPin,
   }) async {
     final generation = ++_generation;
 
+    _stopChildRefresh();
     _cancelAdultExpiry();
+
     _activeProfile = null;
     _snapshot = null;
     _sessionAccountId = null;
+
+    _refreshing = false;
     _isLoading = true;
+
     _notify();
 
     try {
-      final accountId =
-          _client.auth.currentUser?.id;
+      final accountId = _client.auth.currentUser?.id;
 
       if (accountId == null) {
         _finishFailedActivation(generation);
@@ -174,9 +255,7 @@ class FamilySessionProvider extends ChangeNotifier {
       final profiles =
           await _profileService.loadProfiles();
 
-      if (generation != _generation ||
-          _client.auth.currentUser?.id != accountId) {
-        _finishFailedActivation(generation);
+      if (!_isCurrentRequest(generation, accountId)) {
         return false;
       }
 
@@ -200,7 +279,6 @@ class FamilySessionProvider extends ChangeNotifier {
 
       if (verifiedProfile.type ==
           FamilyProfileType.adult) {
-        // The adult profile uses the account's parent PIN.
         if (adultPin == null ||
             !RegExp(r'^[0-9]{6,10}$')
                 .hasMatch(adultPin)) {
@@ -214,9 +292,7 @@ class FamilySessionProvider extends ChangeNotifier {
           pin: adultPin,
         );
 
-        if (generation != _generation ||
-            _client.auth.currentUser?.id != accountId) {
-          _finishFailedActivation(generation);
+        if (!_isCurrentRequest(generation, accountId)) {
           return false;
         }
 
@@ -232,16 +308,17 @@ class FamilySessionProvider extends ChangeNotifier {
         adultToken = verification.accessToken;
         adultExpiry = verification.validUntil;
 
-        // Verify the parent session with Supabase.
         final sessionValid =
             await _pinService.checkSession(
           scope: FamilyPinScope.parent,
           accessToken: adultToken!,
         );
 
-        if (generation != _generation ||
-            _client.auth.currentUser?.id != accountId ||
-            !sessionValid ||
+        if (!_isCurrentRequest(generation, accountId)) {
+          return false;
+        }
+
+        if (!sessionValid ||
             !adultExpiry!.isAfter(DateTime.now())) {
           _finishFailedActivation(generation);
           return false;
@@ -252,14 +329,11 @@ class FamilySessionProvider extends ChangeNotifier {
         return false;
       }
 
-      final loaded =
-          await _accessService.loadSnapshot(
+      final loaded = await _accessService.loadSnapshot(
         profile: verifiedProfile,
       );
 
-      if (generation != _generation ||
-          _client.auth.currentUser?.id != accountId) {
-        _finishFailedActivation(generation);
+      if (!_isCurrentRequest(generation, accountId)) {
         return false;
       }
 
@@ -277,15 +351,24 @@ class FamilySessionProvider extends ChangeNotifier {
       _activeProfile = verifiedProfile;
       _snapshot = loaded;
       _sessionAccountId = accountId;
+
       _adultAccessToken = adultToken;
       _adultValidUntil = adultExpiry;
+
       _isLoading = false;
+      _refreshing = false;
 
       if (adultExpiry != null) {
         _scheduleAdultExpiry(adultExpiry);
       }
 
+      if (verifiedProfile.type ==
+          FamilyProfileType.child) {
+        _startChildRefresh();
+      }
+
       _notify();
+
       return isReady;
     } catch (_) {
       _finishFailedActivation(generation);
@@ -293,19 +376,43 @@ class FamilySessionProvider extends ChangeNotifier {
     }
   }
 
-  void _finishFailedActivation(int generation) {
-    if (generation != _generation) return;
+  bool _isCurrentRequest(
+    int generation,
+    String accountId,
+  ) {
+    return !_disposed &&
+        generation == _generation &&
+        _client.auth.currentUser?.id == accountId;
+  }
 
+  void _finishFailedActivation(int generation) {
+    if (generation != _generation || _disposed) {
+      return;
+    }
+
+    _stopChildRefresh();
     _cancelAdultExpiry();
+
     _activeProfile = null;
     _snapshot = null;
     _sessionAccountId = null;
+
     _isLoading = false;
+    _refreshing = false;
+
     _notify();
   }
 
   /// Reloads permissions without extending the PIN session.
+  ///
+  /// Child profiles remain selected if Supabase is
+  /// temporarily unreachable. However, all child content
+  /// remains blocked until a successful refresh.
   Future<bool> refreshPermissions() async {
+    if (_disposed || _refreshing || _isLoading) {
+      return false;
+    }
+
     final profile = activeProfile;
     final accountId = _sessionAccountId;
 
@@ -316,10 +423,14 @@ class FamilySessionProvider extends ChangeNotifier {
 
     final adultToken = _adultAccessToken;
     final adultExpiry = _adultValidUntil;
+
     final generation = ++_generation;
 
+    _refreshing = true;
+
+    // Fail closed immediately while loading.
     _snapshot = null;
-    _isLoading = true;
+
     _notify();
 
     try {
@@ -332,16 +443,16 @@ class FamilySessionProvider extends ChangeNotifier {
           return false;
         }
 
-        // Adult access remains bound to the parent PIN session.
-        final valid =
-            await _pinService.checkSession(
+        final valid = await _pinService.checkSession(
           scope: FamilyPinScope.parent,
           accessToken: adultToken,
         );
 
-        if (generation != _generation ||
-            _client.auth.currentUser?.id != accountId ||
-            !valid ||
+        if (!_isCurrentRequest(generation, accountId)) {
+          return false;
+        }
+
+        if (!valid ||
             !adultExpiry.isAfter(DateTime.now())) {
           _finishFailedActivation(generation);
           return false;
@@ -351,9 +462,7 @@ class FamilySessionProvider extends ChangeNotifier {
       final profiles =
           await _profileService.loadProfiles();
 
-      if (generation != _generation ||
-          _client.auth.currentUser?.id != accountId) {
-        _finishFailedActivation(generation);
+      if (!_isCurrentRequest(generation, accountId)) {
         return false;
       }
 
@@ -367,20 +476,18 @@ class FamilySessionProvider extends ChangeNotifier {
         }
       }
 
+      // A deleted or changed profile cannot retain access.
       if (currentProfile == null ||
           currentProfile.type != profile.type) {
         _finishFailedActivation(generation);
         return false;
       }
 
-      final loaded =
-          await _accessService.loadSnapshot(
+      final loaded = await _accessService.loadSnapshot(
         profile: currentProfile,
       );
 
-      if (generation != _generation ||
-          _client.auth.currentUser?.id != accountId) {
-        _finishFailedActivation(generation);
+      if (!_isCurrentRequest(generation, accountId)) {
         return false;
       }
 
@@ -391,21 +498,62 @@ class FamilySessionProvider extends ChangeNotifier {
                   FamilyProfileType.child) ||
           (adultExpiry != null &&
               !adultExpiry.isAfter(DateTime.now()))) {
-        _finishFailedActivation(generation);
-        return false;
+        return _handleRefreshFailure(
+          generation,
+          profile,
+        );
       }
 
       _activeProfile = currentProfile;
       _snapshot = loaded;
       _sessionAccountId = accountId;
+
+      _refreshing = false;
       _isLoading = false;
 
       _notify();
+
       return isReady;
     } catch (_) {
+      return _handleRefreshFailure(
+        generation,
+        profile,
+      );
+    }
+  }
+
+  bool _handleRefreshFailure(
+    int generation,
+    FamilyProfile profile,
+  ) {
+    if (_disposed || generation != _generation) {
+      return false;
+    }
+
+    // An adult authentication failure must not be
+    // treated as a temporary child permission error.
+    if (profile.type != FamilyProfileType.child) {
       _finishFailedActivation(generation);
       return false;
     }
+
+    if (!_belongsToCurrentAccount ||
+        _activeProfile?.id != profile.id) {
+      _finishFailedActivation(generation);
+      return false;
+    }
+
+    // Preserve the child profile selection but
+    // revoke all cached content permissions.
+    _snapshot = null;
+    _refreshing = false;
+    _isLoading = false;
+
+    // The periodic timer remains active, so another
+    // refresh can restore access when Supabase responds.
+    _notify();
+
+    return false;
   }
 
   bool canAccessCategory({
@@ -442,12 +590,16 @@ class FamilySessionProvider extends ChangeNotifier {
 
   void clearSession() {
     ++_generation;
+
+    _stopChildRefresh();
     _cancelAdultExpiry();
 
     _activeProfile = null;
     _snapshot = null;
     _sessionAccountId = null;
+
     _isLoading = false;
+    _refreshing = false;
 
     _notify();
   }
@@ -456,8 +608,13 @@ class FamilySessionProvider extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     ++_generation;
+
+    _stopChildRefresh();
     _cancelAdultExpiry();
+
+    WidgetsBinding.instance.removeObserver(this);
     _authSubscription?.cancel();
+
     super.dispose();
   }
 }
