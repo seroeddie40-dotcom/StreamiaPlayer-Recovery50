@@ -3,10 +3,10 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 
 import '../core/focus_navigation.dart';
-import '../core/platform/device_layout.dart';
 import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
 import '../providers/content_provider.dart';
+import '../providers/family_session_provider.dart';
 import '../providers/locale_provider.dart';
 import '../models/series.dart';
 import '../services/download_service.dart';
@@ -50,7 +50,16 @@ class _SeriesScreenState extends State<SeriesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final all = context.watch<ContentProvider>().series;
+    final content = context.watch<ContentProvider>();
+    final family = context.watch<FamilySessionProvider>();
+    final all = family.isReady && family.isChild
+        ? family.filterItems<Series>(
+            items: content.series,
+            sourceKey: content.sourceKey,
+            contentType: 'series',
+            categoryKeyOf: (item) => item.categoryKey,
+          )
+        : family.isReady ? content.series : <Series>[];
     final lang = context.watch<LocaleProvider>().locale.languageCode;
     // Keep Xtream category labels intact. Separators may be part of a name.
     final categoryCounts = <String, int>{};
@@ -202,7 +211,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
                                 itemCount: filtered.length,
                                 itemBuilder: (context, i) => _SeriesTile(
                                   series: filtered[i],
-                                  autofocus: DeviceLayout.isTelevision && i == 0,
+                                  autofocus: i == 0,
                                 ),
                               ),
                             );
@@ -232,7 +241,7 @@ String _seriesText(String language, String key) {
   return (labels[language] ?? labels['en']!)[key] ?? labels['en']![key] ?? key;
 }
 
-class _SeriesTile extends StatefulWidget {
+class _SeriesTile extends StatelessWidget {
   final Series series;
   final bool autofocus;
 
@@ -242,28 +251,19 @@ class _SeriesTile extends StatefulWidget {
   });
 
   @override
-  State<_SeriesTile> createState() => _SeriesTileState();
-}
-
-class _SeriesTileState extends State<_SeriesTile> {
-  bool _focused = false;
-
-  @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isDark =
+        Theme.of(context).brightness == Brightness.dark;
 
     return InkWell(
-      autofocus: widget.autofocus,
-      onFocusChange: (value) {
-        if (mounted) setState(() => _focused = value);
-      },
+      autofocus: autofocus,
       focusColor:
           AppTheme.electricBlue.withValues(alpha: 0.22),
       onTap: () => pushWithFocusRestore(
         context,
         MaterialPageRoute(
           builder: (_) => SeriesDetailScreen(
-            series: widget.series,
+            series: series,
           ),
         ),
       ),
@@ -273,10 +273,6 @@ class _SeriesTileState extends State<_SeriesTile> {
               ? AppTheme.darkSurface
               : AppTheme.lightSurface,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: _focused ? AppTheme.electricBlue : Colors.transparent,
-            width: _focused ? 3 : 1,
-          ),
         ),
         clipBehavior: Clip.antiAlias,
         child: Stack(
@@ -286,9 +282,9 @@ class _SeriesTileState extends State<_SeriesTile> {
                   CrossAxisAlignment.stretch,
               children: [
                 Expanded(
-                  child: widget.series.posterUrl != null
+                  child: series.posterUrl != null
                       ? CachedNetworkImage(
-                          imageUrl: widget.series.posterUrl!,
+                          imageUrl: series.posterUrl!,
                           fit: BoxFit.cover,
                           errorWidget: (_, __, ___) =>
                               const Icon(
@@ -308,19 +304,19 @@ class _SeriesTileState extends State<_SeriesTile> {
                         CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.series.title,
+                        series.title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      if (widget.series.releaseDate != null ||
-                          widget.series.genre != null)
+                      if (series.releaseDate != null ||
+                          series.genre != null)
                         Text(
                           [
-                            widget.series.releaseDate,
-                            widget.series.genre,
+                            series.releaseDate,
+                            series.genre,
                           ]
                               .whereType<String>()
                               .where((v) => v.isNotEmpty)
@@ -340,9 +336,9 @@ class _SeriesTileState extends State<_SeriesTile> {
               top: 4,
               left: 4,
               child: FavoriteToggleButton(
-                contentId: widget.series.id,
+                contentId: series.id,
                 contentType: 'series',
-                title: widget.series.title,
+                title: series.title,
               ),
             ),
           ],
