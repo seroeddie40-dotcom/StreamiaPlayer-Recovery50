@@ -6,6 +6,15 @@ enum FamilyPinScope {
   adult,
 }
 
+/// Result of checking whether the account
+/// already has a configured parent PIN.
+enum FamilyParentPinStatus {
+  configured,
+  notConfigured,
+  unauthorized,
+  unknown,
+}
+
 class FamilyPinVerification {
   final String status;
   final String? accessToken;
@@ -59,25 +68,69 @@ class FamilyPinService {
     }
   }
 
-  /// Richtet die Eltern-PIN erstmalig ein.
+  /// Checks whether the authenticated account
+  /// already has a parent PIN.
   ///
-  /// Supabase erlaubt diese Aktion nur, wenn für
-  /// das angemeldete Konto noch keine Eltern-PIN
-  /// existiert.
+  /// The Supabase RPC returns only a status.
+  /// No PIN, PIN hash or session token is exposed.
   ///
-  /// Eine bestehende PIN kann über diese Methode
-  /// weder geändert noch zurückgesetzt werden.
+  /// A server error is not treated as
+  /// "not configured".
   ///
-  /// Zulässige PIN-Länge: 6 bis 12 Ziffern.
+  /// This prevents accidentally opening the
+  /// initial PIN setup for existing accounts
+  /// when the server is unavailable.
+  Future<FamilyParentPinStatus>
+      getParentPinStatus() async {
+    if (_client.auth.currentUser == null) {
+      return FamilyParentPinStatus.unauthorized;
+    }
+
+    final response = await _client.rpc(
+      'get_family_parent_pin_status',
+    );
+
+    if (response is! String) {
+      throw const FormatException(
+        'Unerwartete Antwort bei der '
+        'Eltern-PIN-Statusprüfung.',
+      );
+    }
+
+    switch (response) {
+      case 'configured':
+        return FamilyParentPinStatus.configured;
+
+      case 'not_configured':
+        return FamilyParentPinStatus.notConfigured;
+
+      case 'unauthorized':
+        return FamilyParentPinStatus.unauthorized;
+
+      default:
+        return FamilyParentPinStatus.unknown;
+    }
+  }
+
+  /// Initializes the parent PIN for the first time.
   ///
-  /// Rückgabewerte:
+  /// Supabase allows this operation only if
+  /// the authenticated account does not
+  /// already have a parent PIN.
+  ///
+  /// An existing PIN cannot be overwritten
+  /// or reset using this method.
+  ///
+  /// Valid PIN length: 6 to 12 digits.
+  ///
+  /// Possible results:
   /// - success
   /// - already_configured
   /// - invalid_pin
   /// - unauthorized
   ///
-  /// Die PIN niemals protokollieren oder lokal
-  /// im Klartext speichern.
+  /// Never log or locally store the PIN
+  /// in plaintext.
   Future<String> initializeParentPin(
     String newPin,
   ) async {
@@ -120,10 +173,12 @@ class FamilyPinService {
     return response;
   }
 
-  /// Verifiziert die PIN auf dem Supabase-Server.
+  /// Verifies a parent or adult PIN
+  /// using the Supabase server.
   ///
-  /// PIN und Sitzungstoken dürfen nicht in Logs
-  /// oder ungeschützten Einstellungen gespeichert werden.
+  /// PINs and session tokens must never
+  /// be written to logs or unprotected
+  /// local preferences.
   Future<FamilyPinVerification> verifyPin({
     required FamilyPinScope scope,
     required String pin,
@@ -168,17 +223,19 @@ class FamilyPinService {
     final rawExpiry = result['valid_until'];
 
     return FamilyPinVerification(
-      status: result['verification_status']?.toString() ??
-          'unknown',
-      accessToken: result['access_token']?.toString(),
+      status:
+          result['verification_status']?.toString() ??
+              'unknown',
+      accessToken:
+          result['access_token']?.toString(),
       validUntil: rawExpiry == null
           ? null
           : DateTime.tryParse(rawExpiry.toString()),
     );
   }
 
-  /// Prüft, ob eine bestehende PIN-Sitzung
-  /// auf dem Server weiterhin gültig ist.
+  /// Checks whether an existing PIN session
+  /// remains valid on the Supabase server.
   Future<bool> checkSession({
     required FamilyPinScope scope,
     required String accessToken,
@@ -190,7 +247,8 @@ class FamilyPinService {
     );
 
     if (_client.auth.currentUser == null ||
-        !RegExp(r'^[0-9a-f]{64}$').hasMatch(accessToken)) {
+        !RegExp(r'^[0-9a-f]{64}$')
+            .hasMatch(accessToken)) {
       return false;
     }
 
