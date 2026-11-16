@@ -1,3 +1,4 @@
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -221,6 +222,9 @@ class PlaylistParser {
           logoUrl: logo,
           category: itemGroup,
           epgChannelId: tvgId,
+          // The original M3U group is the permission key.
+          // The source identity is assigned after parsing.
+          categoryKey: itemGroup,
         );
         channels.add(item);
         descriptors.add('live|${item.id}');
@@ -250,8 +254,17 @@ class PlaylistParser {
     final sourceKey = sourceKeyOverride ??
         'src:v1:${sha256.convert(utf8.encode(sourceIdentity))}';
 
+    // The final source key is known only after the complete
+    // playlist has been parsed. Attach it to every channel
+    // without changing existing IDs, URLs or category labels.
+    final identifiedChannels = channels
+        .map((channel) => channel.copyWith(
+              sourceKey: sourceKey,
+            ))
+        .toList(growable: false);
+
     content.replaceLibrary(
-      channels: channels,
+      channels: identifiedChannels,
       vod: vod,
       series: series.values.toList(),
       sourceKey: sourceKey,
