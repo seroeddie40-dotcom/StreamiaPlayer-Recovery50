@@ -192,11 +192,8 @@ class _FamilyChildCategoryPermissionsScreenState
         setState(() {
           _loading = false;
           _errorMessage =
-              'M3U-Ordner werden nach der '
-              'Anbindung des bestehenden '
-              'M3U-Parsers verfügbar. '
-              'Bis dahin bleiben nicht '
-              'freigegebene Kategorien gesperrt.';
+              'M3U-Ordner können hier noch nicht verwaltet werden. '
+              'Vorhandene Sperren bleiben erhalten.';
         });
         return;
       }
@@ -297,8 +294,12 @@ class _FamilyChildCategoryPermissionsScreenState
         _rules = updatedRules;
       });
 
-      final confirmed =
-          _isCategoryVisible(category) == visible;
+      final confirmed = _profileService.isChildCategoryVisible(
+        rules: updatedRules,
+        sourceKey: category.sourceKey,
+        contentType: category.contentTypeKey,
+        categoryKey: category.categoryKey,
+      ) == visible;
 
       if (!confirmed) {
         _showMessage(
@@ -470,6 +471,18 @@ class _FamilyChildCategoryPermissionsScreenState
         updated++;
       }
       final rules = await _profileService.loadCategoryRules(widget.childProfile.id);
+      final confirmed = chosen.every((category) =>
+          _profileService.isChildCategoryVisible(
+            rules: rules,
+            sourceKey: category.sourceKey,
+            contentType: category.contentTypeKey,
+            categoryKey: category.categoryKey,
+          ) == visible);
+      if (!confirmed) {
+        throw const _FamilyPermissionError(
+          'Gespeicherte Ordnersperren stimmen nicht mit der Auswahl überein.',
+        );
+      }
       if (!mounted) return;
       setState(() {
         _rules = rules;
@@ -525,8 +538,17 @@ class _FamilyChildCategoryPermissionsScreenState
             }
           }),
           title: Text(category.displayName, maxLines: 2, overflow: TextOverflow.ellipsis),
-          subtitle: Text(visible ? 'Sichtbar' : 'Gesperrt'),
-          secondary: Icon(visible ? Icons.lock_open_outlined : Icons.lock_outline),
+          subtitle: Text(visible ? 'Sichtbar für das Kind' : 'Für das Kind gesperrt'),
+          secondary: IconButton(
+            tooltip: visible ? 'Diesen Ordner sperren' : 'Diesen Ordner freigeben',
+            onPressed: _saving || _loading
+                ? null
+                : () => _changeVisibility(category, !visible),
+            icon: Icon(
+              visible ? Icons.lock_open_outlined : Icons.lock_outline,
+              color: visible ? null : Theme.of(context).colorScheme.error,
+            ),
+          ),
         );
       },
     );
@@ -539,7 +561,7 @@ class _FamilyChildCategoryPermissionsScreenState
         Text('Kinderprofil: ${widget.childProfile.displayName}',
             style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 4),
-        const Text('Alle Ordner sind zunächst sichtbar. Markierte Ordner können gesperrt werden.'),
+        const Text('Alle Ordner sind zunächst sichtbar. Das Schloss rechts zeigt den gespeicherten Status und ändert ihn direkt. Die Kästchen links dienen nur zur Mehrfachauswahl.'),
         const SizedBox(height: 12),
         _buildPlaylistSelector(),
         const SizedBox(height: 12),
@@ -568,7 +590,7 @@ class _FamilyChildCategoryPermissionsScreenState
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       child: Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Text('${_selectedKeys.length} ausgewählt'),
+          Text('${_selectedKeys.length} ausgewählt · ${_categories.where((c) => !_isCategoryVisible(c)).length} gesperrt'),
           OutlinedButton(
             onPressed: _saving || _loading ? null : () => setState(() {
               _selectedKeys.addAll(filtered.map((c) => c.categoryKey));

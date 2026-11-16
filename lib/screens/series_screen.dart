@@ -371,7 +371,14 @@ class _SeriesDetailScreenState
   Future<void> _loadEpisodes() async {
     if (_loadingEpisodes) return;
     final content = context.read<ContentProvider>();
+    final family = context.read<FamilySessionProvider>();
     final sourceKey = content.sourceKey;
+    if (!family.isReady ||
+        !family.canAccessCategory(
+          sourceKey: sourceKey,
+          contentType: 'series',
+          categoryKey: widget.series.categoryKey ?? '',
+        )) return;
     final current = content.series.firstWhere(
       (item) => item.id == widget.series.id,
       orElse: () => widget.series,
@@ -463,8 +470,24 @@ class _SeriesDetailScreenState
       ),
     );
 
+    final content = context.watch<ContentProvider>();
+    final family = context.watch<FamilySessionProvider>();
     final sourceChanged = _openedSourceKey != null &&
-        context.read<ContentProvider>().sourceKey != _openedSourceKey;
+        content.sourceKey != _openedSourceKey;
+    final current = content.series.where((candidate) =>
+        candidate.id == widget.series.id &&
+        candidate.categoryKey == widget.series.categoryKey);
+    final permitted = !sourceChanged && family.isReady &&
+        current.isNotEmpty && family.canAccessCategory(
+          sourceKey: content.sourceKey,
+          contentType: 'series',
+          categoryKey: widget.series.categoryKey ?? '',
+        );
+    if (!permitted) {
+      return const Scaffold(
+        body: Center(child: Text('Diese Serie ist für das aktuelle Profil nicht verfügbar.')),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text(series.title),

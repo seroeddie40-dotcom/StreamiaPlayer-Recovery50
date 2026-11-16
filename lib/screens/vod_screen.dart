@@ -896,6 +896,23 @@ class VodDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final source = playbackItem ?? item;
+    final family = context.watch<FamilySessionProvider>();
+    final content = context.watch<ContentProvider>();
+    final current = content.vodItems.where((candidate) =>
+        candidate.id == source.id &&
+        candidate.streamUrl == source.streamUrl &&
+        candidate.categoryKey == source.categoryKey);
+    final permitted = family.isReady && current.isNotEmpty &&
+        family.canAccessCategory(
+          sourceKey: content.sourceKey,
+          contentType: 'vod',
+          categoryKey: source.categoryKey ?? '',
+        );
+    if (!permitted) {
+      return const Scaffold(
+        body: Center(child: Text('Dieser Film ist für das aktuelle Profil nicht verfügbar.')),
+      );
+    }
 
     final facts = <String>[
       if (item.releaseDate != null)

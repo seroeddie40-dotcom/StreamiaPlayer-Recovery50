@@ -41,6 +41,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   late final Player _player;
   late final VideoController _videoController;
   late final FamilySessionProvider _familySession;
+  late final ContentProvider _contentProvider;
   bool _playbackRevoked = false;
   StreamSubscription? _posSub, _durSub, _playSub, _errorSub, _bufferingSub;
   Duration _position = Duration.zero;
@@ -170,6 +171,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _videoController = VideoController(_player);
     _familySession = context.read<FamilySessionProvider>();
     _familySession.addListener(_onFamilySessionChanged);
+    _contentProvider = context.read<ContentProvider>();
+    _contentProvider.addListener(_onFamilySessionChanged);
     _currentEpisode = widget.initialEpisodeIndex ?? 0;
     _posSub = _player.stream.position.listen((p) {
       if (!mounted) return;
@@ -217,7 +220,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Live TV starts with folders on the left and channels beside them.
       // This is only the initial view; Back/close still hides the drawer.
-      if (mounted && widget.isLive && widget.channel != null) {
+      if (!mounted || _playbackRevoked || !_isCurrentStreamAuthorized()) return;
+      if (widget.isLive && widget.channel != null) {
         _openNavigationDrawer();
       }
       final library = context.read<ContentProvider>();
@@ -232,6 +236,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   void _recordCurrentEpisodeHistory([ContentProvider? provider]) {
+    if (!mounted || _playbackRevoked || !_isCurrentStreamAuthorized()) return;
     final library = provider ?? context.read<ContentProvider>();
     final series = widget.series;
     final episodes = widget.episodes;
@@ -448,8 +453,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (mounted) setState(() { _reconnecting = reconnect; _streamFailed = false; });
     try {
       await _player.open(Media(url));
-      if (!mounted || generation != _streamLoadGeneration) {
-        if (_playbackRevoked) await _player.stop();
+      if (!mounted || generation != _streamLoadGeneration ||
+          !_isCurrentStreamAuthorized()) {
+        await _player.stop();
+        if (mounted && generation == _streamLoadGeneration) {
+          _onFamilySessionChanged();
+        }
         return;
       }
       // Reconnect always takes precedence over stored progress. A first open
@@ -513,7 +522,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   Future<void> _saveProgress() async {
-    if (widget.isLive || !mounted || _saveInFlight) return;
+    if (widget.isLive || !mounted || _saveInFlight ||
+        _playbackRevoked || !_isCurrentStreamAuthorized()) return;
     final id = _progressContentId;
     final position = _position.inSeconds;
     final duration = _duration.inSeconds;
@@ -606,6 +616,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   @override
   void dispose() {
     _familySession.removeListener(_onFamilySessionChanged);
+    _contentProvider.removeListener(_onFamilySessionChanged);
     _hideTimer?.cancel();
     _progressTimer?.cancel();
     _queueSyncTimer?.cancel();

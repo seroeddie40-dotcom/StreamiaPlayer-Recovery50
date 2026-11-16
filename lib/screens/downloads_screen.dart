@@ -28,9 +28,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   String _t(String key) {
     final lang = Localizations.localeOf(context).languageCode;
     const words = <String, Map<String, String>>{
-      'de': {'downloads':'Downloads','movies':'Filme','series':'Serien','empty':'Keine Downloads','cancel':'Abbrechen','delete':'Löschen','retry':'Erneut herunterladen','open':'Offline abspielen','loading':'Downloadliste wird geladen','error':'Downloadliste konnte nicht geladen werden','missing':'Datei fehlt','interrupted':'Unterbrochen','failed':'Fehlgeschlagen','cancelled':'Abgebrochen','queued':'Wartend','downloading':'Wird heruntergeladen','completed':'Heruntergeladen','season':'Staffel','episode':'Folge','deleteQuestion':'Download wirklich löschen?'},
-      'tr': {'downloads':'İndirilenler','movies':'Filmler','series':'Diziler','empty':'İndirme yok','cancel':'İptal et','delete':'Sil','retry':'Yeniden indir','open':'Çevrimdışı oynat','loading':'İndirmeler yükleniyor','error':'İndirme listesi yüklenemedi','missing':'Dosya bulunamadı','interrupted':'Kesintiye uğradı','failed':'Başarısız','cancelled':'İptal edildi','queued':'Bekliyor','downloading':'İndiriliyor','completed':'İndirildi','season':'Sezon','episode':'Bölüm','deleteQuestion':'İndirme silinsin mi?'},
-      'en': {'downloads':'Downloads','movies':'Movies','series':'Series','empty':'No downloads','cancel':'Cancel','delete':'Delete','retry':'Download again','open':'Play offline','loading':'Loading downloads','error':'Could not load downloads','missing':'File missing','interrupted':'Interrupted','failed':'Failed','cancelled':'Cancelled','queued':'Queued','downloading':'Downloading','completed':'Downloaded','season':'Season','episode':'Episode','deleteQuestion':'Delete this download?'},
+      'de': {'downloads':'Downloads','movies':'Filme','series':'Serien','empty':'Keine Downloads','cancel':'Abbrechen','delete':'Löschen','retry':'Erneut herunterladen','open':'Offline abspielen','loading':'Downloadliste wird geladen','error':'Downloadliste konnte nicht geladen werden','missing':'Datei fehlt','interrupted':'Unterbrochen','failed':'Fehlgeschlagen','cancelled':'Abgebrochen','queued':'Wartend','downloading':'Wird heruntergeladen','completed':'Heruntergeladen','season':'Staffel','episode':'Folge','deleteQuestion':'Download wirklich löschen?','restricted':'Downloads sind nur im Elternprofil verfügbar.'},
+      'tr': {'downloads':'İndirilenler','movies':'Filmler','series':'Diziler','empty':'İndirme yok','cancel':'İptal et','delete':'Sil','retry':'Yeniden indir','open':'Çevrimdışı oynat','loading':'İndirmeler yükleniyor','error':'İndirme listesi yüklenemedi','missing':'Dosya bulunamadı','interrupted':'Kesintiye uğradı','failed':'Başarısız','cancelled':'İptal edildi','queued':'Bekliyor','downloading':'İndiriliyor','completed':'İndirildi','season':'Sezon','episode':'Bölüm','deleteQuestion':'İndirme silinsin mi?','restricted':'İndirmeler yalnızca yetişkin profilinde kullanılabilir.'},
+      'en': {'downloads':'Downloads','movies':'Movies','series':'Series','empty':'No downloads','cancel':'Cancel','delete':'Delete','retry':'Download again','open':'Play offline','loading':'Loading downloads','error':'Could not load downloads','missing':'File missing','interrupted':'Interrupted','failed':'Failed','cancelled':'Cancelled','queued':'Queued','downloading':'Downloading','completed':'Downloaded','season':'Season','episode':'Episode','deleteQuestion':'Delete this download?','restricted':'Downloads are available only in an adult profile.'},
       'ru': {'downloads':'Загрузки','movies':'Фильмы','series':'Сериалы','empty':'Нет загрузок','cancel':'Отмена','delete':'Удалить','retry':'Скачать снова','open':'Смотреть офлайн','loading':'Загрузка списка','error':'Не удалось загрузить список','missing':'Файл отсутствует','interrupted':'Прервано','failed':'Ошибка','cancelled':'Отменено','queued':'В очереди','downloading':'Загрузка','completed':'Загружено','season':'Сезон','episode':'Серия','deleteQuestion':'Удалить загрузку?'},
       'pl': {'downloads':'Pobrane','movies':'Filmy','series':'Seriale','empty':'Brak pobranych','cancel':'Anuluj','delete':'Usuń','retry':'Pobierz ponownie','open':'Odtwórz offline','loading':'Ładowanie pobranych','error':'Nie można wczytać listy','missing':'Brak pliku','interrupted':'Przerwano','failed':'Błąd','cancelled':'Anulowano','queued':'W kolejce','downloading':'Pobieranie','completed':'Pobrano','season':'Sezon','episode':'Odcinek','deleteQuestion':'Usunąć pobrany plik?'},
       'es': {'downloads':'Descargas','movies':'Películas','series':'Series','empty':'Sin descargas','cancel':'Cancelar','delete':'Eliminar','retry':'Descargar de nuevo','open':'Ver sin conexión','loading':'Cargando descargas','error':'No se pudo cargar la lista','missing':'Archivo no encontrado','interrupted':'Interrumpido','failed':'Error','cancelled':'Cancelado','queued':'En espera','downloading':'Descargando','completed':'Descargado','season':'Temporada','episode':'Episodio','deleteQuestion':'¿Eliminar esta descarga?'},
@@ -40,11 +40,16 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     return (words[lang] ?? words['en']!)[key] ?? key;
   }
 
+  bool get _adultAllowed {
+    final family = context.read<FamilySessionProvider>();
+    return family.isReady && family.isAdult;
+  }
+
   Future<void> _play(DownloadEntry entry) async {
     final family = context.read<FamilySessionProvider>();
     // Offline entries currently do not retain a verified source/category
     // binding. Do not permit children to bypass category restrictions.
-    if (!family.isReady || family.isChild) {
+    if (!family.isReady || !family.isAdult) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -61,12 +66,13 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('missing'))));
       return;
     }
-    if (!mounted) return;
+    if (!mounted || !_adultAllowed) return;
     pushWithFocusRestore(context, MaterialPageRoute<void>(builder: (_) =>
       PlayerScreen(streamUrl: file.uri.toString(), title: entry.title, isLive: false, contentId: entry.id)));
   }
 
   Future<void> _retry(DownloadEntry entry) async {
+    if (!_adultAllowed) return;
     try {
       await DownloadService.start(id: entry.id, title: entry.title, kind: entry.kind,
         url: entry.sourceUrl, seriesTitle: entry.seriesTitle,
@@ -77,6 +83,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   }
 
   Future<void> _confirmDelete(DownloadEntry entry) async {
+    if (!_adultAllowed) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -95,7 +102,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         ],
       ),
     );
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted || !_adultAllowed) return;
     try {
       await DownloadService.remove(entry.id);
     } catch (_) {
@@ -124,7 +131,9 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         if (entry.state == DownloadState.completed)
           IconButton(tooltip: _t('open'), icon: const Icon(Icons.play_arrow), onPressed: () => _play(entry)),
         if (active)
-          IconButton(tooltip: _t('cancel'), icon: const Icon(Icons.cancel_outlined), onPressed: () => DownloadService.cancel(entry.id)),
+          IconButton(tooltip: _t('cancel'), icon: const Icon(Icons.cancel_outlined), onPressed: () {
+            if (_adultAllowed) DownloadService.cancel(entry.id);
+          }),
         if (!active && entry.state != DownloadState.completed)
           IconButton(tooltip: _t('retry'), icon: const Icon(Icons.refresh), onPressed: () => _retry(entry)),
         IconButton(tooltip: _t('delete'), icon: const Icon(Icons.delete_outline), onPressed: () => _confirmDelete(entry)),
@@ -152,7 +161,17 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) {
+    final family = context.watch<FamilySessionProvider>();
+    if (!family.isReady || !family.isAdult) {
+      return Scaffold(
+        appBar: AppBar(title: Text(_t('downloads'))),
+        body: Center(
+          child: Text(_t('restricted')),
+        ),
+      );
+    }
+    return Scaffold(
     appBar: AppBar(title: Text(_t('downloads'))),
     body: FutureBuilder<void>(future: _ready, builder: (context, snapshot) {
       if (snapshot.hasError) return Center(child: Text(_t('error')));
@@ -163,4 +182,5 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       );
     }),
   );
+  }
 }

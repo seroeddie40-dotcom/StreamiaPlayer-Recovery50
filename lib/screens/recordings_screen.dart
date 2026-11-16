@@ -6,6 +6,9 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
+
+import '../providers/family_session_provider.dart';
 
 import '../services/recording_service.dart';
 import '../core/platform/device_layout.dart';
@@ -392,6 +395,8 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
   }
 
   Future<void> _play(_RecordingEntry entry) async {
+    final family = context.read<FamilySessionProvider>();
+    if (!family.isReady || !family.isAdult) return;
     try {
       String path = entry.location;
 
@@ -417,6 +422,8 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
       }
 
       if (!mounted) return;
+      final currentFamily = context.read<FamilySessionProvider>();
+      if (!currentFamily.isReady || !currentFamily.isAdult) return;
 
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -437,6 +444,8 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
   }
 
   Future<void> _delete(_RecordingEntry entry) async {
+    final family = context.read<FamilySessionProvider>();
+    if (!family.isReady || !family.isAdult) return;
     try {
       final status = await RecordingService.refreshStatus();
 
@@ -550,6 +559,12 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final family = context.watch<FamilySessionProvider>();
+    if (!family.isReady || !family.isAdult) {
+      return const Scaffold(
+        body: Center(child: Text('Aufnahmen sind nur im Elternprofil verfügbar.')),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text(_t('title')),
@@ -629,21 +644,32 @@ class _RecordingPlaybackState
     extends State<_RecordingPlayback> {
   late final Player _player;
   late final VideoController _controller;
+  late final FamilySessionProvider _familySession;
+
+  void _onFamilyChanged() {
+    if (!_familySession.isReady || !_familySession.isAdult) {
+      _player.pause();
+    }
+  }
 
   @override
   void initState() {
     super.initState();
 
+    _familySession = context.read<FamilySessionProvider>();
+    _familySession.addListener(_onFamilyChanged);
     _player = Player();
     _controller = VideoController(_player);
 
-    _player.open(
-      Media(widget.file.uri.toString()),
-    );
+    final family = context.read<FamilySessionProvider>();
+    if (family.isReady && family.isAdult) {
+      _player.open(Media(widget.file.uri.toString()));
+    }
   }
 
   @override
   void dispose() {
+    _familySession.removeListener(_onFamilyChanged);
     _player.dispose();
 
     if (widget.temporaryFile) {
@@ -659,6 +685,12 @@ class _RecordingPlaybackState
 
   @override
   Widget build(BuildContext context) {
+    final family = context.watch<FamilySessionProvider>();
+    if (!family.isReady || !family.isAdult) {
+      return const Scaffold(
+        body: Center(child: Text('Wiedergabe für dieses Profil nicht verfügbar.')),
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text(
