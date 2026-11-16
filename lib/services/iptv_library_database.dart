@@ -153,7 +153,7 @@ class IptvLibraryDatabase {
       return result;
     }
     return StoredIptvLibrary(
-      channels: (await read('channels')).map((v) => _channelFromJson(v as Map<String, dynamic>)).toList(growable: false),
+      channels: (await read('channels')).map((v) => _channelFromJson(v as Map<String, dynamic>, sourceKey)).toList(growable: false),
       vod: (await read('vod')).map((v) => _vodFromJson(v as Map<String, dynamic>)).toList(growable: false),
       series: (await read('series')).map((v) => _seriesFromJson(v as Map<String, dynamic>)).toList(growable: false),
     );
@@ -172,14 +172,16 @@ class IptvLibraryDatabase {
   Map<String, Object?> _channelToJson(Channel c) => {
     'id': c.id, 'name': c.name, 'streamUrl': c.streamUrl,
     'logoUrl': c.logoUrl, 'category': c.category, 'epgChannelId': c.epgChannelId,
+    'sourceKey': c.sourceKey, 'categoryKey': c.categoryKey,
   };
-  Channel _channelFromJson(Map<String, dynamic> j) => Channel(
+  Channel _channelFromJson(Map<String, dynamic> j, String catalogSourceKey) => Channel(
     id: j['id'] as String, name: j['name'] as String, streamUrl: j['streamUrl'] as String,
     logoUrl: j['logoUrl'] as String?, category: j['category'] as String?, epgChannelId: j['epgChannelId'] as String?,
+    sourceKey: catalogSourceKey, categoryKey: j['categoryKey'] as String?,
   );
 
   Map<String, Object?> _vodToJson(VodItem v) => {
-    'id': v.id, 'title': v.title, 'plot': v.plot, 'posterUrl': v.posterUrl,
+    'id': v.id, 'title': v.title, 'categoryKey': v.categoryKey, 'plot': v.plot, 'posterUrl': v.posterUrl,
     'backdropUrl': v.backdropUrl, 'genre': v.genre, 'releaseDate': v.releaseDate,
     'ageRating': v.ageRating, 'director': v.director, 'cast': v.cast,
     'rating': v.rating, 'externalMetadataId': v.externalMetadataId,
@@ -189,7 +191,7 @@ class IptvLibraryDatabase {
     'durationSeconds': v.durationSeconds,
   };
   VodItem _vodFromJson(Map<String, dynamic> j) => VodItem(
-    id: j['id'] as String, title: j['title'] as String,
+    id: j['id'] as String, title: j['title'] as String, categoryKey: j['categoryKey'] as String?,
     plot: j['plot'] as String?, posterUrl: j['posterUrl'] as String?, backdropUrl: j['backdropUrl'] as String?,
     genre: j['genre'] as String?, releaseDate: j['releaseDate'] as String?, ageRating: j['ageRating'] as String?,
     director: j['director'] as String?, cast: j['cast'] as String?, rating: (j['rating'] as num?)?.toDouble(),
@@ -200,7 +202,7 @@ class IptvLibraryDatabase {
   );
 
   Map<String, Object?> _seriesToJson(Series s) => {
-    'id': s.id, 'title': s.title, 'plot': s.plot, 'posterUrl': s.posterUrl,
+    'id': s.id, 'title': s.title, 'categoryKey': s.categoryKey, 'plot': s.plot, 'posterUrl': s.posterUrl,
     'backdropUrl': s.backdropUrl, 'genre': s.genre, 'releaseDate': s.releaseDate,
     'ageRating': s.ageRating, 'cast': s.cast, 'director': s.director,
     'rating': s.rating, 'externalMetadataId': s.externalMetadataId,
@@ -219,7 +221,7 @@ class IptvLibraryDatabase {
     }).toList(),
   };
   Series _seriesFromJson(Map<String, dynamic> j) => Series(
-    id: j['id'] as String, title: j['title'] as String,
+    id: j['id'] as String, title: j['title'] as String, categoryKey: j['categoryKey'] as String?,
     plot: j['plot'] as String?, posterUrl: j['posterUrl'] as String?, backdropUrl: j['backdropUrl'] as String?,
     genre: j['genre'] as String?, releaseDate: j['releaseDate'] as String?, ageRating: j['ageRating'] as String?,
     cast: j['cast'] as String?, director: j['director'] as String?, rating: (j['rating'] as num?)?.toDouble(),
