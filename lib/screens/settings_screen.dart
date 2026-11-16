@@ -9,6 +9,7 @@ import '../core/localization/app_localizations.dart';
 import '../providers/theme_provider.dart';
 import '../providers/locale_provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/family_session_provider.dart';
 
 import 'family_profile_selection_screen.dart';
 import 'family_profile_management_screen.dart';
@@ -84,6 +85,7 @@ class SettingsScreen extends StatelessWidget {
     final auth = context.watch<AuthProvider>();
 
     final isDark = theme.themeMode == ThemeMode.dark;
+    final childProfileActive = context.watch<FamilySessionProvider>().isChild;
 
     final isConfigured =
         Supabase.instance.client.auth.currentUser != null;
@@ -339,6 +341,7 @@ class SettingsScreen extends StatelessWidget {
 
                   const Divider(),
 
+                  if (!childProfileActive) ...[
                   ListTile(
                     focusColor: focusColor,
                     leading: const Icon(
@@ -374,6 +377,8 @@ class SettingsScreen extends StatelessWidget {
                       const FamilyProfileManagementScreen(),
                     ),
                   ),
+
+                  ],
 
                   const Divider(),
 
