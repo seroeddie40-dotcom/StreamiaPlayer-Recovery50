@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -6,6 +5,7 @@ import '../models/family_profile.dart';
 import '../services/family_profile_service.dart';
 import '../services/family_pin_service.dart';
 import '../services/family_profile_management_service.dart';
+import 'family_child_category_permissions_screen.dart';
 
 class FamilyProfileManagementScreen
     extends StatefulWidget {
@@ -33,6 +33,8 @@ class _FamilyProfileManagementScreenState
   List<FamilyProfile> _profiles = [];
 
   bool _loading = true;
+  bool _accessGranted = false;
+  bool _unlocking = false;
   bool _busy = false;
   String? _error;
   String? _parentToken;
@@ -42,7 +44,9 @@ class _FamilyProfileManagementScreenState
   @override
   void initState() {
     super.initState();
-    _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _unlockManagement();
+    });
   }
 
   @override
@@ -50,6 +54,50 @@ class _FamilyProfileManagementScreenState
     _parentToken = null;
     _parentTokenExpiry = null;
     super.dispose();
+  }
+
+  Future<void> _unlockManagement() async {
+    if (_unlocking || !mounted) return;
+    setState(() => _unlocking = true);
+    try {
+      final token = await _requireParentToken();
+      if (!mounted) return;
+      if (token == null) {
+        setState(() => _loading = false);
+        return;
+      }
+      setState(() => _accessGranted = true);
+      await _loadData();
+    } finally {
+      if (mounted) setState(() => _unlocking = false);
+    }
+  }
+
+  Future<void> _openChildPermissions(FamilyProfile profile) async {
+    if (_busy || !_accessGranted ||
+        profile.type != FamilyProfileType.child) return;
+    final token = await _requireParentToken();
+    if (token == null || !mounted) return;
+    final valid = await _pinService.checkSession(
+      scope: FamilyPinScope.parent,
+      accessToken: token,
+    );
+    if (!mounted) return;
+    if (!valid) {
+      _parentToken = null;
+      _parentTokenExpiry = null;
+      _showMessage('Eltern-PIN-Sitzung abgelaufen.');
+      return;
+    }
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => FamilyChildCategoryPermissionsScreen(
+          childProfile: profile,
+          parentAccessToken: token,
+        ),
+      ),
+    );
+    if (mounted) await _loadData();
   }
 
   Future<void> _loadData() async {
@@ -623,6 +671,9 @@ class _FamilyProfileManagementScreenState
           tooltip: 'Profil verwalten',
           onSelected: (action) {
             switch (action) {
+              case 'permissions':
+                _openChildPermissions(profile);
+                break;
               case 'rename':
                 _renameProfile(profile);
                 break;
@@ -635,6 +686,11 @@ class _FamilyProfileManagementScreenState
             }
           },
           itemBuilder: (context) => [
+            if (!isAdult)
+              const PopupMenuItem(
+                value: 'permissions',
+                child: Text('Ordnerfreigaben verwalten'),
+              ),
             const PopupMenuItem(
               value: 'rename',
               child: Text('Umbenennen'),
@@ -669,7 +725,17 @@ class _FamilyProfileManagementScreenState
         ],
       ),
       body: SafeArea(
-        child: _loading
+        child: !_accessGranted
+            ? Center(
+                child: _unlocking
+                    ? const CircularProgressIndicator()
+                    : FilledButton.icon(
+                        onPressed: _unlockManagement,
+                        icon: const Icon(Icons.lock_open),
+                        label: const Text('Mit Eltern-PIN entsperren'),
+                      ),
+              )
+            : _loading
             ? const Center(
                 child: CircularProgressIndicator(),
               )
