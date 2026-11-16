@@ -4,9 +4,9 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../core/focus_navigation.dart';
-import '../core/platform/device_layout.dart';
 import '../services/favorites_backup_service.dart';
 import '../providers/content_provider.dart';
+import '../providers/family_session_provider.dart';
 import '../models/channel.dart';
 import '../models/vod_item.dart';
 import '../models/series.dart';
@@ -92,6 +92,12 @@ class _FavoritesLibraryScreenState
 
     if (id == null) return;
 
+    final family = context.read<FamilySessionProvider>();
+    if (!family.isReady) {
+      _showAccessDenied();
+      return;
+    }
+
     if (type == 'live') {
       Channel? item;
 
@@ -103,6 +109,18 @@ class _FavoritesLibraryScreenState
       }
 
       if (item != null && mounted) {
+        final categoryKey = item.categoryKey;
+        if (family.isChild &&
+            (categoryKey == null ||
+                categoryKey.isEmpty ||
+                !family.canAccessCategory(
+                  sourceKey: sourceKey,
+                  contentType: 'live',
+                  categoryKey: categoryKey,
+                ))) {
+          _showAccessDenied();
+          return;
+        }
         await pushWithFocusRestore(
           context,
           MaterialPageRoute(
@@ -125,6 +143,18 @@ class _FavoritesLibraryScreenState
       }
 
       if (item != null && mounted) {
+        final categoryKey = item.categoryKey;
+        if (family.isChild &&
+            (categoryKey == null ||
+                categoryKey.isEmpty ||
+                !family.canAccessCategory(
+                  sourceKey: sourceKey,
+                  contentType: 'vod',
+                  categoryKey: categoryKey,
+                ))) {
+          _showAccessDenied();
+          return;
+        }
         await pushWithFocusRestore(
           context,
           MaterialPageRoute(
@@ -146,6 +176,18 @@ class _FavoritesLibraryScreenState
       }
 
       if (item != null && mounted) {
+        final categoryKey = item.categoryKey;
+        if (family.isChild &&
+            (categoryKey == null ||
+                categoryKey.isEmpty ||
+                !family.canAccessCategory(
+                  sourceKey: sourceKey,
+                  contentType: 'series',
+                  categoryKey: categoryKey,
+                ))) {
+          _showAccessDenied();
+          return;
+        }
         await pushWithFocusRestore(
           context,
           MaterialPageRoute(
@@ -168,6 +210,15 @@ class _FavoritesLibraryScreenState
         ),
       );
     }
+  }
+
+  void _showAccessDenied() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Dieser Inhalt ist für das aktive Profil nicht freigegeben.'),
+      ),
+    );
   }
 
   Future<void> _remove(
@@ -354,7 +405,7 @@ class _FavoritesLibraryScreenState
                         final row = rows[index];
 
                         return ListTile(
-                          autofocus: DeviceLayout.isTelevision && index == 0,
+                          autofocus: index == 0,
                           focusColor: color.withValues(
                             alpha: 0.14,
                           ),
