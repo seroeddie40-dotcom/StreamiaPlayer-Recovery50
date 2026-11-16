@@ -1,10 +1,11 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 import '../models/family_profile.dart';
+import '../providers/family_session_provider.dart';
 import '../services/family_profile_service.dart';
-import '../services/family_pin_service.dart';
 
 class FamilyProfileSelectionScreen extends StatefulWidget {
   const FamilyProfileSelectionScreen({
@@ -21,9 +22,6 @@ class _FamilyProfileSelectionScreenState
   final FamilyProfileService _profileService =
       FamilyProfileService();
 
-  final FamilyPinService _pinService =
-      FamilyPinService();
-
   List<FamilyProfile> _profiles = [];
 
   bool _isLoading = true;
@@ -37,6 +35,8 @@ class _FamilyProfileSelectionScreenState
   }
 
   Future<void> _loadProfiles() async {
+    if (!mounted) return;
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -68,23 +68,59 @@ class _FamilyProfileSelectionScreenState
   ) async {
     if (_isSelecting) return;
 
+    final session = context.read<FamilySessionProvider>();
+
     setState(() {
       _isSelecting = true;
+      _errorMessage = null;
     });
 
-    try {
-      if (profile.type == FamilyProfileType.adult) {
-        final verified = await _verifyAdultPin(profile);
+    // Invalidate the previous family session before
+    // any new profile can be selected.
+    session.clearSession();
 
-        if (!mounted || !verified) return;
+    try {
+      String? adultPin;
+
+      if (profile.type == FamilyProfileType.adult) {
+        adultPin = await _requestAdultPin(profile);
+
+        if (!mounted) return;
+
+        if (adultPin == null) {
+          return;
+        }
       }
+
+      // The provider reloads the profile from Supabase,
+      // verifies adult PINs and loads child permissions.
+      final activated = await session.activateProfile(
+        profile,
+        adultPin: adultPin,
+      );
 
       if (!mounted) return;
 
-      // The calling screen receives the selected profile.
-      // Persisting the active profile and enforcing
-      // child restrictions are handled during integration.
-      Navigator.of(context).pop(profile);
+      if (!activated) {
+        _showMessage(
+          'Das Profil konnte nicht aktiviert werden. '
+          'Bitte prüfe die PIN und versuche es erneut.',
+        );
+        return;
+      }
+
+      // Preserve the existing navigation contract:
+      // the calling screen receives the selected profile.
+      Navigator.of(context).pop(
+        session.activeProfile,
+      );
+    } catch (_) {
+      if (!mounted) return;
+
+      _showMessage(
+        'Bei der Profilaktivierung ist ein Fehler '
+        'aufgetreten. Bitte erneut versuchen.',
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -94,30 +130,42 @@ class _FamilyProfileSelectionScreenState
     }
   }
 
-  Future<bool> _verifyAdultPin(
+  void _showMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  /// Collects the adult PIN without verifying it here.
+  ///
+  /// Verification is performed by FamilySessionProvider.
+  /// This prevents duplicate PIN verification requests.
+  Future<String?> _requestAdultPin(
     FamilyProfile profile,
   ) async {
     final pinController = TextEditingController();
     final pinFocus = FocusNode();
 
-    bool isChecking = false;
     bool showPin = false;
     String? errorMessage;
 
     try {
-      final result = await showDialog<bool>(
+      final pin = await showDialog<String>(
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) {
           return StatefulBuilder(
             builder: (dialogContext, updateDialog) {
-              Future<void> submit() async {
-                if (isChecking) return;
-
-                final pin = pinController.text;
+              void submit() {
+                final value = pinController.text;
 
                 if (!RegExp(r'^[0-9]{4,12}$')
-                    .hasMatch(pin)) {
+                    .hasMatch(value)) {
                   updateDialog(() {
                     errorMessage =
                         'Bitte eine gültige PIN eingeben.';
@@ -125,67 +173,7 @@ class _FamilyProfileSelectionScreenState
                   return;
                 }
 
-                updateDialog(() {
-                  isChecking = true;
-                  errorMessage = null;
-                });
-
-                try {
-                  final verification =
-                      await _pinService.verifyPin(
-                    scope: FamilyPinScope.adult,
-                    pin: pin,
-                    familyProfileId: profile.id,
-                  );
-
-                  if (!dialogContext.mounted) return;
-
-                  if (verification.isSuccessful) {
-                    Navigator.of(dialogContext).pop(true);
-                    return;
-                  }
-
-                  updateDialog(() {
-                    switch (verification.status) {
-                      case 'invalid_pin':
-                        errorMessage =
-                            'Die PIN ist nicht korrekt.';
-                        break;
-                      case 'locked':
-                        errorMessage =
-                            'Zu viele Fehlversuche. '
-                            'Bitte später erneut versuchen.';
-                        break;
-                      case 'not_configured':
-                        errorMessage =
-                            'Für dieses Erwachsenenprofil '
-                            'ist noch keine PIN eingerichtet.';
-                        break;
-                      case 'unauthorized':
-                        errorMessage =
-                            'Bitte erneut anmelden.';
-                        break;
-                      default:
-                        errorMessage =
-                            'Die PIN konnte nicht '
-                            'bestätigt werden.';
-                    }
-                  });
-                } catch (_) {
-                  if (!dialogContext.mounted) return;
-
-                  updateDialog(() {
-                    errorMessage =
-                        'Die PIN-Prüfung ist momentan '
-                        'nicht verfügbar.';
-                  });
-                } finally {
-                  if (dialogContext.mounted) {
-                    updateDialog(() {
-                      isChecking = false;
-                    });
-                  }
-                }
+                Navigator.of(dialogContext).pop(value);
               }
 
               return AlertDialog(
@@ -219,7 +207,8 @@ class _FamilyProfileSelectionScreenState
                             FilteringTextInputFormatter
                                 .digitsOnly,
                           ],
-                          decoration: const InputDecoration(
+                          decoration:
+                              const InputDecoration(
                             labelText: 'Profil-PIN',
                             counterText: '',
                             prefixIcon:
@@ -231,27 +220,30 @@ class _FamilyProfileSelectionScreenState
                         CheckboxListTile(
                           value: showPin,
                           contentPadding: EdgeInsets.zero,
-                          title: const Text('PIN anzeigen'),
+                          title:
+                              const Text('PIN anzeigen'),
                           controlAffinity:
-                              ListTileControlAffinity.leading,
-                          onChanged: isChecking
-                              ? null
-                              : (value) {
-                                  updateDialog(() {
-                                    showPin = value ?? false;
-                                  });
-                                },
+                              ListTileControlAffinity
+                                  .leading,
+                          onChanged: (value) {
+                            updateDialog(() {
+                              showPin = value ?? false;
+                            });
+                          },
                         ),
                         if (errorMessage != null)
                           Padding(
                             padding:
-                                const EdgeInsets.only(top: 8),
+                                const EdgeInsets.only(
+                              top: 8,
+                            ),
                             child: Text(
                               errorMessage!,
                               style: TextStyle(
-                                color: Theme.of(dialogContext)
-                                    .colorScheme
-                                    .error,
+                                color:
+                                    Theme.of(dialogContext)
+                                        .colorScheme
+                                        .error,
                               ),
                             ),
                           ),
@@ -261,25 +253,15 @@ class _FamilyProfileSelectionScreenState
                 ),
                 actions: [
                   TextButton(
-                    onPressed: isChecking
-                        ? null
-                        : () {
-                            Navigator.of(dialogContext)
-                                .pop(false);
-                          },
+                    onPressed: () {
+                      Navigator.of(dialogContext)
+                          .pop();
+                    },
                     child: const Text('Abbrechen'),
                   ),
                   FilledButton(
-                    onPressed: isChecking ? null : submit,
-                    child: isChecking
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                            ),
-                          )
-                        : const Text('Entsperren'),
+                    onPressed: submit,
+                    child: const Text('Entsperren'),
                   ),
                 ],
               );
@@ -288,18 +270,22 @@ class _FamilyProfileSelectionScreenState
         },
       );
 
-      return result == true;
+      return pin;
     } finally {
-      // Wait until the dialog route has finished
-      // before releasing its input resources.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        pinController.dispose();
-        pinFocus.dispose();
-      });
+      // Release resources after the dialog has
+      // completed its current frame.
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) {
+          pinController.dispose();
+          pinFocus.dispose();
+        },
+      );
     }
   }
 
-  IconData _profileIcon(FamilyProfile profile) {
+  IconData _profileIcon(
+    FamilyProfile profile,
+  ) {
     if (profile.type == FamilyProfileType.child) {
       return Icons.child_care_rounded;
     }
@@ -340,7 +326,8 @@ class _FamilyProfileSelectionScreenState
             vertical: 20,
           ),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisAlignment:
+                MainAxisAlignment.center,
             children: [
               CircleAvatar(
                 radius: 34,
@@ -380,7 +367,8 @@ class _FamilyProfileSelectionScreenState
                           ? 'Kinderprofil'
                           : 'Erwachsenenprofil',
                       maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      overflow:
+                          TextOverflow.ellipsis,
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall,
@@ -433,7 +421,8 @@ class _FamilyProfileSelectionScreenState
               FilledButton.icon(
                 onPressed: _loadProfiles,
                 icon: const Icon(Icons.refresh),
-                label: const Text('Erneut versuchen'),
+                label:
+                    const Text('Erneut versuchen'),
               ),
             ],
           ),
@@ -468,7 +457,8 @@ class _FamilyProfileSelectionScreenState
               OutlinedButton.icon(
                 onPressed: _loadProfiles,
                 icon: const Icon(Icons.refresh),
-                label: const Text('Aktualisieren'),
+                label:
+                    const Text('Aktualisieren'),
               ),
             ],
           ),
@@ -493,9 +483,8 @@ class _FamilyProfileSelectionScreenState
             crossAxisCount: columns,
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio: width >= 600
-                ? 1.05
-                : 0.82,
+            childAspectRatio:
+                width >= 600 ? 1.05 : 0.82,
           ),
           itemCount: _profiles.length,
           itemBuilder: (context, index) {
@@ -512,7 +501,9 @@ class _FamilyProfileSelectionScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Wer schaut gerade?'),
+        title: const Text(
+          'Wer schaut gerade?',
+        ),
         actions: [
           IconButton(
             tooltip: 'Profile aktualisieren',
