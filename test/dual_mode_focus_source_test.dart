@@ -37,7 +37,21 @@ void main() {
   test('parental PIN and folder controls only request initial TV focus', () {
     final source = File('lib/screens/parental_lock_screen.dart').readAsStringSync();
     expect(source.contains("import '../core/platform/device_layout.dart';"), isTrue);
-    expect(RegExp(r'autofocus: DeviceLayout\.isTelevision && i == 0').allMatches(source).length, 2);
+
+    expect(
+      RegExp(
+        r'autofocus:\s*DeviceLayout\.isTelevision\s*&&\s*row\s*==\s*0\s*&&\s*column\s*==\s*0',
+      ).allMatches(source).length,
+      1,
+    );
+
+    expect(
+      RegExp(
+        r'autofocus:\s*DeviceLayout\.isTelevision\s*&&\s*index\s*==\s*0',
+      ).allMatches(source).length,
+      1,
+    );
+
     expect(source.contains('autofocus: i == 0,'), isFalse);
   });
 
@@ -58,5 +72,4 @@ void main() {
     expect(appStart, greaterThan(orientation));
     expect(source.contains('DeviceLayout.isTelevision'), isTrue);
   });
-
 }
