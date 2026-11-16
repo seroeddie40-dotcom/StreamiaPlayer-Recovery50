@@ -198,7 +198,7 @@ class MetadataEnrichmentService {
         return Season(number: season.number, episodes: episodes);
       }).toList(growable: false);
       return Series(
-        id: series.id, title: series.title, plot: series.plot,
+        id: series.id, title: series.title, categoryKey: series.categoryKey, plot: series.plot,
         posterUrl: series.posterUrl, backdropUrl: series.backdropUrl,
         genre: series.genre, releaseDate: series.releaseDate,
         ageRating: series.ageRating, cast: series.cast, director: series.director,
