@@ -9,9 +9,7 @@ import '../services/family_profile_service.dart';
 import 'family_profile_management_screen.dart';
 
 class FamilyProfileSelectionScreen extends StatefulWidget {
-  const FamilyProfileSelectionScreen({
-    super.key,
-  });
+  const FamilyProfileSelectionScreen({super.key});
 
   @override
   State<FamilyProfileSelectionScreen> createState() =>
@@ -48,8 +46,7 @@ class _FamilyProfileSelectionScreenState
     });
 
     try {
-      final profiles =
-          await _profileService.loadProfiles();
+      final profiles = await _profileService.loadProfiles();
 
       if (!mounted) return;
 
@@ -63,8 +60,7 @@ class _FamilyProfileSelectionScreenState
       setState(() {
         _isLoading = false;
         _errorMessage =
-            'Die Familienprofile konnten nicht '
-            'geladen werden.';
+            'Die Familienprofile konnten nicht geladen werden.';
       });
     }
   }
@@ -91,15 +87,13 @@ class _FamilyProfileSelectionScreenState
       );
     } catch (_) {
       _showMessage(
-        'Die Familienverwaltung konnte '
-        'nicht geöffnet werden.',
+        'Die Familienverwaltung konnte nicht geöffnet werden.',
       );
     } finally {
       if (mounted) {
         setState(() {
           _isManaging = false;
         });
-
         await _loadProfiles();
       }
     }
@@ -126,85 +120,102 @@ class _FamilyProfileSelectionScreenState
       return;
     }
 
-    final session =
-        context.read<FamilySessionProvider>();
+    final session = context.read<FamilySessionProvider>();
 
     setState(() {
       _isSelecting = true;
       _errorMessage = null;
     });
 
-    // No previous profile session may be reused.
+    // Never reuse an earlier profile session.
     session.clearSession();
 
     try {
-      String? adultPin;
+      String? parentPin;
 
       if (profile.type == FamilyProfileType.adult) {
-        adultPin = await _requestAdultPin(profile);
+        parentPin = await _requestParentPin(profile);
 
-        if (!mounted || adultPin == null) {
+        if (!mounted || parentPin == null) {
           return;
         }
       }
 
-      final activated =
-          await session.activateProfile(
+      // The provider retains the adultPin parameter name
+      // for compatibility. Its value is now the parent PIN.
+      final activated = await session.activateProfile(
         profile,
-        adultPin: adultPin,
+        adultPin: parentPin,
       );
 
       if (!mounted) return;
 
       if (!activated || !session.isReady) {
         if (profile.type == FamilyProfileType.adult) {
-          final openManagement = await showDialog<bool>(
+          final openManagement =
+              await showDialog<bool>(
             context: context,
-            builder: (dialogContext) => AlertDialog(
-              title: const Text('Profil nicht entsperrt'),
-              content: const Text(
-                'Die Erwachsenen-PIN konnte nicht bestätigt '
-                'werden. Möglicherweise ist sie falsch oder '
-                'für dieses Profil noch nicht eingerichtet. '
-                'Eine erstmalige Einrichtung ist ausschließlich '
-                'in der geschützten Familienverwaltung möglich.',
-              ),
-              actions: [
-                TextButton(
-                  autofocus: true,
-                  onPressed: () =>
-                      Navigator.of(dialogContext).pop(false),
-                  child: const Text('Schließen'),
+            builder: (dialogContext) {
+              return AlertDialog(
+                title: const Text(
+                  'Profil nicht entsperrt',
                 ),
-                FilledButton(
-                  onPressed: () =>
-                      Navigator.of(dialogContext).pop(true),
-                  child: const Text('Familienverwaltung'),
+                content: const Text(
+                  'Das Erwachsenenprofil konnte nicht '
+                  'mit der Eltern-PIN entsperrt werden. '
+                  'Bitte überprüfe deine PIN und die '
+                  'Verbindung zum Server. Falls noch '
+                  'keine Eltern-PIN eingerichtet wurde, '
+                  'öffne die Familienverwaltung.',
                 ),
-              ],
-            ),
+                actions: [
+                  TextButton(
+                    autofocus: true,
+                    onPressed: () {
+                      Navigator.of(dialogContext)
+                          .pop(false);
+                    },
+                    child: const Text('Schließen'),
+                  ),
+                  FilledButton(
+                    onPressed: () {
+                      Navigator.of(dialogContext)
+                          .pop(true);
+                    },
+                    child: const Text(
+                      'Familienverwaltung',
+                    ),
+                  ),
+                ],
+              );
+            },
           );
+
           if (!mounted) return;
+
           if (openManagement == true) {
-            // Release the selection lock before navigating.
-            setState(() => _isSelecting = false);
+            setState(() {
+              _isSelecting = false;
+            });
+
             await _openProfileManagement();
           }
         } else {
           _showMessage(
-            'Das Kinderprofil konnte nicht aktiviert werden. '
-            'Bitte versuche es erneut.',
+            'Das Kinderprofil konnte nicht aktiviert '
+            'werden. Bitte versuche es erneut.',
           );
         }
         return;
       }
 
-      // When opened from Settings, return to the previous screen.
-      // When this widget is the startup route, the app gate itself
-      // replaces it with the dashboard after session activation.
-      // Popping the root route would leave the Navigator empty.
+      // When opened from Settings, return to the caller.
+      // When used as the startup route, the app gate
+      // handles navigation after session activation.
       if (Navigator.of(context).canPop()) {
-        Navigator.of(context).pop(session.activeProfile);
+        Navigator.of(context).pop(
+          session.activeProfile,
+        );
       }
     } catch (_) {
       _showMessage(
@@ -220,7 +231,7 @@ class _FamilyProfileSelectionScreenState
     }
   }
 
-  Future<String?> _requestAdultPin(
+  Future<String?> _requestParentPin(
     FamilyProfile profile,
   ) async {
     final pinController = TextEditingController();
@@ -237,14 +248,14 @@ class _FamilyProfileSelectionScreenState
           return StatefulBuilder(
             builder: (dialogContext, updateDialog) {
               void submit() {
-                final value =
-                    pinController.text.trim();
+                final value = pinController.text.trim();
 
-                if (!RegExp(r'^[0-9]{4,12}$')
+                if (!RegExp(r'^[0-9]{6,10}$')
                     .hasMatch(value)) {
                   updateDialog(() {
                     errorMessage =
-                        'Bitte eine gültige PIN eingeben.';
+                        'Die Eltern-PIN muss aus '
+                        '6 bis 10 Ziffern bestehen.';
                   });
                   return;
                 }
@@ -252,89 +263,144 @@ class _FamilyProfileSelectionScreenState
                 Navigator.of(dialogContext).pop(value);
               }
 
-              return AlertDialog(
-                title: const Text(
-                  'Erwachsenenprofil entsperren',
+              return Dialog(
+                insetPadding:
+                    const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 16,
                 ),
-                content: SizedBox(
-                  width: 360,
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment:
-                          CrossAxisAlignment.stretch,
-                      children: [
-                        Text(
-                          'PIN für ${profile.displayName} '
-                          'eingeben.',
-                        ),
-                        const SizedBox(height: 18),
-                        TextField(
-                          controller: pinController,
-                          focusNode: pinFocus,
-                          autofocus: true,
-                          obscureText: !showPin,
-                          keyboardType:
-                              TextInputType.number,
-                          textInputAction:
-                              TextInputAction.done,
-                          maxLength: 12,
-                          inputFormatters: [
-                            FilteringTextInputFormatter
-                                .digitsOnly,
-                          ],
-                          decoration:
-                              const InputDecoration(
-                            labelText: 'Profil-PIN',
-                            counterText: '',
-                            prefixIcon:
-                                Icon(Icons.lock_outline),
-                            border: OutlineInputBorder(),
+                child: SafeArea(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: 420,
+                    ),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment:
+                            CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.admin_panel_settings_outlined,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Eltern-PIN eingeben',
+                                  style:
+                                      Theme.of(dialogContext)
+                                          .textTheme
+                                          .titleLarge,
+                                ),
+                              ),
+                            ],
                           ),
-                          onSubmitted: (_) => submit(),
-                        ),
-                        CheckboxListTile(
-                          value: showPin,
-                          contentPadding: EdgeInsets.zero,
-                          title:
-                              const Text('PIN anzeigen'),
-                          controlAffinity:
-                              ListTileControlAffinity.leading,
-                          onChanged: (value) {
-                            updateDialog(() {
-                              showPin = value ?? false;
-                            });
-                          },
-                        ),
-                        if (errorMessage != null)
-                          Padding(
-                            padding:
-                                const EdgeInsets.only(top: 8),
-                            child: Text(
+                          const SizedBox(height: 16),
+                          Text(
+                            'Erwachsenenprofil '
+                            '"${profile.displayName}" '
+                            'entsperren.',
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Verwende die gemeinsame '
+                            'Eltern-PIN deines Kontos.',
+                          ),
+                          const SizedBox(height: 20),
+                          TextField(
+                            controller: pinController,
+                            focusNode: pinFocus,
+                            autofocus: true,
+                            obscureText: !showPin,
+                            keyboardType:
+                                TextInputType.number,
+                            textInputAction:
+                                TextInputAction.done,
+                            maxLength: 10,
+                            inputFormatters: [
+                              FilteringTextInputFormatter
+                                  .digitsOnly,
+                            ],
+                            decoration:
+                                const InputDecoration(
+                              labelText: 'Eltern-PIN',
+                              counterText: '',
+                              prefixIcon: Icon(
+                                Icons.lock_outline,
+                              ),
+                              border: OutlineInputBorder(),
+                            ),
+                            onChanged: (_) {
+                              if (errorMessage != null) {
+                                updateDialog(() {
+                                  errorMessage = null;
+                                });
+                              }
+                            },
+                            onSubmitted: (_) => submit(),
+                          ),
+                          CheckboxListTile(
+                            value: showPin,
+                            contentPadding: EdgeInsets.zero,
+                            title: const Text(
+                              'PIN anzeigen',
+                            ),
+                            controlAffinity:
+                                ListTileControlAffinity
+                                    .leading,
+                            onChanged: (value) {
+                              updateDialog(() {
+                                showPin = value ?? false;
+                              });
+                            },
+                          ),
+                          if (errorMessage != null) ...[
+                            const SizedBox(height: 8),
+                            Text(
                               errorMessage!,
                               style: TextStyle(
-                                color: Theme.of(dialogContext)
-                                    .colorScheme
-                                    .error,
+                                color:
+                                    Theme.of(dialogContext)
+                                        .colorScheme
+                                        .error,
                               ),
                             ),
+                          ],
+                          const SizedBox(height: 16),
+                          Wrap(
+                            alignment: WrapAlignment.end,
+                            spacing: 10,
+                            runSpacing: 10,
+                            children: [
+                              TextButton(
+                                autofocus: false,
+                                onPressed: () {
+                                  Navigator.of(dialogContext)
+                                      .pop();
+                                },
+                                child: const Text(
+                                  'Abbrechen',
+                                ),
+                              ),
+                              FilledButton.icon(
+                                onPressed: submit,
+                                icon: const Icon(
+                                  Icons.lock_open_outlined,
+                                ),
+                                label: const Text(
+                                  'Entsperren',
+                                ),
+                              ),
+                            ],
                           ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-                actions: [
-                  TextButton(
-                    onPressed: () {
-                      Navigator.of(dialogContext).pop();
-                    },
-                    child: const Text('Abbrechen'),
-                  ),
-                  FilledButton(
-                    onPressed: submit,
-                    child: const Text('Entsperren'),
-                  ),
-                ],
               );
             },
           );
@@ -350,9 +416,7 @@ class _FamilyProfileSelectionScreenState
     }
   }
 
-  IconData _profileIcon(
-    FamilyProfile profile,
-  ) {
+  IconData _profileIcon(FamilyProfile profile) {
     return profile.type == FamilyProfileType.child
         ? Icons.child_care_rounded
         : Icons.person_rounded;
@@ -369,9 +433,7 @@ class _FamilyProfileSelectionScreenState
         : colors.primary;
   }
 
-  Widget _buildProfileCard(
-    FamilyProfile profile,
-  ) {
+  Widget _buildProfileCard(FamilyProfile profile) {
     final color = _profileColor(context, profile);
     final isChild =
         profile.type == FamilyProfileType.child;
@@ -390,8 +452,7 @@ class _FamilyProfileSelectionScreenState
             vertical: 20,
           ),
           child: Column(
-            mainAxisAlignment:
-                MainAxisAlignment.center,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               CircleAvatar(
                 radius: 34,
@@ -431,8 +492,7 @@ class _FamilyProfileSelectionScreenState
                           ? 'Kinderprofil'
                           : 'Erwachsenenprofil',
                       maxLines: 1,
-                      overflow:
-                          TextOverflow.ellipsis,
+                      overflow: TextOverflow.ellipsis,
                       style: Theme.of(context)
                           .textTheme
                           .bodySmall,
@@ -518,7 +578,7 @@ class _FamilyProfileSelectionScreenState
 
     if (_errorMessage != null) {
       return Center(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -536,7 +596,9 @@ class _FamilyProfileSelectionScreenState
               FilledButton.icon(
                 onPressed: _loadProfiles,
                 icon: const Icon(Icons.refresh),
-                label: const Text('Erneut versuchen'),
+                label: const Text(
+                  'Erneut versuchen',
+                ),
               ),
             ],
           ),
@@ -583,31 +645,27 @@ class _FamilyProfileSelectionScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Wer schaut gerade?',
-        ),
+        title: const Text('Wer schaut gerade?'),
         actions: [
           if (_profiles.isNotEmpty)
             IconButton(
               tooltip: 'Familienprofile verwalten',
-              onPressed:
-                  _isLoading ||
-                          _isSelecting ||
-                          _isManaging
-                      ? null
-                      : _openProfileManagement,
+              onPressed: _isLoading ||
+                      _isSelecting ||
+                      _isManaging
+                  ? null
+                  : _openProfileManagement,
               icon: const Icon(
                 Icons.manage_accounts_outlined,
               ),
             ),
           IconButton(
             tooltip: 'Profile aktualisieren',
-            onPressed:
-                _isLoading ||
-                        _isSelecting ||
-                        _isManaging
-                    ? null
-                    : _loadProfiles,
+            onPressed: _isLoading ||
+                    _isSelecting ||
+                    _isManaging
+                ? null
+                : _loadProfiles,
             icon: const Icon(Icons.refresh),
           ),
         ],
