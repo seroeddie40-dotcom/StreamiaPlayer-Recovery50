@@ -61,11 +61,30 @@ class FamilyPinService {
 
     if (scope == FamilyPinScope.adult &&
         (familyProfileId == null ||
-            familyProfileId.isEmpty)) {
+            familyProfileId.trim().isEmpty)) {
       throw ArgumentError(
-        'Für die Erwachsenen-PIN ist eine Profil-ID erforderlich.',
+        'Für die Erwachsenen-PIN ist eine '
+        'Profil-ID erforderlich.',
       );
     }
+  }
+
+  bool _isValidNewPin(String pin) {
+    return RegExp(r'^[0-9]{6,12}$').hasMatch(pin);
+  }
+
+  bool _isValidParentToken(String token) {
+    return RegExp(r'^[0-9a-f]{64}$').hasMatch(token);
+  }
+
+  bool _isValidUuid(String value) {
+    return RegExp(
+      r'^[0-9a-fA-F]{8}-'
+      r'[0-9a-fA-F]{4}-'
+      r'[0-9a-fA-F]{4}-'
+      r'[0-9a-fA-F]{4}-'
+      r'[0-9a-fA-F]{12}$',
+    ).hasMatch(value);
   }
 
   /// Checks whether the authenticated account
@@ -76,10 +95,6 @@ class FamilyPinService {
   ///
   /// A server error is not treated as
   /// "not configured".
-  ///
-  /// This prevents accidentally opening the
-  /// initial PIN setup for existing accounts
-  /// when the server is unavailable.
   Future<FamilyParentPinStatus>
       getParentPinStatus() async {
     if (_client.auth.currentUser == null) {
@@ -122,19 +137,10 @@ class FamilyPinService {
   /// or reset using this method.
   ///
   /// Valid PIN length: 6 to 12 digits.
-  ///
-  /// Possible results:
-  /// - success
-  /// - already_configured
-  /// - invalid_pin
-  /// - unauthorized
-  ///
-  /// Never log or locally store the PIN
-  /// in plaintext.
   Future<String> initializeParentPin(
     String newPin,
   ) async {
-    if (!RegExp(r'^[0-9]{6,12}$').hasMatch(newPin)) {
+    if (!_isValidNewPin(newPin)) {
       return 'invalid_pin';
     }
 
@@ -167,6 +173,92 @@ class FamilyPinService {
       throw FormatException(
         'Unbekannter Status bei der '
         'Eltern-PIN-Einrichtung: $response',
+      );
+    }
+
+    return response;
+  }
+
+  /// Initializes an adult profile PIN
+  /// for the first time.
+  ///
+  /// A valid, server-verified parent PIN
+  /// session is required.
+  ///
+  /// Supabase also checks:
+  /// - Account ownership
+  /// - Adult profile type
+  /// - Whether a PIN already exists
+  ///
+  /// An existing adult PIN cannot be
+  /// overwritten using this method.
+  ///
+  /// Valid PIN length: 6 to 12 digits.
+  ///
+  /// Possible results:
+  /// - success
+  /// - already_configured
+  /// - invalid_pin
+  /// - invalid_profile
+  /// - invalid_parent_session
+  /// - unauthorized
+  ///
+  /// Never log or locally store PINs
+  /// or parent access tokens.
+  Future<String> initializeAdultPin({
+    required String parentAccessToken,
+    required String familyProfileId,
+    required String newPin,
+  }) async {
+    if (_client.auth.currentUser == null) {
+      return 'unauthorized';
+    }
+
+    if (!_isValidNewPin(newPin)) {
+      return 'invalid_pin';
+    }
+
+    if (!_isValidUuid(familyProfileId)) {
+      return 'invalid_profile';
+    }
+
+    if (!_isValidParentToken(parentAccessToken)) {
+      return 'invalid_parent_session';
+    }
+
+    // The server is authoritative.
+    // Local token validation alone is
+    // never considered authorization.
+    final response = await _client.rpc(
+      'initialize_family_adult_pin',
+      params: {
+        'p_parent_token': parentAccessToken,
+        'p_family_profile_id': familyProfileId,
+        'p_new_pin': newPin,
+      },
+    );
+
+    if (response is! String) {
+      throw const FormatException(
+        'Unerwartete Antwort bei der '
+        'Erwachsenenprofil-PIN-Einrichtung.',
+      );
+    }
+
+    const allowedStatuses = {
+      'success',
+      'already_configured',
+      'invalid_pin',
+      'invalid_profile',
+      'invalid_parent_session',
+      'unauthorized',
+    };
+
+    if (!allowedStatuses.contains(response)) {
+      throw FormatException(
+        'Unbekannter Status bei der '
+        'Erwachsenenprofil-PIN-Einrichtung: '
+        '$response',
       );
     }
 
@@ -247,8 +339,7 @@ class FamilyPinService {
     );
 
     if (_client.auth.currentUser == null ||
-        !RegExp(r'^[0-9a-f]{64}$')
-            .hasMatch(accessToken)) {
+        !_isValidParentToken(accessToken)) {
       return false;
     }
 
