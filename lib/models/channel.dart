@@ -13,7 +13,7 @@ class Channel {
 
   /// Unique identifier of the playlist containing
   /// this channel. Must match PlaylistProfile.sourceKey.
-  final String? sourceKey;
+  String? sourceKey;
 
   /// Original category identifier from the source.
   ///
@@ -21,7 +21,7 @@ class Channel {
   /// M3U: the original group-title value.
   ///
   /// Must not be replaced by a translated label.
-  final String? categoryKey;
+  String? categoryKey;
 
   Channel({
     required this.id,
