@@ -4,10 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
-import '../core/platform/device_layout.dart';
 import '../core/theme/app_theme.dart';
 import '../models/vod_item.dart';
 import '../providers/content_provider.dart';
+import '../providers/family_session_provider.dart';
 import '../providers/locale_provider.dart';
 import '../services/download_service.dart';
 import '../widgets/favorite_toggle_button.dart';
@@ -238,7 +238,16 @@ class _VodScreenState extends State<VodScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final items = context.watch<ContentProvider>().vodItems;
+    final content = context.watch<ContentProvider>();
+    final family = context.watch<FamilySessionProvider>();
+    final items = family.isReady && family.isChild
+        ? family.filterItems<VodItem>(
+            items: content.vodItems,
+            sourceKey: content.sourceKey,
+            contentType: 'vod',
+            categoryKeyOf: (item) => item.categoryKey,
+          )
+        : family.isReady ? content.vodItems : <VodItem>[];
 
     final counts = <String, int>{};
 
@@ -314,7 +323,7 @@ class _VodScreenState extends State<VodScreen> {
                       title: _vodText(context, 'all'),
                       count: items.length,
                       selected: selected == null,
-                      autofocus: DeviceLayout.isTelevision && wide,
+                      autofocus: wide,
                       onTap: () =>
                           setState(() => _selectedGenre = null),
                     ),
@@ -472,7 +481,7 @@ class _VodScreenState extends State<VodScreen> {
                                       ),
                                       item: filtered[index],
                                       autofocus:
-                                          DeviceLayout.isTelevision && index == 0 && !wide,
+                                          index == 0 && !wide,
                                     ),
                                   ),
                                 );
@@ -618,7 +627,6 @@ class _VodTileState extends State<_VodTile> {
   String get _downloadId => 'movie_${widget.item.id}';
   bool _startingDownload = false;
   bool _opening = false;
-  bool _focused = false;
 
   Future<void> _openDetails() async {
     if (_opening) return;
@@ -697,9 +705,6 @@ class _VodTileState extends State<_VodTile> {
 
     return InkWell(
       autofocus: widget.autofocus,
-      onFocusChange: (value) {
-        if (mounted) setState(() => _focused = value);
-      },
       focusColor: AppTheme.electricBlue.withOpacity(0.22),
       borderRadius: BorderRadius.circular(16),
       onTap: _opening ? null : _openDetails,
@@ -710,10 +715,7 @@ class _VodTileState extends State<_VodTile> {
               : AppTheme.lightSurface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: _focused
-                ? AppTheme.electricBlue
-                : AppTheme.electricBlue.withOpacity(0.12),
-            width: _focused ? 3 : 1,
+            color: AppTheme.electricBlue.withOpacity(0.12),
           ),
         ),
         clipBehavior: Clip.antiAlias,
