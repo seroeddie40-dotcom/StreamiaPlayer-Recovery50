@@ -168,7 +168,13 @@ class FamilyContentAccessSnapshot {
         contentType.trim().toLowerCase();
     final normalizedCategoryKey = categoryKey.trim();
 
-    // Invalid identifiers never grant access.
+    // No permissions loaded: fail closed.
+    if (!rulesLoaded) return false;
+
+    // Adult profiles are not subject to child category restrictions.
+    if (!isChild) return true;
+
+    // Child identifiers must match the original playlist metadata.
     if (normalizedSourceKey.isEmpty ||
         normalizedCategoryKey.isEmpty ||
         !_validContentTypes.contains(
@@ -177,16 +183,6 @@ class FamilyContentAccessSnapshot {
       return false;
     }
 
-    // No permissions loaded: fail closed.
-    if (!rulesLoaded) {
-      return false;
-    }
-
-    // Adult profiles are not restricted
-    // by child category permissions.
-    if (!isChild) {
-      return true;
-    }
 
     // Explicit blocks override the default-visible policy.
     for (final rule in rules) {
@@ -219,7 +215,16 @@ class FamilyContentAccessSnapshot {
     for (final item in items) {
       final categoryKey = categoryKeyOf(item);
 
-      if (categoryKey == null) {
+      // Legacy catalogs can contain entries without a category ID.
+      // Show them only when no folder is explicitly blocked for this
+      // playlist/content type. Otherwise their category cannot be
+      // established safely and they remain hidden until a catalog reload.
+      if (categoryKey == null || categoryKey.trim().isEmpty) {
+        final hasBlockedCategories = rules.any((rule) =>
+            rule['source_key'] == sourceKey.trim() &&
+            rule['content_type'] == contentType.trim().toLowerCase() &&
+            rule['is_visible'] == false);
+        if (rulesLoaded && !hasBlockedCategories) result.add(item);
         continue;
       }
 
