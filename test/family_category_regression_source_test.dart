@@ -20,6 +20,16 @@ void main() {
 
   test('bulk update checks persisted state before clearing selection', () {
     final source = File('lib/screens/family_child_category_permissions_screen.dart').readAsStringSync();
-    expect(source.contains('if (confirmed) _selectedKeys.clear();'), isTrue);
+    // Bulk updates first reload persisted rules and verify every selected
+    // category. The selection is cleared only after that verification.
+    final bulkStart = source.indexOf('Future<void> _applyBulk(');
+    final bulkEnd = source.indexOf('Widget _build', bulkStart);
+    final bulk = source.substring(bulkStart, bulkEnd);
+    final verifyIndex = bulk.indexOf('final confirmed = chosen.every(');
+    final rejectIndex = bulk.indexOf('if (!confirmed)');
+    final clearIndex = bulk.indexOf('_selectedKeys.clear();');
+    expect(verifyIndex, lessThan(rejectIndex));
+    expect(rejectIndex, lessThan(clearIndex));
+    expect(bulk.contains('throw const _FamilyPermissionError('), isTrue);
   });
 }
