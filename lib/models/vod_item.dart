@@ -1,5 +1,7 @@
 class VodItem {
   final String id;
+  /// Original playlist group or Xtream category ID.
+  final String? categoryKey;
   final String title;
   final String? plot;
   final String? posterUrl;
@@ -21,6 +23,7 @@ class VodItem {
 
   VodItem({
     required this.id,
+    this.categoryKey,
     required this.title,
     this.plot,
     this.posterUrl,
@@ -44,7 +47,7 @@ class VodItem {
   VodItem copyWith({String? plot, String? posterUrl, String? backdropUrl, String? genre,
     String? releaseDate, double? rating, String? externalMetadataId, String? metadataSource,
     String? metadataProviderId, String? metadataAttribution, String? metadataLicense, String? metadataSourceUrl}) {
-    return VodItem(id: id, title: title, plot: _keep(plot, this.plot),
+    return VodItem(id: id, categoryKey: categoryKey, title: title, plot: _keep(plot, this.plot),
       posterUrl: _keep(posterUrl, this.posterUrl), backdropUrl: _keep(backdropUrl, this.backdropUrl),
       genre: _keep(genre, this.genre), releaseDate: _keep(releaseDate, this.releaseDate),
       ageRating: ageRating, director: director, cast: cast, rating: rating ?? this.rating,
