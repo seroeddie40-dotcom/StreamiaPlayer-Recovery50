@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/family_profile.dart';
 import 'family_profile_service.dart';
+import 'adult_folder_visibility_service.dart';
 
 /// Evaluates category visibility for family profiles.
 ///
@@ -32,13 +33,19 @@ class FamilyContentAccessService {
   /// Adult profiles do not require child rules.
   Future<FamilyContentAccessSnapshot> loadSnapshot({
     required FamilyProfile profile,
+    String? parentToken,
   }) async {
     if (profile.type == FamilyProfileType.adult) {
+      List<Map<String, dynamic>> hidden = const [];
+      try {
+        hidden = await AdultFolderVisibilityService().load(profile, parentToken: parentToken);
+      } catch (_) { /* Personal visibility is not a parental restriction. */ }
       return FamilyContentAccessSnapshot._(
         profileId: profile.id,
         isChild: false,
         rulesLoaded: true,
         rules: const [],
+        adultHiddenRules: List.unmodifiable(hidden.map((r) => Map<String, dynamic>.unmodifiable(r))),
       );
     }
 
@@ -140,6 +147,7 @@ class FamilyContentAccessSnapshot {
     required this.isChild,
     required this.rulesLoaded,
     required this.rules,
+    this.adultHiddenRules = const [],
   });
 
   /// Test-only constructor for exercising the real authorization policy
@@ -150,10 +158,12 @@ class FamilyContentAccessSnapshot {
     required bool isChild,
     required bool rulesLoaded,
     required List<Map<String, dynamic>> rules,
+    List<Map<String, dynamic>> adultHiddenRules = const [],
   }) => FamilyContentAccessSnapshot._(
     profileId: profileId,
     isChild: isChild,
     rulesLoaded: rulesLoaded,
+    adultHiddenRules: adultHiddenRules,
     rules: List.unmodifiable(rules.map(
       (rule) => Map<String, dynamic>.unmodifiable(rule),
     )),
@@ -164,6 +174,7 @@ class FamilyContentAccessSnapshot {
   final bool rulesLoaded;
 
   final List<Map<String, dynamic>> rules;
+  final List<Map<String, dynamic>> adultHiddenRules;
 
   static const Set<String> _validContentTypes = {
     'live',
@@ -191,7 +202,13 @@ class FamilyContentAccessSnapshot {
     if (!rulesLoaded) return false;
 
     // Adult profiles are not subject to child category restrictions.
-    if (!isChild) return true;
+    if (!isChild) {
+      return !adultHiddenRules.any((rule) =>
+        rule['source_key'] == normalizedSourceKey &&
+        rule['content_type'] == normalizedContentType &&
+        rule['category_key'] == normalizedCategoryKey &&
+        rule['is_visible'] == false);
+    }
 
     // Child identifiers must match the original playlist metadata.
     if (normalizedSourceKey.isEmpty ||

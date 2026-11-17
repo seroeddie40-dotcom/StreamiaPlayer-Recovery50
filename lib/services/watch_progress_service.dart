@@ -1,176 +1,126 @@
+import 'profile_sync_clock.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../providers/family_session_provider.dart';
 
-/// Account-scoped playback progress. Stream URLs and playlist credentials are
-/// deliberately never persisted; only stable content/source identifiers are.
+/// A service instance is bound to the account and profile at screen entry.
 class WatchProgressService {
-  final SupabaseClient? _client;
-  WatchProgressService({SupabaseClient? client})
-      : _client = client ?? _tryClient();
+  final FamilySessionProvider family;
+  final SupabaseClient _client;
+  final String? _account;
+  final String? _profile;
+  static Future<void> _tail = Future<void>.value();
+  WatchProgressService({required this.family, SupabaseClient? client})
+      : _client = client ?? Supabase.instance.client,
+        _account = family.activeProfile?.accountUserId,
+        _profile = family.activeProfile?.id;
 
-  static SupabaseClient? _tryClient() {
-    try { return Supabase.instance.client; } catch (_) { return null; }
-  }
+  bool get isCurrent => _account != null && _profile != null && family.isReady &&
+      _client.auth.currentUser?.id == _account && family.activeProfile?.id == _profile;
+  String get _key => 'streamia_progress_v2:$_account:$_profile';
+  Map<String, dynamic> get _auth => {'p_profile_id': _profile, 'p_parent_token': family.parentAccessToken};
 
-  bool get _ready => _client?.auth.currentUser != null;
-  Future<void> _queueOperations = Future<void>.value();
-
-  Future<T> _serializeQueue<T>(Future<T> Function() action) async {
-    final previous = _queueOperations;
+  Future<T> _serial<T>(Future<T> Function() action) async {
+    final previous = _tail;
     final gate = Completer<void>();
-    _queueOperations = gate.future;
+    _tail = gate.future;
     await previous;
-    try {
-      return await action();
-    } finally {
-      gate.complete();
+    try { return await action(); } finally { gate.complete(); }
+  }
+
+  Future<List<Map<String, dynamic>>> _local() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_key);
+    if (raw == null) return [];
+    return (jsonDecode(raw) as List).map((r) => Map<String, dynamic>.from(r as Map)).toList();
+  }
+  Future<void> _store(List<Map<String, dynamic>> rows) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!await prefs.setString(_key, jsonEncode(rows))) throw StateError('Progress storage failed');
+  }
+  bool _same(Map a, Map b) => a['source_key'] == b['source_key'] &&
+      a['content_id'] == b['content_id'] && a['content_type'] == b['content_type'];
+  DateTime _time(Map row) => DateTime.parse(row['watched_at'] as String);
+
+  Future<void> _flush(List<Map<String, dynamic>> rows) async {
+    for (final row in rows) {
+      if (!isCurrent) break;
+      if (row['pending'] != true) continue;
+      try {
+        await _client.rpc('write_profile_watch_progress', params: {..._auth,
+          'p_source_key': row['source_key'], 'p_content_id': row['content_id'],
+          'p_content_type': row['content_type'], 'p_title': row['title'],
+          'p_position': row['position_seconds'], 'p_duration': row['duration_seconds'],
+          'p_watched_at': row['watched_at']});
+        row['pending'] = false;
+      } catch (_) { /* Retry on next flush. */ }
     }
+    await _store(rows);
   }
+  Future<void> flushPending() => _serial(() async {
+    if (!isCurrent) return;
+    await _flush(await _local());
+  });
 
-  String? get _queueKey {
-    final userId = _client?.auth.currentUser?.id;
-    return userId == null ? null : 'streamia_watch_progress_queue_v1_$userId';
-  }
-
-  Future<List<Map<String, dynamic>>> _readQueue() async {
-    final key = _queueKey;
-    if (key == null) return [];
+  Future<List<Map<String, dynamic>>> _load(String sourceKey) => _serial(() async {
+    if (!isCurrent || sourceKey.isEmpty) return <Map<String, dynamic>>[];
+    final rows = await _local();
+    await _flush(rows);
+    if (!isCurrent) return <Map<String, dynamic>>[];
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(key);
-      if (raw == null || raw.isEmpty) return [];
-      final decoded = jsonDecode(raw);
-      if (decoded is! List) return [];
-      return decoded.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
-    } catch (_) {
-      return [];
-    }
-  }
-
-  Future<void> _writeQueue(List<Map<String, dynamic>> rows) async {
-    final key = _queueKey;
-    if (key == null) return;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(key, jsonEncode(rows.take(100).toList()));
-    } catch (_) {}
-  }
-
-  Future<void> _queueProgress(Map<String, dynamic> row) async {
-    await _serializeQueue(() async {
-      final rows = await _readQueue();
-      rows.removeWhere((item) => item['source_key'] == row['source_key'] &&
-          item['content_id'] == row['content_id'] && item['content_type'] == row['content_type']);
-      rows.insert(0, row);
-      await _writeQueue(rows.take(100).toList());
-    });
-  }
-
-  /// Retries locally queued progress records for the currently signed-in user.
-  Future<void> flushPending() async {
-    if (!_ready || _queueKey == null) return;
-    await _serializeQueue(() async {
-      final accountId = _client!.auth.currentUser?.id;
-      final rows = await _readQueue();
-      if (rows.isEmpty) return;
-      final remaining = <Map<String, dynamic>>[];
-      for (final row in rows) {
-        // Never replay a queued row after another account has signed in.
-        if (row['user_id'] != accountId) continue;
-        try {
-          await _client!.from('watch_history').upsert(row,
-              onConflict: 'user_id,source_key,content_id,content_type');
-        } catch (_) {
-          remaining.add(row);
-        }
+      final result = await _client.rpc('read_profile_watch_progress', params: {..._auth, 'p_source_key': sourceKey});
+      if (!isCurrent) return <Map<String, dynamic>>[];
+      for (final raw in result as List) {
+        final remote = Map<String, dynamic>.from(raw as Map);
+        remote['pending'] = false;
+        final index = rows.indexWhere((r) => _same(r, remote));
+        if (index < 0) { rows.add(remote); }
+        else if (!_time(rows[index]).isAfter(_time(remote))) { rows[index] = remote; }
       }
-      // Do not write an old account's queue into a newly signed-in account.
-      if (_client!.auth.currentUser?.id == accountId) {
-        await _writeQueue(remaining);
+      await _store(rows);
+    } catch (_) { /* Offline: keep cached progress. */ }
+    if (!isCurrent) return <Map<String, dynamic>>[];
+    return rows.where((r) => r['source_key'] == sourceKey).toList()
+      ..sort((a,b) => _time(b).compareTo(_time(a)));
+  });
+  bool _unfinished(Map row) {
+    final pos = (row['position_seconds'] as num?)?.toInt() ?? 0;
+    final duration = (row['duration_seconds'] as num?)?.toInt() ?? 0;
+    return pos >= 5 && (duration <= 0 || pos < duration - 20);
+  }
+  Future<int?> loadPosition({required String sourceKey, required String contentId, required String contentType}) async {
+    final rows = await _load(sourceKey);
+    if (!isCurrent) return null;
+    for (final row in rows) {
+      if (row['content_id'] == contentId && row['content_type'] == contentType) {
+        return _unfinished(row) ? (row['position_seconds'] as num).toInt() : null;
       }
-    });
-  }
-
-
-  Future<int?> loadPosition({
-    required String sourceKey,
-    required String contentId,
-    required String contentType,
-  }) async {
-    if (!_ready || sourceKey.isEmpty || contentId.isEmpty) return null;
-    await flushPending();
-    try {
-      final row = await _client!
-          .from('watch_history')
-          .select('position_seconds,duration_seconds')
-          .eq('source_key', sourceKey)
-          .eq('content_id', contentId)
-          .eq('content_type', contentType)
-          .order('watched_at', ascending: false)
-          .limit(1)
-          .maybeSingle();
-      if (row == null) return null;
-      final position = (row['position_seconds'] as num?)?.toInt() ?? 0;
-      final duration = (row['duration_seconds'] as num?)?.toInt();
-      if (position <= 0 || (duration != null && duration > 0 && position >= duration - 20)) return null;
-      return position;
-    } catch (_) {
-      // Progress sync must never prevent playback when offline or before migration.
-      return null;
     }
+    return null;
   }
-
   Future<List<Map<String, dynamic>>> loadRecent({required String sourceKey, int limit = 20}) async {
-    if (!_ready || sourceKey.isEmpty) return const [];
-    await flushPending();
-    try {
-      final rows = await _client!
-          .from('watch_history')
-          .select('content_id,content_type,title,position_seconds,duration_seconds,watched_at')
-          .eq('source_key', sourceKey)
-          .order('watched_at', ascending: false)
-          .limit(limit);
-      // Hide entries that are effectively completed; they remain stored so the
-      // history can still be used for analytics or a future watch-history view.
-      return List<Map<String, dynamic>>.from(rows).where((row) {
-        final position = (row['position_seconds'] as num?)?.toInt() ?? 0;
-        final duration = (row['duration_seconds'] as num?)?.toInt() ?? 0;
-        if (position < 5) return false;
-        return duration <= 0 || position < duration - 20;
-      }).toList(growable: false);
-    } catch (_) {
-      return const [];
-    }
+    final rows = await _load(sourceKey);
+    return isCurrent ? rows.where(_unfinished).take(limit).toList() : [];
   }
-
-  Future<void> savePosition({
-    required String sourceKey,
-    required String contentId,
-    required String contentType,
-    required String title,
-    required int positionSeconds,
-    required int durationSeconds,
-  }) async {
-    if (!_ready || sourceKey.isEmpty || contentId.isEmpty || positionSeconds < 0) return;
-    final row = <String, dynamic>{
-      'user_id': _client!.auth.currentUser!.id,
-      'source_key': sourceKey,
-      'content_id': contentId,
-      'content_type': contentType,
-      'title': title,
-      'position_seconds': positionSeconds,
+  Future<void> savePosition({required String sourceKey, required String contentId,
+    required String contentType, required String title, required int positionSeconds,
+    required int durationSeconds}) async {
+    if (!isCurrent || sourceKey.isEmpty || contentId.isEmpty || positionSeconds < 0 ||
+        !{'vod','series'}.contains(contentType)) return;
+    final row = <String,dynamic>{'source_key': sourceKey, 'content_id': contentId,
+      'content_type': contentType, 'title': title, 'position_seconds': positionSeconds,
       'duration_seconds': durationSeconds > 0 ? durationSeconds : null,
-      'watched_at': DateTime.now().toUtc().toIso8601String(),
-    };
-    try {
-      await _client!.from('watch_history').upsert(row,
-          onConflict: 'user_id,source_key,content_id,content_type');
-      await flushPending();
-    } catch (_) {
-      // Keep only the newest progress per source/content, scoped to this account.
-      await _queueProgress(row);
-    }
+      'watched_at': ProfileSyncClock.now().toIso8601String(), 'pending': true};
+    await _serial(() async {
+      if (!isCurrent) return;
+      final rows = await _local();
+      if (!isCurrent) return;
+      rows.removeWhere((r) => _same(r,row));
+      rows.add(row);
+      await _store(rows);
+      await _flush(rows);
+    });
   }
 }

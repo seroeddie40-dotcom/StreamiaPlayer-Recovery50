@@ -1,26 +1,30 @@
+import 'profile_sync_clock.dart';
 import 'dart:convert';
+import 'profile_favorite_outbox.dart';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Account-based favorites sync and portable, versioned JSON backup.
+/// Profile-based favorites sync and portable, versioned JSON backup.
 /// No playlist credentials, stream URLs, or media files are exported.
 class FavoritesBackupService {
-  FavoritesBackupService(this._client);
+  FavoritesBackupService(this._client, {required this.profileId, required this.isCurrent, required this.parentToken});
+  final String profileId;
+  final String? Function() parentToken;
+  final bool Function() isCurrent;
   final SupabaseClient _client;
   static const int schemaVersion = 1;
 
   String get _userId {
+    if (!isCurrent()) throw StateError('Profile session changed');
     final id = _client.auth.currentUser?.id;
     if (id == null) throw StateError('Bitte zuerst anmelden.');
     return id;
   }
 
   Future<List<Map<String, dynamic>>> loadAll() async {
-    final rows = await _client.from('favorites').select(
-      'id,content_id,content_type,title,source_key,source_label,created_at,updated_at'
-    ).eq('user_id', _userId).order('created_at');
-    return List<Map<String, dynamic>>.from(rows);
+    return ProfileFavoriteOutbox.load(_client,_userId,profileId,parentToken(),isCurrent);
+
   }
 
   Future<void> add({
@@ -33,16 +37,10 @@ class FavoritesBackupService {
     if (!{'live', 'vod', 'series'}.contains(contentType)) {
       throw ArgumentError.value(contentType, 'contentType');
     }
-    await _client.from('favorites').upsert({
-      'user_id': _userId,
-      'playlist_id': null,
-      'content_id': contentId,
-      'content_type': contentType,
-      'title': title,
-      'source_key': sourceKey,
-      'source_label': sourceLabel,
-      'updated_at': DateTime.now().toUtc().toIso8601String(),
-    }, onConflict: 'user_id,content_type,source_key,content_id');
+    final account = _userId;
+    await ProfileFavoriteOutbox.enqueue(account, profileId, sourceKey,
+        contentType, contentId, title, sourceLabel ?? '', true);
+    await _flush(account);
   }
 
   Future<void> remove({
@@ -50,22 +48,29 @@ class FavoritesBackupService {
     required String contentType,
     required String sourceKey,
   }) async {
-    await _client.from('favorites').delete()
-      .eq('user_id', _userId)
-      .eq('content_id', contentId)
-      .eq('content_type', contentType)
-      .eq('source_key', sourceKey);
+    final account = _userId;
+    await ProfileFavoriteOutbox.enqueue(account, profileId, sourceKey,
+        contentType, contentId, '', '', false);
+    await _flush(account);
+  }
+
+  Future<void> _flush(String account) async {
+    if (!isCurrent() || _client.auth.currentUser?.id != account) return;
+    final token = parentToken();
+    await ProfileFavoriteOutbox.flush(_client, account, profileId, token,
+        () => isCurrent() && _client.auth.currentUser?.id == account && parentToken() == token);
   }
 
   Future<void> exportBackup({String? onlyType}) async {
     final all = await loadAll();
+    if (!isCurrent()) throw StateError('Profile session changed');
     final selected = onlyType == null
         ? all
         : all.where((r) => r['content_type'] == onlyType).toList();
     final backup = <String, dynamic>{
       'format': 'streamia_favorites_backup',
       'schema_version': schemaVersion,
-      'exported_at': DateTime.now().toUtc().toIso8601String(),
+      'exported_at': ProfileSyncClock.now().toIso8601String(),
       'categories': ['live', 'vod', 'series'],
       'favorites': selected.map((r) => {
         'content_id': r['content_id'],
@@ -124,29 +129,34 @@ class FavoritesBackupService {
           title == null || title.trim().isEmpty || title.length > 1000 || id.length > 500) continue;
       records.add({
         'user_id': _userId,
-        'playlist_id': null,
+      'family_profile_id': profileId,
+        
         'content_id': id,
         'content_type': type,
         'title': title,
         'source_key': source,
         'source_label': item['source_label']?.toString(),
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
+        'updated_at': ProfileSyncClock.now().toIso8601String(),
       });
     }
     // Deduplicate within the backup too: Postgres cannot update the same conflict row twice in one statement.
     final unique = <String, Map<String, dynamic>>{};
     for (final record in records) {
-      final key = '${record['content_type']}|${record['source_key']}|${record['content_id']}';
+      final key = jsonEncode([record['content_type'], record['source_key'], record['content_id']]);
       unique[key] = record;
     }
     final cleanRecords = unique.values.toList();
-    // Chunk to stay comfortably below PostgREST request limits. Upsert makes import idempotent.
-    for (var i = 0; i < cleanRecords.length; i += 100) {
-      await _client.from('favorites').upsert(
-        cleanRecords.skip(i).take(100).toList(),
-        onConflict: 'user_id,content_type,source_key,content_id',
-      );
+    final account = _userId;
+    for (final record in cleanRecords) {
+      if (!isCurrent() || _client.auth.currentUser?.id != account) {
+        throw StateError('Profile session changed');
+      }
+      await ProfileFavoriteOutbox.enqueue(account, profileId,
+          record['source_key'] as String, record['content_type'] as String,
+          record['content_id'] as String, record['title'] as String,
+          record['source_label']?.toString() ?? '', true);
     }
+    await _flush(account);
     return cleanRecords.length;
   }
 }
