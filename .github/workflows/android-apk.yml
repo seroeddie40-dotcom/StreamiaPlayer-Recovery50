@@ -4,7 +4,12 @@ name: Streamia Player - Android Debug APK and checks
   push:
     branches:
       - main
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      performance_release:
+        description: "Build optimized release APK for private performance tests (existing test key)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -17,7 +22,7 @@ jobs:
   android:
     name: Analyze, Test and Build APK
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
 
     steps:
       - name: Checkout repository
@@ -140,8 +145,21 @@ jobs:
           set -o pipefail
           mkdir -p build/ci-logs
           flutter build apk \
-            --debug \
+            --debug --verbose \
             --build-number=${{ github.run_number }} 2>&1 | tee build/ci-logs/flutter-build.log
+
+      - name: Diagnose Gradle configuration after failed APK build
+        if: ${{ failure() }}
+        run: |
+          mkdir -p build/ci-logs
+          ROOT="$PWD"
+          {
+            echo "=== Gradle files after Flutter migration ==="
+            git diff -- android/app/build.gradle.kts android/settings.gradle.kts android/gradle.properties android/gradle/wrapper/gradle-wrapper.properties
+            echo "=== Gradle task configuration stacktrace ==="
+            cd android
+            ./gradlew :app:tasks --all --stacktrace --no-daemon --console=plain
+          } 2>&1 | tee "$ROOT/build/ci-logs/gradle-diagnostic.log"
 
       - name: Verify APK signature matches permanent key
         run: |
@@ -163,6 +181,49 @@ jobs:
           print('APK signing certificate matches the permanent Streamia key.')
           PY
           ls -lh "$APK"
+
+      - name: Build private performance release APK
+        if: ${{ inputs.performance_release }}
+        env:
+          STREAMIA_PERFORMANCE_TEST_SIGNING: '1'
+        run: |
+          set -o pipefail
+          flutter build apk --release --build-number=${{ github.run_number }} 2>&1 | tee build/ci-logs/flutter-performance-build.log
+
+      - name: Verify performance APK signature matches permanent key
+        if: ${{ inputs.performance_release }}
+        run: |
+          set -euo pipefail
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          test -s "$APK"
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/streamia-apk-signature.txt"
+          python3 - <<'PY'
+          import os, re, sys
+          text = open(os.path.join(os.environ['RUNNER_TEMP'], 'streamia-apk-signature.txt'), encoding='utf-8').read()
+          expected = 'B22C52AB21AD649755CFDD8F2302C2A9CB5DADC13409B1BD373E941C9FBBF8F2'
+          digests = re.findall(r'^\s*(?:Signer\s*#\d+|V\d+\s+Signer):\s*certificate SHA-256 digest:\s*([0-9A-Fa-f:]+)\s*$', text, re.M | re.I)
+          actual = {re.sub(r'[^0-9A-Fa-f]', '', digest).upper() for digest in digests}
+          if actual != {expected}:
+              print('::error::APK signing certificate mismatch or certificate digest not found. Observed:', sorted(actual))
+              sys.exit(1)
+          print('APK signing certificate matches the permanent Streamia key.')
+          PY
+          ls -lh "$APK"
+
+      - name: Report APK size by component
+        run: |
+          python3 scripts/report_apk_size.py build/app/outputs/flutter-apk/app-debug.apk build/app/outputs/flutter-apk/app-release.apk | tee build/ci-logs/apk-size.log
+
+      - name: Upload private performance APK
+        if: ${{ inputs.performance_release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: streamia-player-private-performance-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
 
       # Keep error logs accessible from a phone even if analysis, tests or build fail.
       - name: Upload Flutter diagnostic logs
