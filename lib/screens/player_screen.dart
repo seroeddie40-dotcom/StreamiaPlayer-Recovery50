@@ -13,6 +13,7 @@ import '../models/vod_item.dart';
 import '../providers/content_provider.dart';
 import '../providers/family_session_provider.dart';
 import '../services/recording_service.dart';
+import '../services/download_service.dart';
 import '../services/watch_progress_service.dart';
 
 class PlayerScreen extends StatefulWidget {
@@ -24,11 +25,12 @@ class PlayerScreen extends StatefulWidget {
   final Series? series;
   final bool isLive;
   final String? contentId;
+  final String? offlineDownloadId;
   final bool startFromBeginning;
 
   const PlayerScreen({
     super.key, this.channel, this.streamUrl, this.title,
-    this.episodes, this.initialEpisodeIndex, this.series, this.isLive = false, this.contentId, this.startFromBeginning = false,
+    this.episodes, this.initialEpisodeIndex, this.series, this.isLive = false, this.contentId, this.offlineDownloadId, this.startFromBeginning = false,
   });
 
   @override
@@ -148,7 +150,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   String? get _progressContentId {
-    if (widget.isLive) return null;
+    if (widget.isLive || widget.offlineDownloadId != null) return null;
     if (widget.episodes != null && widget.episodes!.isNotEmpty) {
       final episode = widget.episodes![_currentEpisode];
       return widget.series == null ? episode.id : '${widget.series!.id}::${episode.id}';
@@ -171,6 +173,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _videoController = VideoController(_player);
     _familySession = context.read<FamilySessionProvider>();
     _familySession.addListener(_onFamilySessionChanged);
+    if (widget.offlineDownloadId != null) {
+      DownloadService.entries.addListener(_onFamilySessionChanged);
+    }
     _contentProvider = context.read<ContentProvider>();
     _contentProvider.addListener(_onFamilySessionChanged);
     _currentEpisode = widget.initialEpisodeIndex ?? 0;
@@ -376,6 +381,14 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     final content = context.read<ContentProvider>();
     final channel = widget.channel;
     bool permitted = family.isReady;
+    final offlineId = widget.offlineDownloadId;
+    if (offlineId != null) {
+      final profile = family.activeProfile;
+      return permitted && profile != null && channel == null &&
+          widget.episodes == null && !widget.isLive &&
+          DownloadService.authorizesOffline(offlineId, profile.accountUserId,
+              profile.id, _currentUrl);
+    }
 
     if (permitted && channel != null) {
       permitted = _canPlayChannel(channel);
@@ -616,6 +629,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   @override
   void dispose() {
     _familySession.removeListener(_onFamilySessionChanged);
+    DownloadService.entries.removeListener(_onFamilySessionChanged);
     _contentProvider.removeListener(_onFamilySessionChanged);
     _hideTimer?.cancel();
     _progressTimer?.cancel();
@@ -1621,10 +1635,15 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   Future<void> _toggleRecording() async {
+    final profile = _familySession.activeProfile;
+    if (profile == null || !_familySession.isReady) return;
+    final owner = RecordingService.ownerKey(profile.accountUserId, profile.id);
     final state = await RecordingService.refreshStatus();
-    if (!mounted) return;
+    if (!mounted || _familySession.activeProfile?.id != profile.id ||
+        !_familySession.isReady) return;
 
     if (state.isBusy) {
+      if (state.ownerKey != owner) return;
       await RecordingService.stop();
       if (!mounted) return;
       _showTrackMessage('Aufnahme wird beendet …');
@@ -1658,6 +1677,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         return;
       }
       try {
+        if (_familySession.activeProfile?.id != profile.id ||
+            !_familySession.isReady || finished.ownerKey != owner) return;
         final uri = await RecordingService.exportLastRecording();
         if (!mounted) return;
         _showTrackMessage(uri == null
@@ -1678,9 +1699,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _showTrackMessage('Keine Stream-Adresse für die Aufnahme vorhanden.');
       return;
     }
+    if (widget.channel == null || !_canPlayChannel(widget.channel!)) return;
     final accepted = await RecordingService.start(
       widget.channel?.name ?? _currentTitle,
       streamUrl: url,
+      ownerKey: owner,
     );
     if (!mounted) return;
     _showTrackMessage(accepted

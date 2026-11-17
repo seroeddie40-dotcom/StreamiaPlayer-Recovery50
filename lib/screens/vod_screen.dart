@@ -638,7 +638,14 @@ class _VodTile extends StatefulWidget {
 }
 
 class _VodTileState extends State<_VodTile> {
-  String get _downloadId => 'movie_${widget.item.id}';
+  String? get _downloadId {
+    final family = context.read<FamilySessionProvider>();
+    final profile = family.activeProfile;
+    final content = context.read<ContentProvider>();
+    if (!family.isReady || profile == null) return null;
+    return DownloadService.scopedId(profile.accountUserId, profile.id,
+        content.sourceKey, 'movie_${widget.item.id}');
+  }
   bool _startingDownload = false;
   bool _opening = false;
 
@@ -679,13 +686,18 @@ class _VodTileState extends State<_VodTile> {
   }
 
   Future<void> _download() async {
+    final family = context.read<FamilySessionProvider>();
+    final profile = family.activeProfile;
+    final content = context.read<ContentProvider>();
+    final id = _downloadId;
+    if (id == null || profile == null || !family.canAccessCategory(sourceKey: content.sourceKey, contentType: 'vod', categoryKey: widget.item.categoryKey ?? '') || !content.vodItems.any((i) => i.id == widget.item.id && i.streamUrl == widget.item.streamUrl && i.categoryKey == widget.item.categoryKey)) return;
     final active = DownloadService.entries.value.where(
-      (entry) => entry.id == _downloadId &&
+      (entry) => entry.id == id &&
           (entry.state == DownloadState.downloading ||
            entry.state == DownloadState.queued),
     );
     if (active.isNotEmpty) {
-      DownloadService.cancel(_downloadId);
+      DownloadService.cancel(id);
       return;
     }
     if (_startingDownload) return;
@@ -696,7 +708,9 @@ class _VodTileState extends State<_VodTile> {
     setState(() => _startingDownload = true);
     try {
       await DownloadService.start(
-        id: _downloadId,
+        id: id,
+        ownerAccountId: profile.accountUserId,
+        ownerProfileId: profile.id,
         title: widget.item.title,
         kind: 'movie',
         url: widget.item.streamUrl,
@@ -768,7 +782,7 @@ class _VodTileState extends State<_VodTile> {
                     top: 4,
                     child: Material(
                       color: Colors.black54,
-                      shape: const CircleBorder(),
+                      borderRadius: BorderRadius.circular(24),
                       child: ValueListenableBuilder<List<DownloadEntry>>(
                         valueListenable: DownloadService.entries,
                         builder: (context, entries, _) {
@@ -778,18 +792,37 @@ class _VodTileState extends State<_VodTile> {
                           final entry = matches.isEmpty ? null : matches.first;
                           final active = entry?.state == DownloadState.queued ||
                               entry?.state == DownloadState.downloading;
-                          return IconButton(
-                            tooltip: active
-                                ? _vodText(context, 'cancel')
-                                : _vodText(context, 'download'),
-                            onPressed: _download,
-                            icon: Icon(
-                              active ? Icons.cancel_outlined :
-                                  entry?.state == DownloadState.completed
-                                      ? Icons.download_done : Icons.download,
-                              color: Colors.white,
-                              size: 20,
-                            ),
+                          final progress = (entry?.progress ?? 0.0).clamp(0.0, 1.0).toDouble();
+                          return Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (active)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 6),
+                                  child: Text('${(progress * 100).round()}%',
+                                    style: const TextStyle(color: Colors.white, fontSize: 11)),
+                                ),
+                              SizedBox(
+                                width: 44, height: 44,
+                                child: Stack(alignment: Alignment.center, children: [
+                                  if (active)
+                                    SizedBox(width: 38, height: 38,
+                                      child: CircularProgressIndicator(
+                                        value: progress > 0 ? progress : null,
+                                        strokeWidth: 3,
+                                        backgroundColor: Colors.white24,
+                                        color: const Color(0xFF20D8C6),
+                                      )),
+                                  IconButton(
+                                    tooltip: active ? _vodText(context, 'cancel') : _vodText(context, 'download'),
+                                    onPressed: _download,
+                                    icon: Icon(active ? Icons.close :
+                                      entry?.state == DownloadState.completed ? Icons.download_done : Icons.download,
+                                      color: Colors.white, size: 20),
+                                  ),
+                                ]),
+                              ),
+                            ],
                           );
                         },
                       ),
@@ -799,24 +832,7 @@ class _VodTileState extends State<_VodTile> {
                     const Center(
                       child: CircularProgressIndicator(),
                     ),
-                  Positioned(
-                    left: 0, right: 0, bottom: 0,
-                    child: ValueListenableBuilder<List<DownloadEntry>>(
-                      valueListenable: DownloadService.entries,
-                      builder: (context, entries, _) {
-                        final matches = entries.where((e) => e.id == _downloadId);
-                        if (matches.isEmpty ||
-                            matches.first.state != DownloadState.downloading) {
-                          return const SizedBox.shrink();
-                        }
-                        return LinearProgressIndicator(
-                          value: matches.first.progress.clamp(0.0, 1.0),
-                          backgroundColor: Colors.black45,
-                          color: AppTheme.electricBlue,
-                        );
-                      },
-                    ),
-                  ),
+
                 ],
               ),
             ),
@@ -838,7 +854,7 @@ class _VodTileState extends State<_VodTile> {
                       widget.item.genre != null)
                     Text(
                       [
-                        widget.item.releaseDate,
+                        RegExp(r"^\d{4}").firstMatch(widget.item.releaseDate ?? "")?.group(0),
                         widget.item.genre,
                       ]
                           .whereType<String>()

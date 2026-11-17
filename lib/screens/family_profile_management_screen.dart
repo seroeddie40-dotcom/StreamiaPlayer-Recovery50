@@ -11,9 +11,14 @@ import '../services/family_pin_service.dart';
 import '../services/family_profile_management_service.dart';
 import 'family_child_category_permissions_screen.dart';
 import 'family_parent_pin_setup_screen.dart';
+import 'downloads_screen.dart';
+import 'recordings_screen.dart';
 
 class FamilyProfileManagementScreen extends StatefulWidget {
-  const FamilyProfileManagementScreen({super.key});
+  const FamilyProfileManagementScreen({super.key, this.rulesOnly = false, this.useActiveSession = false});
+
+  final bool rulesOnly;
+  final bool useActiveSession;
 
   @override
   State<FamilyProfileManagementScreen> createState() =>
@@ -96,26 +101,25 @@ class _FamilyProfileManagementScreenState
         if (updatedStatus ==
             FamilyParentPinStatus.configured) {
           _showMessage(
-            'Eltern-PIN eingerichtet. '
-            'Bitte zur Bestätigung eingeben.',
+            _t('family_setup_pin_saved'),
           );
           return true;
         }
 
         _showMessage(
-          'Die Einrichtung konnte nicht bestätigt werden.',
+          _t('family_setup_pin_failed'),
         );
         return false;
 
       case FamilyParentPinStatus.unauthorized:
         _showMessage(
-          'Bitte zuerst mit deinem Konto anmelden.',
+          _t('family_setup_pin_login'),
         );
         return false;
 
       case FamilyParentPinStatus.unknown:
         _showMessage(
-          'Der Eltern-PIN-Status konnte nicht erkannt werden.',
+          _t('family_server_verify_failed'),
         );
         return false;
     }
@@ -131,9 +135,10 @@ class _FamilyProfileManagementScreenState
     });
 
     try {
-      final configured = await _ensureParentPinConfigured();
-
-      if (!configured || !mounted) return;
+      if (!widget.useActiveSession) {
+        final configured = await _ensureParentPinConfigured();
+        if (!configured || !mounted) return;
+      }
 
       final token = await _requireParentToken();
 
@@ -146,8 +151,7 @@ class _FamilyProfileManagementScreenState
       await _loadData();
     } catch (_) {
       _showMessage(
-        'Die Familienverwaltung konnte '
-        'nicht entsperrt werden.',
+        _t('family_pin_verify_failed'),
       );
     } finally {
       if (mounted) {
@@ -162,6 +166,18 @@ class _FamilyProfileManagementScreenState
   Future<String?> _requireParentToken() async {
     if (!mounted) return null;
 
+    if (widget.useActiveSession) {
+      final family = context.read<FamilySessionProvider>();
+      final token = family.parentAccessToken;
+      if (token == null) return null;
+      try {
+        final valid = await _pinService.checkSession(scope: FamilyPinScope.parent, accessToken: token);
+        if (!mounted || !valid || family.parentAccessToken != token) return null;
+        return token;
+      } catch (_) {
+        return null;
+      }
+    }
     final existingToken = _parentToken;
     final expiry = _parentTokenExpiry;
 
@@ -298,9 +314,8 @@ class _FamilyProfileManagementScreenState
                                 .titleLarge,
                           ),
                           const SizedBox(height: 16),
-                          const Text(
-                            'Die Familienverwaltung ist '
-                            'mit deiner gemeinsamen Eltern-PIN geschützt.',
+                          Text(
+                            _t('family_management_protected'),
                           ),
                           const SizedBox(height: 20),
                           TextField(
@@ -416,6 +431,7 @@ class _FamilyProfileManagementScreenState
           await _managementService.loadProfileLimit();
 
       if (!mounted) return;
+      if (widget.useActiveSession && context.read<FamilySessionProvider>().parentAccessToken != token) return;
 
       setState(() {
         _profiles = profiles;
@@ -545,6 +561,7 @@ class _FamilyProfileManagementScreenState
       );
 
       if (input == null || !mounted) return;
+      if (await _requireParentToken() != token || !mounted) return;
 
       setState(() => _busy = true);
 
@@ -635,6 +652,7 @@ class _FamilyProfileManagementScreenState
       );
 
       if (newName == null || !mounted) return;
+      if (await _requireParentToken() != token || !mounted) return;
 
       setState(() => _busy = true);
 
@@ -751,6 +769,7 @@ class _FamilyProfileManagementScreenState
     );
 
     if (confirmed != true || !mounted) return;
+    if (await _requireParentToken() != token || !mounted) return;
 
     setState(() => _busy = true);
 
@@ -805,7 +824,7 @@ class _FamilyProfileManagementScreenState
         _parentTokenExpiry = null;
 
         _showMessage(
-          'Eltern-PIN-Sitzung abgelaufen.',
+          _t('family_session_expired'),
         );
         return;
       }
@@ -816,6 +835,7 @@ class _FamilyProfileManagementScreenState
               FamilyChildCategoryPermissionsScreen(
             childProfile: profile,
             parentAccessToken: token,
+            requireActiveSession: widget.useActiveSession,
           ),
         ),
       );
@@ -828,6 +848,14 @@ class _FamilyProfileManagementScreenState
         _t('family_feedback_rules_failed'),
       );
     }
+  }
+
+  Future<void> _manageChildMedia(FamilyProfile profile, {required bool downloads}) async {
+    if (_busy || !_accessGranted || !profile.isChild) return;
+    final family = context.read<FamilySessionProvider>();
+    final token = await _requireParentToken();
+    if (!mounted || token == null || family.parentAccessToken != token || family.activeProfile?.accountUserId != profile.accountUserId) return;
+    await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => downloads ? DownloadsScreen(managedChild: profile) : RecordingsScreen(managedChild: profile)));
   }
 
   Widget _buildProfileTile(FamilyProfile profile) {
@@ -843,18 +871,25 @@ class _FamilyProfileManagementScreenState
                 : Icons.child_care,
           ),
         ),
+        onTap: widget.rulesOnly ? () => _openChildPermissions(profile) : null,
         title: Text(profile.displayName),
         subtitle: Text(
           '${_t(isAdult ? 'family_adult' : 'family_child')}'
           '${profile.isDefault ? " · ${_t('family_default')}" : ""}',
         ),
-        trailing: PopupMenuButton<String>(
+        trailing: widget.rulesOnly ? const Icon(Icons.chevron_right) : PopupMenuButton<String>(
           enabled: !_busy,
           tooltip: _t('family_manage_one'),
           onSelected: (action) {
             switch (action) {
               case 'permissions':
                 _openChildPermissions(profile);
+                break;
+              case 'child_downloads':
+                _manageChildMedia(profile, downloads: true);
+                break;
+              case 'child_recordings':
+                _manageChildMedia(profile, downloads: false);
                 break;
               case 'rename':
                 _renameProfile(profile);
@@ -873,6 +908,10 @@ class _FamilyProfileManagementScreenState
                 value: 'permissions',
                 child: Text(_t('family_manage_rules')),
               ),
+            if (!isAdult && widget.useActiveSession) ...[
+              PopupMenuItem(value: 'child_downloads', child: Text(_t('family_child_downloads'))),
+              PopupMenuItem(value: 'child_recordings', child: Text(_t('family_child_recordings'))),
+            ],
             PopupMenuItem(
               value: 'rename',
               child: Text(_t('family_rename')),
@@ -960,6 +999,10 @@ class _FamilyProfileManagementScreenState
       );
     }
 
+    if (widget.rulesOnly) {
+      final children = _profiles.where((p) => p.type == FamilyProfileType.child).toList();
+      return children.isEmpty ? Center(child: Text(_t('family_no_child_profiles'))) : ListView.builder(itemCount: children.length, itemBuilder: (_, i) => _buildProfileTile(children[i]));
+    }
     return Column(
       children: [
         if (_busy)
@@ -1041,7 +1084,7 @@ class _FamilyProfileManagementScreenState
   @override
   Widget build(BuildContext context) {
     final isChild = context.watch<FamilySessionProvider>().isChild;
-    if (isChild) {
+    if (isChild || (widget.useActiveSession && context.watch<FamilySessionProvider>().parentAccessToken == null)) {
       return Scaffold(
         appBar: AppBar(title: Text(_t('family_manage'))),
         body: Center(
@@ -1054,7 +1097,7 @@ class _FamilyProfileManagementScreenState
     }
     return Scaffold(
       appBar: AppBar(
-        title: Text(_t('family_manage')),
+        title: Text(_t(widget.rulesOnly ? 'family_manage_rules' : 'family_manage')),
         actions: [
           IconButton(
             tooltip: _t('playlist_refresh'),

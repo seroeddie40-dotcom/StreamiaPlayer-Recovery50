@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/family_session_provider.dart';
 import '../core/localization/app_localizations.dart';
 
 import '../models/family_profile.dart';
@@ -16,10 +18,12 @@ class FamilyChildCategoryPermissionsScreen
     super.key,
     required this.childProfile,
     required this.parentAccessToken,
+    this.requireActiveSession = false,
   });
 
   final FamilyProfile childProfile;
   final String parentAccessToken;
+  final bool requireActiveSession;
 
   @override
   State<FamilyChildCategoryPermissionsScreen>
@@ -78,13 +82,15 @@ class _FamilyChildCategoryPermissionsScreenState
       FamilyProfileType.child;
 
   Future<bool> _hasParentAuthorization() async {
-    if (!_isChild) return false;
+    if (!_isChild || !mounted) return false;
+    if (widget.requireActiveSession && context.read<FamilySessionProvider>().parentAccessToken != widget.parentAccessToken) return false;
 
     try {
-      return await _pinService.checkSession(
+      final valid = await _pinService.checkSession(
         scope: FamilyPinScope.parent,
         accessToken: widget.parentAccessToken,
       );
+      return mounted && valid && (!widget.requireActiveSession || context.read<FamilySessionProvider>().parentAccessToken == widget.parentAccessToken);
     } catch (_) {
       return false;
     }
@@ -587,6 +593,9 @@ class _FamilyChildCategoryPermissionsScreenState
 
   @override
   Widget build(BuildContext context) {
+    if (widget.requireActiveSession && context.watch<FamilySessionProvider>().parentAccessToken != widget.parentAccessToken) {
+      return Scaffold(appBar: AppBar(title: Text(_t('family_folder_rules'))), body: Center(child: Text(_t('family_pin_expired'))));
+    }
     return Scaffold(
       appBar: AppBar(
         title: Text(_t('family_folder_rules')),

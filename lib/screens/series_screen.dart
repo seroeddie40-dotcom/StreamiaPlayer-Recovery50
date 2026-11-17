@@ -328,7 +328,7 @@ class _SeriesTile extends StatelessWidget {
                           series.genre != null)
                         Text(
                           [
-                            series.releaseDate,
+                            RegExp(r"^\d{4}").firstMatch(series.releaseDate ?? "")?.group(0),
                             series.genre,
                           ]
                               .whereType<String>()
@@ -545,18 +545,19 @@ class _SeriesDetailScreenState
               padding: const EdgeInsets.all(16),
               child: ListView(
                 children: [
-                  if (series.backdropUrl != null)
+                  if (_validSeriesImage(series.backdropUrl))
                     ClipRRect(
                       borderRadius:
                           BorderRadius.circular(12),
                       child: CachedNetworkImage(
                         imageUrl: series.backdropUrl!,
+                        errorWidget: (_, __, ___) => const Icon(Icons.image_not_supported_outlined),
                         height: 110,
                         width: double.infinity,
                         fit: BoxFit.cover,
                       ),
                     ),
-                  if (series.posterUrl != null)
+                  if (_validSeriesImage(series.posterUrl))
                     AspectRatio(
                       aspectRatio: 2 / 3,
                       child: ClipRRect(
@@ -565,6 +566,7 @@ class _SeriesDetailScreenState
                         child: CachedNetworkImage(
                           imageUrl: series.posterUrl!,
                           fit: BoxFit.cover,
+                          errorWidget: (_, __, ___) => const Icon(Icons.movie_outlined),
                         ),
                       ),
                     ),
@@ -739,11 +741,20 @@ class _SeasonHeader extends StatelessWidget {
   });
 
   Future<void> _downloadSeason(BuildContext context) async {
+    final family = context.read<FamilySessionProvider>();
+    final profile = family.activeProfile;
+    final content = context.read<ContentProvider>();
+    final source = content.sourceKey;
+    if (!family.isReady || profile == null) return;
     var failed = false;
     for (final ep in season.episodes) {
+      if (!context.mounted || family.activeProfile?.id != profile.id ||
+          family.activeProfile?.accountUserId != profile.accountUserId ||
+          content.sourceKey != source || !family.canAccessCategory(sourceKey: source, contentType: 'series', categoryKey: series.categoryKey ?? '')) break;
       try {
         await DownloadService.start(
-          id: 'episode_${series.id}_${season.number}_${ep.id}',
+          id: DownloadService.scopedId(profile.accountUserId, profile.id, source, 'episode_${series.id}_${season.number}_${ep.id}'),
+          ownerAccountId: profile.accountUserId, ownerProfileId: profile.id,
           title: ep.title,
           kind: 'episode',
           url: ep.streamUrl,
@@ -836,13 +847,13 @@ class _EpisodeRow extends StatelessWidget {
             : CircleAvatar(child: Text('${ep.number}')),
         title: Text(ep.title, maxLines: 2, overflow: TextOverflow.ellipsis),
         subtitle: ep.plot == null && ep.releaseDate == null &&
-                ep.durationSeconds == null
+                (ep.durationSeconds ?? 0) < 60
             ? null
             : Text(
                 [
                   if (ep.releaseDate != null) ep.releaseDate!,
-                  if (ep.durationSeconds != null)
-                    '${ep.durationSeconds! ~/ 60} Min.',
+                  if ((ep.durationSeconds ?? 0) >= 60)
+                    '${ep.durationSeconds! ~/ 60} ${_seriesMinute(context)}',
                   if (ep.plot != null) ep.plot!,
                 ].join(' · '),
                 maxLines: 2,
@@ -851,7 +862,11 @@ class _EpisodeRow extends StatelessWidget {
         trailing: ValueListenableBuilder<List<DownloadEntry>>(
           valueListenable: DownloadService.entries,
           builder: (context, entries, _) {
-            final id = 'episode_${series.id}_${season.number}_${ep.id}';
+            final family = context.watch<FamilySessionProvider>();
+            final content = context.watch<ContentProvider>();
+            final profile = family.activeProfile;
+            final source = content.sourceKey;
+            final id = profile == null ? null : DownloadService.scopedId(profile.accountUserId, profile.id, source, 'episode_${series.id}_${season.number}_${ep.id}');
             final matches = entries.where((entry) => entry.id == id);
             final entry = matches.isEmpty ? null : matches.first;
             final active = entry?.state == DownloadState.downloading ||
@@ -910,6 +925,9 @@ class _EpisodeRow extends StatelessWidget {
                               entry?.state == DownloadState.completed
                                   ? Icons.download_done : Icons.download_outlined),
               onPressed: () async {
+                if (id == null || profile == null || !family.isReady ||
+                    family.activeProfile?.id != profile.id || family.activeProfile?.accountUserId != profile.accountUserId ||
+                    content.sourceKey != source || !family.canAccessCategory(sourceKey: source, contentType: 'series', categoryKey: series.categoryKey ?? '')) return;
                 if (active) {
                   DownloadService.cancel(id);
                   return;
@@ -937,6 +955,7 @@ class _EpisodeRow extends StatelessWidget {
                 try {
                   await DownloadService.start(
                     id: id,
+                    ownerAccountId: profile.accountUserId, ownerProfileId: profile.id,
                     title: ep.title,
                     kind: 'episode',
                     url: ep.streamUrl,
@@ -964,4 +983,14 @@ class _EpisodeRow extends StatelessWidget {
       ),
     );
   }
+}
+
+// Provider image metadata may contain empty arrays instead of URLs.
+bool _validSeriesImage(String? value) {
+  final uri = Uri.tryParse(value?.trim() ?? '');
+  return uri != null && (uri.scheme == 'http' || uri.scheme == 'https') && uri.host.isNotEmpty;
+}
+String _seriesMinute(BuildContext context) {
+  const labels = {'de':'Min.', 'tr':'dk.', 'en':'min', 'ru':'мин', 'pl':'min', 'es':'min', 'fr':'min', 'ar':'د'};
+  return labels[context.watch<LocaleProvider>().locale.languageCode] ?? 'min';
 }

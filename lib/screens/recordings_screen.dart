@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/family_session_provider.dart';
+import '../models/family_profile.dart';
 
 import '../services/recording_service.dart';
 import '../core/platform/device_layout.dart';
@@ -17,6 +18,7 @@ import '../core/platform/device_layout.dart';
 // Screen-local translations. Recording filenames and platform errors remain unchanged.
 const Map<String, Map<String, String>> _recordingStrings = {
   'de': {
+    'legacyNotice': 'Ältere Aufnahmen ohne Profilzuordnung bleiben gespeichert, werden jedoch nicht angezeigt.',
     'title': 'Meine Aufnahmen',
     'refresh': 'Aktualisieren',
     'empty': 'Noch keine Aufnahmen vorhanden.',
@@ -42,6 +44,7 @@ const Map<String, Map<String, String>> _recordingStrings = {
     'defaultName': 'Aufnahme.ts',
   },
   'en': {
+    'legacyNotice': 'Older recordings without a profile assignment are retained but not displayed.',
     'title': 'My recordings',
     'refresh': 'Refresh',
     'empty': 'No recordings yet.',
@@ -67,6 +70,7 @@ const Map<String, Map<String, String>> _recordingStrings = {
     'defaultName': 'Recording.ts',
   },
   'tr': {
+    'legacyNotice': 'Profil ataması olmayan eski kayıtlar saklanır ancak gösterilmez.',
     'title': 'Kayıtlarım',
     'refresh': 'Yenile',
     'empty': 'Henüz kayıt yok.',
@@ -92,6 +96,7 @@ const Map<String, Map<String, String>> _recordingStrings = {
     'defaultName': 'Kayıt.ts',
   },
   'ru': {
+    'legacyNotice': 'Старые записи без профиля сохранены, но не отображаются.',
     'title': 'Мои записи',
     'refresh': 'Обновить',
     'empty': 'Записей пока нет.',
@@ -117,6 +122,7 @@ const Map<String, Map<String, String>> _recordingStrings = {
     'defaultName': 'Запись.ts',
   },
   'pl': {
+    'legacyNotice': 'Starsze nagrania bez przypisanego profilu są zachowane, ale niewidoczne.',
     'title': 'Moje nagrania',
     'refresh': 'Odśwież',
     'empty': 'Brak nagrań.',
@@ -142,6 +148,7 @@ const Map<String, Map<String, String>> _recordingStrings = {
     'defaultName': 'Nagranie.ts',
   },
   'es': {
+    'legacyNotice': 'Las grabaciones antiguas sin perfil se conservan, pero no se muestran.',
     'title': 'Mis grabaciones',
     'refresh': 'Actualizar',
     'empty': 'Todavía no hay grabaciones.',
@@ -167,6 +174,7 @@ const Map<String, Map<String, String>> _recordingStrings = {
     'defaultName': 'Grabación.ts',
   },
   'fr': {
+    'legacyNotice': 'Les anciens enregistrements sans profil sont conservés mais non affichés.',
     'title': 'Mes enregistrements',
     'refresh': 'Actualiser',
     'empty': 'Aucun enregistrement.',
@@ -192,6 +200,7 @@ const Map<String, Map<String, String>> _recordingStrings = {
     'defaultName': 'Enregistrement.ts',
   },
   'ar': {
+    'legacyNotice': 'يتم الاحتفاظ بالتسجيلات القديمة غير المرتبطة بملف شخصي دون عرضها.',
     'title': 'تسجيلاتي',
     'refresh': 'تحديث',
     'empty': 'لا توجد تسجيلات بعد.',
@@ -219,7 +228,8 @@ const Map<String, Map<String, String>> _recordingStrings = {
 };
 
 class RecordingsScreen extends StatefulWidget {
-  const RecordingsScreen({super.key});
+  const RecordingsScreen({super.key, this.managedChild});
+  final FamilyProfile? managedChild;
 
   @override
   State<RecordingsScreen> createState() => _RecordingsScreenState();
@@ -241,6 +251,12 @@ class _RecordingEntry {
   final DateTime? modified;
 }
 
+String? _recordingOwner(FamilySessionProvider family) {
+  final profile = family.activeProfile;
+  if (!family.isReady || profile == null) return null;
+  return RecordingService.ownerKey(profile.accountUserId, profile.id);
+}
+
 class _RecordingsScreenState extends State<RecordingsScreen> {
   static const MethodChannel _channel =
       MethodChannel('com.streamia/recording');
@@ -254,23 +270,61 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
   bool _loading = true;
   String? _error;
   String? _usbWarning;
+  bool _hasLegacy = false;
+
+  late final FamilySessionProvider _family;
+  String? _loadedOwner;
+  int _loadGeneration = 0;
+
+  String? _visibleOwner(FamilySessionProvider family) {
+    final child = widget.managedChild;
+    if (child == null) return _recordingOwner(family);
+    if (family.parentAccessToken == null || !child.isChild || family.activeProfile?.accountUserId != child.accountUserId) return null;
+    return RecordingService.ownerKey(child.accountUserId, child.id);
+  }
+
+  bool _owns(_RecordingEntry entry) {
+    final owner = _visibleOwner(_family);
+    return owner != null && RecordingService.ownsName(entry.name, owner);
+  }
+
+  void _familyChanged() {
+    if (_visibleOwner(_family) != _loadedOwner) _load();
+  }
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _family = context.read<FamilySessionProvider>();
+    _family.addListener(_familyChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) { if (mounted) _load(); });
+  }
+
+  @override
+  void dispose() {
+    _family.removeListener(_familyChanged);
+    super.dispose();
   }
 
   Future<void> _load() async {
     if (!mounted) return;
 
+    final owner = _visibleOwner(_family);
+    final generation = ++_loadGeneration;
+    _loadedOwner = owner;
     setState(() {
-      _loading = true;
+      _recordings = [];
+      _loading = owner != null;
       _error = null;
       _usbWarning = null;
+      _hasLegacy = false;
     });
 
+    if (owner == null) return;
     final entries = <_RecordingEntry>[];
+    String? errorMessage;
+    String? usbWarning;
+    bool hasLegacy = false;
 
     try {
       final root = await getExternalStorageDirectory();
@@ -286,6 +340,11 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
               continue;
             }
 
+            final name = entity.uri.pathSegments.last;
+            if (!RecordingService.ownsName(name, owner)) {
+              if (!name.startsWith('sp_')) hasLegacy = true;
+              continue;
+            }
             try {
               final stat = await entity.stat();
 
@@ -305,7 +364,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
         }
       }
     } catch (error) {
-      _error = '${_t('localReadError')}: $error';
+      errorMessage = mounted ? _t('localReadError') : null;
     }
 
     try {
@@ -319,7 +378,12 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
         final data = Map<String, dynamic>.from(item);
 
         final uri = data['uri']?.toString() ?? '';
+        final name = data['name']?.toString() ?? '';
         if (uri.isEmpty) continue;
+        if (!RecordingService.ownsName(name, owner)) {
+          if (name.toLowerCase().endsWith('.ts') && !name.startsWith('sp_')) hasLegacy = true;
+          continue;
+        }
 
         final sizeValue = data['size'];
         final modifiedValue = data['modified'];
@@ -334,7 +398,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
 
         entries.add(
           _RecordingEntry(
-            name: data['name']?.toString() ?? _t('defaultName'),
+            name: name,
             location: uri,
             isUsb: true,
             size: size,
@@ -347,13 +411,11 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
         );
       }
     } on MissingPluginException {
-      _usbWarning =
-          _t('usbExtension');
+      usbWarning = mounted ? _t('usbExtension') : null;
     } on PlatformException catch (error) {
-      _usbWarning =
-          error.message ?? _t('usbReadError');
+      usbWarning = mounted ? _t('usbReadError') : null;
     } catch (error) {
-      _usbWarning = '${_t('usbLoadError')}: $error';
+      usbWarning = mounted ? _t('usbLoadError') : null;
     }
 
     entries.sort((a, b) {
@@ -362,10 +424,13 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
       return bTime.compareTo(aTime);
     });
 
-    if (!mounted) return;
+    if (!mounted || generation != _loadGeneration || _visibleOwner(_family) != owner) return;
 
     setState(() {
+      _error = errorMessage;
+      _usbWarning = usbWarning;
       _recordings = entries;
+      _hasLegacy = hasLegacy;
       _loading = false;
     });
   }
@@ -395,8 +460,9 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
   }
 
   Future<void> _play(_RecordingEntry entry) async {
-    final family = context.read<FamilySessionProvider>();
-    if (!family.isReady || !family.isAdult) return;
+    if (widget.managedChild != null || !_owns(entry)) return;
+    final owner = _visibleOwner(_family)!;
+    File? temporary;
     try {
       String path = entry.location;
 
@@ -411,6 +477,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
         }
 
         path = prepared;
+        temporary = File(path);
       }
 
       final file = File(path);
@@ -422,14 +489,14 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
       }
 
       if (!mounted) return;
-      final currentFamily = context.read<FamilySessionProvider>();
-      if (!currentFamily.isReady || !currentFamily.isAdult) return;
+      if (!_owns(entry) || _visibleOwner(_family) != owner) return;
 
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => _RecordingPlayback(
             file: file,
-            title: entry.name,
+            title: entry.name.substring(68),
+            ownerKey: owner,
             temporaryFile: entry.isUsb,
           ),
         ),
@@ -439,20 +506,21 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
         error.message ?? _t('usbPlayError'),
       );
     } catch (error) {
-      _message('${_t('playError')}: $error');
+      if (mounted) _message(_t('playError'));
+    } finally {
+      if (temporary != null) { try { if (await temporary.exists()) await temporary.delete(); } catch (_) {} }
     }
   }
 
   Future<void> _delete(_RecordingEntry entry) async {
-    final family = context.read<FamilySessionProvider>();
-    if (!family.isReady || !family.isAdult) return;
+    if (!_owns(entry)) return;
     try {
       final status = await RecordingService.refreshStatus();
 
-      if (!mounted) return;
+      if (!mounted || !_owns(entry)) return;
 
       if (status.isBusy &&
-          status.outputPath == entry.location) {
+          (status.outputPath == entry.location || status.ownerKey == _visibleOwner(_family))) {
         _message(
           _t('busyDelete'),
         );
@@ -463,7 +531,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
         context: context,
         builder: (dialogContext) => AlertDialog(
           title: Text(_t('deleteQuestion')),
-          content: Text(entry.name),
+          content: Text(entry.name.substring(68)),
           actions: [
             TextButton(
               autofocus: true,
@@ -480,7 +548,10 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
         ),
       );
 
-      if (confirmed != true || !mounted) return;
+      if (confirmed != true || !mounted || !_owns(entry)) return;
+      final latest = await RecordingService.refreshStatus();
+      if (!mounted || !_owns(entry)) return;
+      if (latest.isBusy && (latest.outputPath == entry.location || latest.ownerKey == _visibleOwner(_family))) { _message(_t('busyDelete')); return; }
 
       if (entry.isUsb) {
         final deleted = await _channel.invokeMethod<bool>(
@@ -536,7 +607,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
               : Icons.video_library_outlined,
         ),
         title: Text(
-          entry.name,
+          entry.name.substring(68),
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
@@ -547,7 +618,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
-        onTap: () => _play(entry),
+        onTap: widget.managedChild == null ? () => _play(entry) : null,
         trailing: IconButton(
           tooltip: _t('deleteTooltip'),
           icon: const Icon(Icons.delete_outline),
@@ -560,14 +631,12 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
   @override
   Widget build(BuildContext context) {
     final family = context.watch<FamilySessionProvider>();
-    if (!family.isReady || !family.isAdult) {
-      return const Scaffold(
-        body: Center(child: Text('Aufnahmen sind nur im Elternprofil verfügbar.')),
-      );
+    if (_visibleOwner(family) == null || _visibleOwner(family) != _loadedOwner) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
     return Scaffold(
       appBar: AppBar(
-        title: Text(_t('title')),
+        title: Text(widget.managedChild == null ? _t('title') : '${_t('title')} · ${widget.managedChild!.displayName}'),
         actions: [
           IconButton(
             tooltip: _t('refresh'),
@@ -584,6 +653,11 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
               onRefresh: _load,
               child: ListView(
                 children: [
+                  if (_hasLegacy && widget.managedChild == null && family.parentAccessToken != null)
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(_t('legacyNotice'), textAlign: TextAlign.center),
+                    ),
                   if (_usbWarning != null)
                     Padding(
                       padding: const EdgeInsets.all(16),
@@ -629,11 +703,13 @@ class _RecordingPlayback extends StatefulWidget {
     required this.file,
     required this.title,
     required this.temporaryFile,
+    required this.ownerKey,
   });
 
   final File file;
   final String title;
   final bool temporaryFile;
+  final String ownerKey;
 
   @override
   State<_RecordingPlayback> createState() =>
@@ -646,9 +722,11 @@ class _RecordingPlaybackState
   late final VideoController _controller;
   late final FamilySessionProvider _familySession;
 
+  bool _revoked = false;
   void _onFamilyChanged() {
-    if (!_familySession.isReady || !_familySession.isAdult) {
-      _player.pause();
+    if (_recordingOwner(_familySession) != widget.ownerKey) {
+      _revoked = true;
+      _player.stop();
     }
   }
 
@@ -662,7 +740,7 @@ class _RecordingPlaybackState
     _controller = VideoController(_player);
 
     final family = context.read<FamilySessionProvider>();
-    if (family.isReady && family.isAdult) {
+    if (_recordingOwner(family) == widget.ownerKey) {
       _player.open(Media(widget.file.uri.toString()));
     }
   }
@@ -686,10 +764,8 @@ class _RecordingPlaybackState
   @override
   Widget build(BuildContext context) {
     final family = context.watch<FamilySessionProvider>();
-    if (!family.isReady || !family.isAdult) {
-      return const Scaffold(
-        body: Center(child: Text('Wiedergabe für dieses Profil nicht verfügbar.')),
-      );
+    if (_revoked || _recordingOwner(family) != widget.ownerKey) {
+      return Scaffold(appBar: AppBar(), body: const SizedBox.shrink());
     }
     return Scaffold(
       appBar: AppBar(

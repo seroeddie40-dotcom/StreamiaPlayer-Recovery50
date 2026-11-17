@@ -9,10 +9,7 @@ import '../core/localization/app_localizations.dart';
 import '../providers/theme_provider.dart';
 import '../providers/locale_provider.dart';
 import '../providers/auth_provider.dart';
-import '../providers/family_session_provider.dart';
 
-import 'family_profile_selection_screen.dart';
-import 'family_profile_management_screen.dart';
 import 'admin_devices_screen.dart';
 import 'legal_disclaimer_screen.dart';
 import 'favorites_backup_screen.dart';
@@ -85,7 +82,6 @@ class SettingsScreen extends StatelessWidget {
     final auth = context.watch<AuthProvider>();
 
     final isDark = theme.themeMode == ThemeMode.dark;
-    final childProfileActive = context.watch<FamilySessionProvider>().isChild;
 
     final isConfigured =
         Supabase.instance.client.auth.currentUser != null;
@@ -332,41 +328,6 @@ class SettingsScreen extends StatelessWidget {
                       const FavoritesBackupScreen(),
                     ),
                   ),
-
-                  const Divider(),
-
-                  if (!childProfileActive) ...[
-                  ListTile(
-                    focusColor: focusColor,
-                    leading: const Icon(
-                      Icons.family_restroom_outlined,
-                    ),
-                    title: Text(l10n.t('family_settings_profiles')),
-                    subtitle: Text(l10n.t('family_settings_profiles_hint')),
-                    trailing:
-                        const Icon(Icons.chevron_right),
-                    onTap: () => _open(
-                      context,
-                      const FamilyProfileSelectionScreen(),
-                    ),
-                  ),
-
-                  ListTile(
-                    focusColor: focusColor,
-                    leading: const Icon(
-                      Icons.manage_accounts_outlined,
-                    ),
-                    title: Text(l10n.t('family_settings_manage')),
-                    subtitle: Text(l10n.t('family_settings_manage_hint')),
-                    trailing:
-                        const Icon(Icons.chevron_right),
-                    onTap: () => _open(
-                      context,
-                      const FamilyProfileManagementScreen(),
-                    ),
-                  ),
-
-                  ],
 
                   const Divider(),
 

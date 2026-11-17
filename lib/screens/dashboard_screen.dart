@@ -17,6 +17,7 @@ import '../services/download_service.dart';
 import '../providers/family_session_provider.dart';
 import '../providers/theme_provider.dart';
 import 'live_tv_screen.dart';
+import 'family_profile_management_screen.dart';
 import 'downloads_screen.dart';
 import 'master_search_screen.dart';
 import 'paywall_screen.dart';
@@ -159,6 +160,32 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
     }
   }
 
+  Future<void> _openProfiles() async {
+    final family = context.read<FamilySessionProvider>();
+    if (!family.isAdult) {
+      family.clearSession();
+      return;
+    }
+    final l10n = AppLocalizations.of(context);
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: Text(l10n.t('nav_profiles')),
+        children: [
+          SimpleDialogOption(onPressed: () => Navigator.pop(dialogContext, 'switch'), child: Text(l10n.t('family_switch_profile'))),
+          SimpleDialogOption(onPressed: () => Navigator.pop(dialogContext, 'manage'), child: Text(l10n.t('family_manage'))),
+          SimpleDialogOption(onPressed: () => Navigator.pop(dialogContext, 'rules'), child: Text(l10n.t('family_manage_rules'))),
+        ],
+      ),
+    );
+    if (!mounted || choice == null || !family.isAdult) return;
+    if (choice == 'switch') {
+      family.clearSession();
+    } else {
+      _open(FamilyProfileManagementScreen(rulesOnly: choice == 'rules', useActiveSession: true));
+    }
+  }
+
   void _open(Widget screen) {
     pushWithFocusRestore(
       context,
@@ -223,7 +250,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       _HomeEntry(
         Icons.people_alt_outlined,
         l10n.t('nav_profiles'),
-        () => context.read<FamilySessionProvider>().clearSession(),
+        _openProfiles,
       ),
     ];
 
