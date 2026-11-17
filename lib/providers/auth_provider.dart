@@ -106,15 +106,15 @@ class AuthProvider extends ChangeNotifier {
     _notify();
     try {
       final current = client.auth.currentUser;
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = await SharedPreferences.getInstance().timeout(const Duration(seconds: 5));
       final pendingEmail = prefs.getString(_pendingEmailKey);
       final isConfirmed = current?.emailConfirmedAt != null;
       final matchesPending = pendingEmail != null &&
           current?.email?.toLowerCase() == pendingEmail.toLowerCase();
       if (isConfirmed && matchesPending) {
         // Clear marker before sign-out to prevent reprocessing.
-        await prefs.remove(_pendingEmailKey);
-        await client.auth.signOut();
+        await prefs.remove(_pendingEmailKey).timeout(const Duration(seconds: 5));
+        await client.auth.signOut().timeout(const Duration(seconds: 15));
         _clearAccess();
         _emailConfirmationSuccess = true;
       } else if (current != null && !_emailConfirmationSuccess) {
@@ -122,6 +122,7 @@ class AuthProvider extends ChangeNotifier {
       }
     } catch (e) {
       _error = _friendlyError(e);
+      _accessChecked = true;
     } finally {
       _checkingConfirmation = false;
       _notify();
@@ -151,7 +152,7 @@ class AuthProvider extends ChangeNotifier {
   Future<String> _getInstallationId() async {
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       try {
-        final id = (await _deviceChannel.invokeMethod<String>('getAndroidId'))
+        final id = (await _deviceChannel.invokeMethod<String>('getAndroidId').timeout(const Duration(seconds: 3)))
             ?.trim().toLowerCase();
         if (id != null && RegExp(r'^[0-9a-f]{16}$').hasMatch(id) &&
             id != '9774d56d682e549c' && id != '0000000000000000') {
@@ -161,6 +162,9 @@ class AuthProvider extends ChangeNotifier {
         }
       } on PlatformException catch (error) {
         debugPrint('Android device identity unavailable: ${error.code}');
+      } on TimeoutException {
+        // Do not generate a different installation ID on a slow device.
+        rethrow;
       } on MissingPluginException {
         debugPrint('Android device identity channel unavailable');
       }
@@ -172,7 +176,7 @@ class AuthProvider extends ChangeNotifier {
         !_installationId!.startsWith('android-v1-')) {
       return _installationId!;
     }
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance().timeout(const Duration(seconds: 5));
     final saved = prefs.getString(_installKey);
     if (saved != null && saved.isNotEmpty &&
         !saved.startsWith('android-v1-')) {
@@ -189,7 +193,7 @@ class AuthProvider extends ChangeNotifier {
   Future<String> _readDeviceName() async {
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       try {
-        final name = await _deviceChannel.invokeMethod<String>('getDeviceName');
+        final name = await _deviceChannel.invokeMethod<String>('getDeviceName').timeout(const Duration(seconds: 3));
         if (name != null && name.isNotEmpty) return name;
       } catch (_) {}
     }
@@ -204,7 +208,7 @@ class AuthProvider extends ChangeNotifier {
       final client = _client;
       if (client == null) throw Exception('Supabase ist nicht konfiguriert.');
       _clearAccess();
-      await client.auth.signInWithPassword(email: email.trim(), password: password);
+      await client.auth.signInWithPassword(email: email.trim(), password: password).timeout(const Duration(seconds: 20));
       await _inspectConfirmationAndAccess();
     });
   }
@@ -222,15 +226,15 @@ class AuthProvider extends ChangeNotifier {
         email: normalizedEmail,
         password: password,
         emailRedirectTo: _redirectUrl,
-      );
+      ).timeout(const Duration(seconds: 20));
       if (response.user == null && response.session == null) {
         throw const AuthException('Registration returned no user');
       }
       _registrationSubmitted = true;
       _registrationNeedsConfirmation = response.session == null;
       if (_registrationNeedsConfirmation) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_pendingEmailKey, normalizedEmail.toLowerCase());
+        final prefs = await SharedPreferences.getInstance().timeout(const Duration(seconds: 5));
+        await prefs.setString(_pendingEmailKey, normalizedEmail.toLowerCase()).timeout(const Duration(seconds: 5));
       }
       if (response.session != null) await _inspectConfirmationAndAccess();
     });
@@ -259,7 +263,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       // Check account access before registering the device. The server is the
       // authority for trial eligibility, expiration, and administrative grants.
-      final initialAccess = _firstRow(await client.rpc('get_my_access_status'));
+      final initialAccess = _firstRow(await client.rpc('get_my_access_status').timeout(const Duration(seconds: 15)));
       if (initialAccess == null) {
         throw StateError('Die Kontoberechtigung konnte nicht ermittelt werden.');
       }
@@ -268,7 +272,7 @@ class AuthProvider extends ChangeNotifier {
         // must never grant access locally or prevent an expired user from
         // reaching the normal payment screen.
         try {
-          await client.rpc('start_streamia_trial');
+          await client.rpc('start_streamia_trial').timeout(const Duration(seconds: 15));
         } on PostgrestException {
           // The server may reject repeat trials, expired trials, or other
           // ineligible accounts. Re-read authoritative access below.
@@ -286,12 +290,12 @@ class AuthProvider extends ChangeNotifier {
         'p_installation_id': installationId,
         'p_device_name': deviceName,
         'p_platform': platform,
-      });
+      }).timeout(const Duration(seconds: 15));
       final registrationRow = _firstRow(registered);
       if (registrationRow == null) throw Exception('Die Geräteregistrierung hat keine Daten zurückgegeben.');
       _deviceId = registrationRow['device_id']?.toString();
       _deviceStatus = registrationRow['device_status']?.toString().toLowerCase();
-      final accountResult = await client.rpc('get_my_access_status');
+      final accountResult = await client.rpc('get_my_access_status').timeout(const Duration(seconds: 15));
       final accountRow = _firstRow(accountResult);
       if (accountRow == null) throw Exception('Die Kontoberechtigung konnte nicht ermittelt werden.');
       _access = accountRow;
@@ -401,6 +405,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   String _friendlyError(Object error) {
+    if (error is TimeoutException) return 'auth_unavailable';
     if (error is AuthException) {
       final message = error.message.toLowerCase();
       if (message.contains('invalid login credentials') || message.contains('invalid credentials')) return 'invalid_credentials';

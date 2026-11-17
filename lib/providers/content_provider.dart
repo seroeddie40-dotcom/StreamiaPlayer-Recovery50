@@ -42,7 +42,11 @@ class ContentProvider extends ChangeNotifier {
   String _sourceKey = 'legacy:default';
   String? _sourceLabel;
   // The active library is held separately; retain at most two inactive ones.
-  static const int _maxInactiveCachedLibraries = 2;
+  final int _maxInactiveCachedLibraries;
+
+  ContentProvider({int maxInactiveCachedLibraries = 2})
+      : assert(maxInactiveCachedLibraries >= 0),
+        _maxInactiveCachedLibraries = maxInactiveCachedLibraries;
   final Map<String, _ContentLibrarySnapshot> _libraryCache = {};
   int _activationGeneration = 0;
   Future<void> _catalogWriteQueue = Future<void>.value();
