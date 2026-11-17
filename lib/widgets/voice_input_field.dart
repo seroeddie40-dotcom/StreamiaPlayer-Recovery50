@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../core/localization/app_localizations.dart';
@@ -61,6 +62,32 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
   String? _localeId;
   String _prefix = '';
   String _suffix = '';
+  Timer? _searchTimer;
+  int _session = 0;
+  bool _acceptResults = false;
+  bool _stoppingSearch = false;
+
+  bool get _searchMode => widget.textInputAction == TextInputAction.search;
+
+  Future<void> _finishSearch(int session) async {
+    if (!mounted || session != _session) return;
+    _searchTimer?.cancel();
+    _acceptResults = false;
+    _session++;
+    _stoppingSearch = true;
+    setState(() {
+      _listening = false;
+      _busy = true;
+    });
+    try {
+      await _speech.stop();
+    } catch (_) {
+      // Results are already invalidated even if the platform stops late.
+    } finally {
+      _stoppingSearch = false;
+      if (mounted) setState(() => _busy = false);
+    }
+  }
 
   bool get _urlMode => widget.keyboardType == TextInputType.url;
 
@@ -70,6 +97,7 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
 
   Future<void> _startDictation() async {
     if (_busy) return;
+    if (_searchMode && _searchTimer?.isActive == true) return;
     if (_listening || _speech.isListening) {
       await _speech.stop();
       if (mounted) setState(() => _listening = false);
@@ -80,11 +108,13 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
       if (!_ready) {
         final available = await _speech.initialize(
           onStatus: (status) {
-            if (mounted) setState(() => _listening = status == 'listening');
+            if (mounted && !_searchMode) {
+              setState(() => _listening = status == 'listening');
+            }
           },
           onError: (_) {
             if (!mounted) return;
-            setState(() => _listening = false);
+            if (!_searchMode) setState(() => _listening = false);
             _message(AppLocalizations.of(context).t('speech_unavailable'));
           },
         );
@@ -116,17 +146,26 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
       _prefix = replaceSearch ? '' : existing.text.substring(0, start);
       _suffix = replaceSearch ? '' : existing.text.substring(end);
 
+      final session = ++_session;
+      _acceptResults = true;
+      if (replaceSearch) {
+        setState(() => _listening = true);
+        _searchTimer = Timer(const Duration(seconds: 5), () {
+          unawaited(_finishSearch(session));
+        });
+      }
       await _speech.listen(
         localeId: _localeId,
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 3),
+        listenFor: Duration(seconds: replaceSearch ? 5 : 30),
+        pauseFor: Duration(seconds: replaceSearch ? 5 : 3),
         listenOptions: stt.SpeechListenOptions(
           partialResults: true,
           cancelOnError: true,
           listenMode: stt.ListenMode.dictation,
         ),
         onResult: (result) {
-          if (!mounted || result.recognizedWords.isEmpty) return;
+          if (!mounted || !_acceptResults || session != _session ||
+              result.recognizedWords.isEmpty) return;
           final spoken = result.recognizedWords;
           final insertion = _urlMode ? VoiceInputField.normalizeUrl(spoken) : spoken;
           // One recognition session replaces only its own partial result.
@@ -143,11 +182,16 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
           );
         },
       );
-      if (mounted) setState(() => _listening = _speech.isListening);
+      if (mounted && !replaceSearch) {
+        setState(() => _listening = _speech.isListening);
+      }
     } catch (_) {
+      if (_searchMode && _acceptResults) await _finishSearch(_session);
       if (mounted) _message(AppLocalizations.of(context).t('speech_unavailable'));
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted && !_stoppingSearch) {
+        setState(() => _busy = false);
+      }
     }
   }
 
@@ -157,6 +201,9 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
 
   @override
   void dispose() {
+    _searchTimer?.cancel();
+    _acceptResults = false;
+    _session++;
     _speech.stop();
     super.dispose();
   }
