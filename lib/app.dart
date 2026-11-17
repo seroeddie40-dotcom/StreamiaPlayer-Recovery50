@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/platform/device_layout.dart';
+import 'core/platform/tv_remote_navigation.dart';
 import 'core/localization/app_localizations.dart';
 import 'core/storage/prefs_service.dart';
 
@@ -46,8 +47,11 @@ class StreamiaApp extends StatelessWidget {
       title: 'Streamia Player',
       debugShowCheckedModeBanner: false,
 
-      theme: AppTheme.light,
-      darkTheme: AppTheme.dark,
+      theme: TvRemoteNavigation.theme(AppTheme.light),
+      darkTheme: TvRemoteNavigation.theme(AppTheme.dark),
+      shortcuts: DeviceLayout.isTelevision
+          ? TvRemoteNavigation.shortcuts
+          : null,
       themeMode: themeProvider.themeMode,
 
       locale: localeProvider.locale,
