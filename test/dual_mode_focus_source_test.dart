@@ -62,6 +62,11 @@ void main() {
     expect(source.contains('languageCode == selectedLanguage'), isTrue);
   });
 
+  test('TV always uses traditional focus highlighting', () {
+    final source = File('lib/main.dart').readAsStringSync();
+    expect(source.contains('FocusHighlightStrategy.alwaysTraditional'), isTrue);
+  });
+
   test('startup detects TV before choosing the device orientation', () {
     final source = File('lib/main.dart').readAsStringSync();
     final detection = source.indexOf('await DeviceLayout.initialize();');

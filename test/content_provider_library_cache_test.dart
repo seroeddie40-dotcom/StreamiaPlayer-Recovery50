@@ -12,6 +12,14 @@ Channel channel(String id) => Channel(
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('low-memory mode retains no inactive catalog in RAM', () {
+    final provider = ContentProvider(maxInactiveCachedLibraries: 0);
+    provider.replaceLibrary(channels: [channel('a')], vod: [], series: [], sourceKey: 'src:a');
+    provider.replaceLibrary(channels: [channel('b')], vod: [], series: [], sourceKey: 'src:b');
+    expect(provider.activateCachedLibrary('src:a'), isFalse);
+    expect(provider.sourceKey, 'src:b');
+  });
+
   test('restores a recently loaded source without reloading', () {
     final provider = ContentProvider();
 
