@@ -15,6 +15,7 @@ dependencies:
   shelf: ^1.4.1
   shelf_router: ^1.1.4
   supabase_flutter: ^2.0.0
+  connectivity_plus: ^6.1.4
   network_info_plus: ^6.0.1
   provider: ^6.1.1
   shared_preferences: ^2.2.2
