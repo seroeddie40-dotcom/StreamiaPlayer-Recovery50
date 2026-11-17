@@ -13,7 +13,8 @@ void main() {
   });
   test('recording screen filters both storage locations and revokes playback', () {
     final source = File('lib/screens/recordings_screen.dart').readAsStringSync();
-    expect(source, contains('RecordingService.ownsName(entity.uri.pathSegments.last, owner)'));
+    expect(source, matches(RegExp(r'final name = entity\.uri\.pathSegments\.last;\s*if \(!RecordingService\.ownsName\(name, owner\)\)')));
+    expect(source, matches(RegExp(r"final name = data\['name'\]\?\.toString\(\) \?\? '';\s*if \(uri\.isEmpty\) continue;\s*if \(!RecordingService\.ownsName\(name, owner\)\)")));
     expect(source, contains('RecordingService.ownsName(name, owner)'));
     expect(source, contains('if (confirmed != true || !mounted || !_owns(entry)) return;'));
     expect(source, contains('_recordingOwner(_familySession) != widget.ownerKey'));
