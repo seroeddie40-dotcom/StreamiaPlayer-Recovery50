@@ -106,14 +106,15 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
       }
 
       final existing = widget.controller.value;
+      final replaceSearch = widget.textInputAction == TextInputAction.search;
       final start = existing.selection.isValid
           ? existing.selection.start.clamp(0, existing.text.length)
           : existing.text.length;
       final end = existing.selection.isValid
           ? existing.selection.end.clamp(0, existing.text.length)
           : existing.text.length;
-      _prefix = existing.text.substring(0, start);
-      _suffix = existing.text.substring(end);
+      _prefix = replaceSearch ? '' : existing.text.substring(0, start);
+      _suffix = replaceSearch ? '' : existing.text.substring(end);
 
       await _speech.listen(
         localeId: _localeId,
@@ -142,7 +143,7 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
           );
         },
       );
-      if (mounted) setState(() => _listening = true);
+      if (mounted) setState(() => _listening = _speech.isListening);
     } catch (_) {
       if (mounted) _message(AppLocalizations.of(context).t('speech_unavailable'));
     } finally {
@@ -174,7 +175,7 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
     );
     final base = widget.decoration;
     final tvButton = IconButton(
-      tooltip: 'TV keyboard',
+      tooltip: l10n.t('tv_keyboard_title'),
       icon: const Icon(Icons.keyboard_alt_outlined),
       onPressed: () => TvTextKeyboard.show(
         context,
