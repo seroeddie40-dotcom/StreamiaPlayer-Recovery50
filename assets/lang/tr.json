@@ -171,7 +171,7 @@
   "family_show_pin": "PIN göster",
   "family_confirm": "Onayla",
   "family_parent_pin": "Ebeveyn PIN'i",
-  "family_manage_rules": "Klasör engellerini yönet",
+  "family_manage_rules": "Klasörleri yönet",
   "family_set_default": "Varsayılan yap",
   "family_manage_one": "Profili yönet",
   "family_selected": "seçildi",
@@ -238,7 +238,7 @@
   "family_child_created": "Çocuk profili oluşturuldu. Artık klasörleri kısıtlayabilirsiniz.",
   "family_child_only": "Klasör izinleri yalnızca çocuk profilleri için kullanılabilir.",
   "family_rules_load": "Klasör izinleri yüklenemedi.",
-  "family_m3u_notice": "M3U klasörleri henüz burada yönetilemiyor. Mevcut kısıtlamalar korunur.",
+  "family_m3u_notice": "Önce bu M3U listesini etkin oynatma listesi olarak yükleyin. Mevcut klasör kuralları korunur.",
   "family_categories_load": "Kategoriler yüklenemedi. Liste bağlantısını kontrol edin.",
   "family_session_expired": "Ebeveyn PIN oturumu sona erdi. Yönetimin kilidini tekrar açın.",
   "family_settings_profiles": "Aile profilleri",
@@ -257,5 +257,14 @@
   "family_switch_profile": "Profil değiştir",
   "family_no_child_profiles": "Çocuk profili bulunmuyor.",
   "family_child_downloads": "Çocuğun indirmelerini yönet",
-  "family_child_recordings": "Çocuğun kayıtlarını yönet"
+  "family_child_recordings": "Çocuğun kayıtlarını yönet",
+  "adult_folder_hide": "Klasörleri gizle",
+  "adult_folder_show": "Klasörleri göster",
+  "adult_folder_hidden": "gizli",
+  "adult_folder_hint": "Profilinde gizlemek istediğin klasörleri seç.",
+  "clock_show": "Saati göster",
+  "clock_date": "Tarihi göster",
+  "clock_format": "Saat biçimi",
+  "clock_24": "24 saat",
+  "clock_12": "12 saat (AM/PM)"
 }

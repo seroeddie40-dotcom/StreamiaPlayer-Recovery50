@@ -171,7 +171,7 @@
   "family_show_pin": "Mostrar PIN",
   "family_confirm": "Confirmar",
   "family_parent_pin": "PIN parental",
-  "family_manage_rules": "Gestionar restricciones de carpetas",
+  "family_manage_rules": "Gestionar carpetas",
   "family_set_default": "Establecer como predeterminado",
   "family_manage_one": "Gestionar perfil",
   "family_selected": "seleccionados",
@@ -238,7 +238,7 @@
   "family_child_created": "Perfil infantil creado. Ya puedes restringir carpetas.",
   "family_child_only": "Los permisos de carpetas solo están disponibles para perfiles infantiles.",
   "family_rules_load": "No se pudieron cargar los permisos de carpetas.",
-  "family_m3u_notice": "Todavía no se pueden gestionar carpetas M3U aquí. Se mantienen las restricciones existentes.",
+  "family_m3u_notice": "Carga primero esta lista M3U como lista activa. Se conservan las reglas de carpetas existentes.",
   "family_categories_load": "No se pudieron cargar las categorías. Comprueba la conexión de la lista.",
   "family_session_expired": "La sesión del PIN parental ha caducado. Desbloquea la gestión de nuevo.",
   "family_settings_profiles": "Perfiles familiares",
@@ -257,5 +257,14 @@
   "family_switch_profile": "Cambiar perfil",
   "family_no_child_profiles": "No hay perfiles infantiles.",
   "family_child_downloads": "Gestionar descargas del menor",
-  "family_child_recordings": "Gestionar grabaciones del menor"
+  "family_child_recordings": "Gestionar grabaciones del menor",
+  "adult_folder_hide": "Ocultar carpetas",
+  "adult_folder_show": "Mostrar carpetas",
+  "adult_folder_hidden": "ocultas",
+  "adult_folder_hint": "Selecciona las carpetas que quieras ocultar en tu perfil.",
+  "clock_show": "Mostrar hora",
+  "clock_date": "Mostrar fecha",
+  "clock_format": "Formato de hora",
+  "clock_24": "24 horas",
+  "clock_12": "12 horas (AM/PM)"
 }

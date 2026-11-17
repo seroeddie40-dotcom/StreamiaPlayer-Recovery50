@@ -171,7 +171,7 @@
   "family_show_pin": "Показать PIN",
   "family_confirm": "Подтвердить",
   "family_parent_pin": "Родительский PIN",
-  "family_manage_rules": "Управление блокировками папок",
+  "family_manage_rules": "Управление папками",
   "family_set_default": "Сделать основным",
   "family_manage_one": "Управление профилем",
   "family_selected": "выбрано",
@@ -238,7 +238,7 @@
   "family_child_created": "Детский профиль создан. Теперь можно ограничить доступ к папкам.",
   "family_child_only": "Разрешения папок доступны только для детских профилей.",
   "family_rules_load": "Не удалось загрузить разрешения папок.",
-  "family_m3u_notice": "Управление папками M3U пока недоступно. Действующие ограничения сохраняются.",
+  "family_m3u_notice": "Сначала загрузите этот список M3U как активный. Существующие правила папок сохраняются.",
   "family_categories_load": "Не удалось загрузить категории. Проверьте подключение к плейлисту.",
   "family_session_expired": "Сеанс родительского PIN истёк. Разблокируйте управление снова.",
   "family_settings_profiles": "Семейные профили",
@@ -257,5 +257,14 @@
   "family_switch_profile": "Сменить профиль",
   "family_no_child_profiles": "Нет детских профилей.",
   "family_child_downloads": "Управление загрузками ребёнка",
-  "family_child_recordings": "Управление записями ребёнка"
+  "family_child_recordings": "Управление записями ребёнка",
+  "adult_folder_hide": "Скрыть папки",
+  "adult_folder_show": "Показать папки",
+  "adult_folder_hidden": "скрыто",
+  "adult_folder_hint": "Выберите папки, которые хотите скрыть в своём профиле.",
+  "clock_show": "Показывать время",
+  "clock_date": "Показывать дату",
+  "clock_format": "Формат времени",
+  "clock_24": "24 часа",
+  "clock_12": "12 часов (AM/PM)"
 }

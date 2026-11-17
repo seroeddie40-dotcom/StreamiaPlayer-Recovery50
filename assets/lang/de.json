@@ -171,7 +171,7 @@
   "family_show_pin": "PIN anzeigen",
   "family_confirm": "Bestätigen",
   "family_parent_pin": "Eltern-PIN",
-  "family_manage_rules": "Ordnersperren verwalten",
+  "family_manage_rules": "Ordner verwalten",
   "family_set_default": "Als Standard festlegen",
   "family_manage_one": "Profil verwalten",
   "family_selected": "ausgewählt",
@@ -238,7 +238,7 @@
   "family_child_created": "Kinderprofil erstellt. Du kannst jetzt die Ordnersperren festlegen.",
   "family_child_only": "Ordnerfreigaben sind nur für Kinderprofile verfügbar.",
   "family_rules_load": "Die Ordnerfreigaben konnten nicht geladen werden.",
-  "family_m3u_notice": "M3U-Ordner können hier noch nicht verwaltet werden. Vorhandene Sperren bleiben erhalten.",
+  "family_m3u_notice": "Lade diese M3U-Playlist zuerst als aktive Playlist. Vorhandene Ordnerregeln bleiben erhalten.",
   "family_categories_load": "Die Kategorien konnten nicht geladen werden. Bitte die Playlistverbindung prüfen.",
   "family_session_expired": "Eltern-PIN-Sitzung abgelaufen. Bitte Verwaltung erneut entsperren.",
   "family_settings_profiles": "Familienprofile",
@@ -257,5 +257,14 @@
   "family_switch_profile": "Profil wechseln",
   "family_no_child_profiles": "Keine Kinderprofile vorhanden.",
   "family_child_downloads": "Downloads des Kindes verwalten",
-  "family_child_recordings": "Aufnahmen des Kindes verwalten"
+  "family_child_recordings": "Aufnahmen des Kindes verwalten",
+  "adult_folder_hide": "Ordner ausblenden",
+  "adult_folder_show": "Ordner einblenden",
+  "adult_folder_hidden": "ausgeblendet",
+  "adult_folder_hint": "Wähle Ordner, die du in deinem Profil ausblenden möchtest.",
+  "clock_show": "Uhrzeit anzeigen",
+  "clock_date": "Datum anzeigen",
+  "clock_format": "Uhrzeitformat",
+  "clock_24": "24 Stunden",
+  "clock_12": "12 Stunden (AM/PM)"
 }

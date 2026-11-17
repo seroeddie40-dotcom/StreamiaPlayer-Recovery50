@@ -171,7 +171,7 @@
   "family_show_pin": "Afficher le PIN",
   "family_confirm": "Confirmer",
   "family_parent_pin": "PIN parental",
-  "family_manage_rules": "Gérer les restrictions de dossiers",
+  "family_manage_rules": "Gérer les dossiers",
   "family_set_default": "Définir par défaut",
   "family_manage_one": "Gérer le profil",
   "family_selected": "sélectionnés",
@@ -238,7 +238,7 @@
   "family_child_created": "Profil enfant créé. Vous pouvez maintenant bloquer des dossiers.",
   "family_child_only": "Les autorisations de dossiers sont réservées aux profils enfants.",
   "family_rules_load": "Impossible de charger les autorisations de dossiers.",
-  "family_m3u_notice": "Les dossiers M3U ne sont pas encore gérables ici. Les restrictions existantes sont conservées.",
+  "family_m3u_notice": "Chargez d’abord cette liste M3U comme liste active. Les règles de dossiers existantes sont conservées.",
   "family_categories_load": "Impossible de charger les catégories. Vérifiez la connexion à la liste.",
   "family_session_expired": "La session du PIN parental a expiré. Déverrouillez à nouveau la gestion.",
   "family_settings_profiles": "Profils familiaux",
@@ -257,5 +257,14 @@
   "family_switch_profile": "Changer de profil",
   "family_no_child_profiles": "Aucun profil enfant.",
   "family_child_downloads": "Gérer les téléchargements de l’enfant",
-  "family_child_recordings": "Gérer les enregistrements de l’enfant"
+  "family_child_recordings": "Gérer les enregistrements de l’enfant",
+  "adult_folder_hide": "Masquer les dossiers",
+  "adult_folder_show": "Afficher les dossiers",
+  "adult_folder_hidden": "masqués",
+  "adult_folder_hint": "Sélectionnez les dossiers à masquer dans votre profil.",
+  "clock_show": "Afficher l’heure",
+  "clock_date": "Afficher la date",
+  "clock_format": "Format horaire",
+  "clock_24": "24 heures",
+  "clock_12": "12 heures (AM/PM)"
 }

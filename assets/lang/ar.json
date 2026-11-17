@@ -171,7 +171,7 @@
   "family_show_pin": "إظهار الرمز",
   "family_confirm": "تأكيد",
   "family_parent_pin": "رمز الوالدين",
-  "family_manage_rules": "إدارة قيود المجلدات",
+  "family_manage_rules": "إدارة المجلدات",
   "family_set_default": "تعيين كافتراضي",
   "family_manage_one": "إدارة الملف الشخصي",
   "family_selected": "محدد",
@@ -238,7 +238,7 @@
   "family_child_created": "تم إنشاء ملف الطفل. يمكنك الآن تقييد المجلدات.",
   "family_child_only": "أذونات المجلدات متاحة لملفات الأطفال فقط.",
   "family_rules_load": "تعذر تحميل أذونات المجلدات.",
-  "family_m3u_notice": "لا يمكن إدارة مجلدات M3U هنا بعد. تبقى القيود الحالية محفوظة.",
+  "family_m3u_notice": "حمّل قائمة M3U هذه أولاً كقائمة نشطة. تبقى قواعد المجلدات الحالية دون تغيير.",
   "family_categories_load": "تعذر تحميل الفئات. تحقق من اتصال قائمة التشغيل.",
   "family_session_expired": "انتهت جلسة رمز الوالدين. أعد فتح قفل الإدارة.",
   "family_settings_profiles": "ملفات العائلة",
@@ -257,5 +257,14 @@
   "family_switch_profile": "تبديل الملف الشخصي",
   "family_no_child_profiles": "لا توجد ملفات شخصية للأطفال.",
   "family_child_downloads": "إدارة تنزيلات الطفل",
-  "family_child_recordings": "إدارة تسجيلات الطفل"
+  "family_child_recordings": "إدارة تسجيلات الطفل",
+  "adult_folder_hide": "إخفاء المجلدات",
+  "adult_folder_show": "إظهار المجلدات",
+  "adult_folder_hidden": "مخفية",
+  "adult_folder_hint": "اختر المجلدات التي تريد إخفاءها في ملفك الشخصي.",
+  "clock_show": "إظهار الوقت",
+  "clock_date": "إظهار التاريخ",
+  "clock_format": "تنسيق الوقت",
+  "clock_24": "24 ساعة",
+  "clock_12": "12 ساعة (AM/PM)"
 }

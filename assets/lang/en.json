@@ -171,7 +171,7 @@
   "family_show_pin": "Show PIN",
   "family_confirm": "Confirm",
   "family_parent_pin": "Parent PIN",
-  "family_manage_rules": "Manage folder restrictions",
+  "family_manage_rules": "Manage folders",
   "family_set_default": "Set as default",
   "family_manage_one": "Manage profile",
   "family_selected": "selected",
@@ -238,7 +238,7 @@
   "family_child_created": "Child profile created. You can now restrict folders.",
   "family_child_only": "Folder permissions are available only for child profiles.",
   "family_rules_load": "Could not load folder permissions.",
-  "family_m3u_notice": "M3U folders cannot yet be managed here. Existing restrictions remain.",
+  "family_m3u_notice": "Load this M3U playlist as the active playlist first. Existing folder rules remain unchanged.",
   "family_categories_load": "Could not load categories. Check the playlist connection.",
   "family_session_expired": "Parent PIN session expired. Unlock management again.",
   "family_settings_profiles": "Family profiles",
@@ -257,5 +257,14 @@
   "family_switch_profile": "Switch profile",
   "family_no_child_profiles": "No child profiles available.",
   "family_child_downloads": "Manage child downloads",
-  "family_child_recordings": "Manage child recordings"
+  "family_child_recordings": "Manage child recordings",
+  "adult_folder_hide": "Hide folders",
+  "adult_folder_show": "Show folders",
+  "adult_folder_hidden": "hidden",
+  "adult_folder_hint": "Select folders to hide in your profile.",
+  "clock_show": "Show time",
+  "clock_date": "Show date",
+  "clock_format": "Time format",
+  "clock_24": "24 hours",
+  "clock_12": "12 hours (AM/PM)"
 }

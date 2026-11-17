@@ -171,7 +171,7 @@
   "family_show_pin": "Pokaż PIN",
   "family_confirm": "Potwierdź",
   "family_parent_pin": "PIN rodzica",
-  "family_manage_rules": "Zarządzaj blokadami folderów",
+  "family_manage_rules": "Zarządzaj folderami",
   "family_set_default": "Ustaw jako domyślny",
   "family_manage_one": "Zarządzaj profilem",
   "family_selected": "wybrano",
@@ -238,7 +238,7 @@
   "family_child_created": "Utworzono profil dziecka. Możesz teraz blokować foldery.",
   "family_child_only": "Uprawnienia folderów są dostępne tylko dla profili dzieci.",
   "family_rules_load": "Nie udało się wczytać uprawnień folderów.",
-  "family_m3u_notice": "Nie można jeszcze zarządzać folderami M3U. Istniejące blokady pozostają.",
+  "family_m3u_notice": "Najpierw załaduj tę listę M3U jako aktywną. Istniejące reguły folderów pozostają bez zmian.",
   "family_categories_load": "Nie udało się wczytać kategorii. Sprawdź połączenie z listą.",
   "family_session_expired": "Sesja PIN rodzica wygasła. Odblokuj zarządzanie ponownie.",
   "family_settings_profiles": "Profile rodzinne",
@@ -257,5 +257,14 @@
   "family_switch_profile": "Zmień profil",
   "family_no_child_profiles": "Brak profili dziecięcych.",
   "family_child_downloads": "Zarządzaj pobraniami dziecka",
-  "family_child_recordings": "Zarządzaj nagraniami dziecka"
+  "family_child_recordings": "Zarządzaj nagraniami dziecka",
+  "adult_folder_hide": "Ukryj foldery",
+  "adult_folder_show": "Pokaż foldery",
+  "adult_folder_hidden": "ukryte",
+  "adult_folder_hint": "Wybierz foldery do ukrycia w swoim profilu.",
+  "clock_show": "Pokaż godzinę",
+  "clock_date": "Pokaż datę",
+  "clock_format": "Format czasu",
+  "clock_24": "24 godziny",
+  "clock_12": "12 godzin (AM/PM)"
 }
