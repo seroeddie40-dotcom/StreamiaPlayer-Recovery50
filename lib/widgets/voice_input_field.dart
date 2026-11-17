@@ -15,6 +15,11 @@ class VoiceInputField extends StatefulWidget {
   final TextCapitalization textCapitalization;
   final int? maxLines;
   final bool autofocus;
+  final bool credentialMode;
+  final bool obscureText;
+  final bool secret;
+  final TextStyle? style;
+  final TextDirection? textDirection;
   final FocusNode? focusNode;
   final TextInputAction textInputAction;
   final ValueChanged<String>? onSubmitted;
@@ -28,10 +33,37 @@ class VoiceInputField extends StatefulWidget {
     this.textCapitalization = TextCapitalization.none,
     this.maxLines = 1,
     this.autofocus = false,
+    this.credentialMode = false,
+    this.obscureText = false,
+    this.secret = false,
+    this.style,
+    this.textDirection,
     this.focusNode,
     this.textInputAction = TextInputAction.next,
     this.onSubmitted,
   });
+
+  // Apply spoken punctuation only to email addresses, not passwords or IDs.
+  static String normalizeEmail(String value, String language) {
+    const words = <String, Map<String, String>>{
+      'de': {'punkt': '.', 'at': '@', 'bindestrich': '-', 'unterstrich': '_'},
+      'tr': {'nokta': '.', 'et': '@', 'tire': '-', 'alt çizgi': '_'},
+      'en': {'dot': '.', 'at': '@', 'hyphen': '-', 'underscore': '_'},
+      'ru': {'точка': '.', 'собака': '@', 'дефис': '-', 'подчеркивание': '_'},
+      'pl': {'kropka': '.', 'małpa': '@', 'myślnik': '-', 'podkreślenie': '_'},
+      'es': {'punto': '.', 'arroba': '@', 'guion bajo': '_', 'guion': '-'},
+      'fr': {'point': '.', 'arobase': '@', 'tiret bas': '_', 'tiret': '-'},
+      'ar': {'نقطة': '.', 'آت': '@', 'شرطة سفلية': '_', 'شرطة': '-'},
+    };
+    var text = value.toLowerCase();
+    for (final entry in (words[language] ?? words['en']!).entries) {
+      text = text.replaceAllMapped(
+        RegExp('(^|\\s+)${RegExp.escape(entry.key)}(?=\\s|\$)'),
+        (match) => entry.value,
+      );
+    }
+    return text.replaceAll(RegExp(r'\s+'), '');
+  }
 
   static String normalizeUrl(String value) {
     var text = value.trim();
@@ -167,10 +199,36 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
           if (!mounted || !_acceptResults || session != _session ||
               result.recognizedWords.isEmpty) return;
           final spoken = result.recognizedWords;
-          final insertion = _urlMode ? VoiceInputField.normalizeUrl(spoken) : spoken;
+          final credential = widget.credentialMode || _urlMode;
+          if (credential && !result.finalResult) return;
+          final commands = <String, List<String>>{
+            'de': ['enter', 'weiter', 'jetzt passwort'],
+            'tr': ['enter', 'ileri', 'şimdi şifre'],
+            'en': ['enter', 'next', 'now password'],
+            'ru': ['enter', 'далее', 'теперь пароль'],
+            'pl': ['enter', 'dalej', 'teraz hasło'],
+            'es': ['enter', 'siguiente', 'ahora contraseña'],
+            'fr': ['enter', 'suivant', 'maintenant mot de passe'],
+            'ar': ['enter', 'التالي', 'الآن كلمة المرور'],
+          };
+          final command = spoken.trim().toLowerCase();
+          if (credential && !widget.secret && widget.onSubmitted != null &&
+              (commands[widget.appLanguageCode] ?? commands['en']!).contains(command)) {
+            // Never insert a partial navigation command into credentials.
+            if (result.finalResult) {
+              _acceptResults = false;
+              unawaited(_speech.stop());
+              widget.onSubmitted!(widget.controller.text);
+            }
+            return;
+          }
+          final rawInsertion = _urlMode ? VoiceInputField.normalizeUrl(spoken) : widget.credentialMode ? spoken.replaceAll(RegExp(r'\s+'), '') : spoken;
+          final insertion = widget.keyboardType == TextInputType.emailAddress
+              ? VoiceInputField.normalizeEmail(spoken, widget.appLanguageCode)
+              : rawInsertion;
           // One recognition session replaces only its own partial result.
           // Previously typed scheme and port are never discarded.
-          final separator = !_urlMode && _prefix.isNotEmpty &&
+          final separator = !_urlMode && !widget.credentialMode && _prefix.isNotEmpty &&
                   !_prefix.endsWith(' ') && insertion.isNotEmpty
               ? ' '
               : '';
@@ -229,6 +287,7 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
         controller: widget.controller,
         languageCode: widget.appLanguageCode,
         urlMode: _urlMode,
+        secret: widget.secret,
         onConfirmed: widget.onSubmitted == null
             ? null
             : () => widget.onSubmitted!(widget.controller.text),
@@ -236,7 +295,15 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
     );
     return TextField(
       controller: widget.controller,
+      obscureText: widget.obscureText,
+      style: widget.style,
+      textDirection: widget.textDirection,
       keyboardType: widget.keyboardType,
+      autocorrect: !widget.credentialMode && !_urlMode,
+      enableSuggestions: !widget.credentialMode && !_urlMode,
+      enableIMEPersonalizedLearning: !widget.credentialMode && !_urlMode,
+      smartDashesType: widget.credentialMode || _urlMode ? SmartDashesType.disabled : null,
+      smartQuotesType: widget.credentialMode || _urlMode ? SmartQuotesType.disabled : null,
       textCapitalization: widget.textCapitalization,
       maxLines: widget.maxLines,
       autofocus: widget.autofocus,
