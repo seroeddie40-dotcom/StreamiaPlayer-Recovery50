@@ -23,6 +23,11 @@ void main() async {
   // Detect the physical device and apply its orientation before any network
   // initialization. A slow Supabase startup must not leave Android TV in portrait.
   await DeviceLayout.initialize();
+  if (DeviceLayout.isTelevision) {
+    FocusManager.instance.highlightStrategy = FocusHighlightStrategy.alwaysTraditional;
+    PaintingBinding.instance.imageCache.maximumSize = 120;
+    PaintingBinding.instance.imageCache.maximumSizeBytes = 32 * 1024 * 1024;
+  }
   await SystemChrome.setPreferredOrientations(
     DeviceLayout.isTelevision
         ? [
@@ -57,7 +62,9 @@ void main() async {
           create: (_) => AuthProvider(prefsService),
         ),
         ChangeNotifierProvider(
-          create: (_) => ContentProvider(),
+          create: (_) => ContentProvider(
+            maxInactiveCachedLibraries: DeviceLayout.isTelevision ? 0 : 2,
+          ),
         ),
 
         // Global family session for Live TV, VOD, Series,

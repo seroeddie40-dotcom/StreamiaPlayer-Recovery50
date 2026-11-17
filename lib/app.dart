@@ -91,7 +91,7 @@ class StreamiaApp extends StatelessWidget {
 
     // Do not flash the login screen while restoring a persisted session.
     if (auth.isInitializing) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return _startupLoading(locale.locale.languageCode);
     }
 
     if (!auth.isLoggedIn) {
@@ -99,11 +99,7 @@ class StreamiaApp extends StatelessWidget {
     }
 
     if (!auth.accessChecked || auth.isBusy) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+      return _startupLoading(locale.locale.languageCode);
     }
 
     // Technical errors must not redirect to payment.
@@ -142,6 +138,22 @@ class StreamiaApp extends StatelessWidget {
   }
 }
 
+
+Widget _startupLoading(String language) {
+  const messages = {
+    'de': 'Konto und Gerätezugang werden geprüft…',
+    'tr': 'Hesap ve cihaz erişimi kontrol ediliyor…',
+    'en': 'Checking account and device access…',
+    'ru': 'Проверка аккаунта и доступа устройства…',
+    'pl': 'Sprawdzanie konta i dostępu urządzenia…',
+    'es': 'Comprobando la cuenta y el acceso del dispositivo…',
+    'fr': 'Vérification du compte et de l’accès de l’appareil…',
+    'ar': 'جارٍ التحقق من الحساب والوصول إلى الجهاز…',
+  };
+  return Scaffold(body: Center(child: Column(mainAxisSize: MainAxisSize.min,
+    children: [const CircularProgressIndicator(), const SizedBox(height: 20),
+      Text(messages[language] ?? messages['en']!, textAlign: TextAlign.center)])));
+}
 
 /// Keep onboarding in portrait on phones while restoring the original
 /// landscape experience as soon as the library/dashboard is displayed.
@@ -202,6 +214,7 @@ class _LibraryStartupGate extends StatefulWidget {
 class _LibraryStartupGateState extends State<_LibraryStartupGate> {
   bool _loading = true;
   bool _hasProfiles = false;
+  bool _loadFailed = false;
   @override
   void initState() {
     super.initState();
@@ -210,9 +223,10 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
 
   Future<void> _loadLibrary() async {
     if (!mounted) return;
-    setState(() { _loading = true; });
+    setState(() { _loading = true; _loadFailed = false; });
+    final content = context.read<ContentProvider>();
     try {
-      final profiles = await PlaylistProfileStore().load();
+      final profiles = await PlaylistProfileStore().load().timeout(const Duration(seconds: 15));
       if (!mounted) return;
       if (profiles.isEmpty) {
         setState(() { _hasProfiles = false; _loading = false; });
@@ -220,15 +234,14 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
       }
       _hasProfiles = true;
       final active = profiles.where((p) => p.isActive).firstOrNull ?? profiles.first;
-      final content = context.read<ContentProvider>();
       // Prefer the encrypted offline catalog, so opening the app does not
       // depend on the playlist server being reachable.
       final restored = await content.restoreStoredLibrary(
         active.sourceKey, sourceLabel: active.displayName,
-      );
+      ).timeout(const Duration(seconds: 30));
       if (!restored && !content.isLoaded) {
         // No cached catalog: use the already saved secure source credentials.
-        await PlaylistSwitchService().activate(active, content);
+        await PlaylistSwitchService().activate(active, content).timeout(const Duration(seconds: 120));
       }
       if (!mounted) return;
       if (!content.isLoaded) {
@@ -236,7 +249,10 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
       }
     } catch (error) {
       debugPrint('Streamia startup library load failed: ${error.runtimeType}');
-      if (mounted) setState(() { _loading = false; });
+      if (mounted) {
+        content.beginLibraryActivation();
+        setState(() { _loading = false; _loadFailed = true; });
+      }
     }
   }
 
@@ -250,7 +266,7 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
     if (context.watch<ContentProvider>().isLoaded) {
       return const _LandscapeDashboard();
     }
-    if (!_loading && !_hasProfiles) {
+    if (!_loading && !_hasProfiles && !_loadFailed) {
       return const SetupScreen();
     }
     return Scaffold(
@@ -564,7 +580,7 @@ class _StartupGateState extends State<StartupGate> {
     super.initState();
 
     Timer(
-      const Duration(milliseconds: 1700),
+      const Duration(milliseconds: 350),
       () {
         if (!mounted) return;
 
