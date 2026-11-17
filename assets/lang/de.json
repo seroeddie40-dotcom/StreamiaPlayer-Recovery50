@@ -253,5 +253,9 @@
   "folder_rules_mismatch": "Gespeicherte Ordnersperren stimmen nicht mit der Auswahl überein.",
   "folder_bulk_allowed": "Entsperrte Ordner: {count}",
   "folder_bulk_denied": "Gesperrte Ordner: {count}",
-  "folder_bulk_interrupted": "Änderung unterbrochen ({count} erfolgreich). Bitte erneut prüfen."
+  "folder_bulk_interrupted": "Änderung unterbrochen ({count} erfolgreich). Bitte erneut prüfen.",
+  "family_switch_profile": "Profil wechseln",
+  "family_no_child_profiles": "Keine Kinderprofile vorhanden.",
+  "family_child_downloads": "Downloads des Kindes verwalten",
+  "family_child_recordings": "Aufnahmen des Kindes verwalten"
 }

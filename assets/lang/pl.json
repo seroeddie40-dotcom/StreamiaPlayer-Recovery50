@@ -253,5 +253,9 @@
   "folder_rules_mismatch": "Zapisane blokady folderów nie odpowiadają wyborowi.",
   "folder_bulk_allowed": "Odblokowane foldery: {count}",
   "folder_bulk_denied": "Zablokowane foldery: {count}",
-  "folder_bulk_interrupted": "Zmiana przerwana (udane: {count}). Sprawdź ponownie."
+  "folder_bulk_interrupted": "Zmiana przerwana (udane: {count}). Sprawdź ponownie.",
+  "family_switch_profile": "Zmień profil",
+  "family_no_child_profiles": "Brak profili dziecięcych.",
+  "family_child_downloads": "Zarządzaj pobraniami dziecka",
+  "family_child_recordings": "Zarządzaj nagraniami dziecka"
 }

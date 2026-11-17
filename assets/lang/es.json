@@ -253,5 +253,9 @@
   "folder_rules_mismatch": "Las restricciones guardadas no coinciden con la selección.",
   "folder_bulk_allowed": "Carpetas desbloqueadas: {count}",
   "folder_bulk_denied": "Carpetas bloqueadas: {count}",
-  "folder_bulk_interrupted": "Cambio interrumpido ({count} correctos). Comprueba de nuevo."
+  "folder_bulk_interrupted": "Cambio interrumpido ({count} correctos). Comprueba de nuevo.",
+  "family_switch_profile": "Cambiar perfil",
+  "family_no_child_profiles": "No hay perfiles infantiles.",
+  "family_child_downloads": "Gestionar descargas del menor",
+  "family_child_recordings": "Gestionar grabaciones del menor"
 }

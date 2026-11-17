@@ -253,5 +253,9 @@
   "folder_rules_mismatch": "Kaydedilen klasör engelleri seçimle eşleşmiyor.",
   "folder_bulk_allowed": "Engeli kaldırılan klasörler: {count}",
   "folder_bulk_denied": "Engellenen klasörler: {count}",
-  "folder_bulk_interrupted": "İşlem kesildi ({count} başarılı). Lütfen tekrar kontrol edin."
+  "folder_bulk_interrupted": "İşlem kesildi ({count} başarılı). Lütfen tekrar kontrol edin.",
+  "family_switch_profile": "Profil değiştir",
+  "family_no_child_profiles": "Çocuk profili bulunmuyor.",
+  "family_child_downloads": "Çocuğun indirmelerini yönet",
+  "family_child_recordings": "Çocuğun kayıtlarını yönet"
 }

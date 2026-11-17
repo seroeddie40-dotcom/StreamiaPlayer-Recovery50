@@ -253,5 +253,9 @@
   "folder_rules_mismatch": "Сохранённые ограничения папок не совпадают с выбором.",
   "folder_bulk_allowed": "Разблокировано папок: {count}",
   "folder_bulk_denied": "Заблокировано папок: {count}",
-  "folder_bulk_interrupted": "Изменение прервано (успешно: {count}). Проверьте ещё раз."
+  "folder_bulk_interrupted": "Изменение прервано (успешно: {count}). Проверьте ещё раз.",
+  "family_switch_profile": "Сменить профиль",
+  "family_no_child_profiles": "Нет детских профилей.",
+  "family_child_downloads": "Управление загрузками ребёнка",
+  "family_child_recordings": "Управление записями ребёнка"
 }

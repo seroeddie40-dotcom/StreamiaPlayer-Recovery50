@@ -253,5 +253,9 @@
   "folder_rules_mismatch": "Saved folder restrictions do not match the selection.",
   "folder_bulk_allowed": "Folders unlocked: {count}",
   "folder_bulk_denied": "Folders blocked: {count}",
-  "folder_bulk_interrupted": "Change interrupted ({count} successful). Please check again."
+  "folder_bulk_interrupted": "Change interrupted ({count} successful). Please check again.",
+  "family_switch_profile": "Switch profile",
+  "family_no_child_profiles": "No child profiles available.",
+  "family_child_downloads": "Manage child downloads",
+  "family_child_recordings": "Manage child recordings"
 }

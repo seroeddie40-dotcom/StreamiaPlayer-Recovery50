@@ -253,5 +253,9 @@
   "folder_rules_mismatch": "Les restrictions enregistrées ne correspondent pas à la sélection.",
   "folder_bulk_allowed": "Dossiers déverrouillés : {count}",
   "folder_bulk_denied": "Dossiers bloqués : {count}",
-  "folder_bulk_interrupted": "Modification interrompue ({count} réussies). Veuillez vérifier."
+  "folder_bulk_interrupted": "Modification interrompue ({count} réussies). Veuillez vérifier.",
+  "family_switch_profile": "Changer de profil",
+  "family_no_child_profiles": "Aucun profil enfant.",
+  "family_child_downloads": "Gérer les téléchargements de l’enfant",
+  "family_child_recordings": "Gérer les enregistrements de l’enfant"
 }

@@ -253,5 +253,9 @@
   "folder_rules_mismatch": "قيود المجلدات المحفوظة لا تطابق التحديد.",
   "folder_bulk_allowed": "المجلدات التي أُلغي حظرها: {count}",
   "folder_bulk_denied": "المجلدات المحظورة: {count}",
-  "folder_bulk_interrupted": "توقف التغيير (نجح {count}). يرجى التحقق مجددًا."
+  "folder_bulk_interrupted": "توقف التغيير (نجح {count}). يرجى التحقق مجددًا.",
+  "family_switch_profile": "تبديل الملف الشخصي",
+  "family_no_child_profiles": "لا توجد ملفات شخصية للأطفال.",
+  "family_child_downloads": "إدارة تنزيلات الطفل",
+  "family_child_recordings": "إدارة تسجيلات الطفل"
 }
