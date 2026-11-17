@@ -33,6 +33,7 @@ class PlaylistProfileStore {
 
   Future<List<PlaylistProfile>> load() async {
     final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final raw = prefs.getString(_storageKey);
 
     if (raw == null || raw.isEmpty) {

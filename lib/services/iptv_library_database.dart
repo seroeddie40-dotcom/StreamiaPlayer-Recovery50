@@ -26,8 +26,16 @@ class IptvLibraryDatabase {
   final AesGcm _cipher = AesGcm.with256bits();
   SecretKey? _cachedKey;
 
+  Future<SecretKey>? _keyInitialization;
+
   Future<SecretKey> _getKey() async {
     if (_cachedKey != null) return _cachedKey!;
+    return _keyInitialization ??= _loadOrCreateKey().whenComplete(() {
+      _keyInitialization = null;
+    });
+  }
+
+  Future<SecretKey> _loadOrCreateKey() async {
     var encoded = await _secureStorage.read(key: _keyName);
     if (encoded == null) {
       final fresh = await _cipher.newSecretKey();

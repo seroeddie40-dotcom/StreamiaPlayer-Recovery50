@@ -74,6 +74,7 @@ class DownloadService {
   static final Map<String, CancelToken> _tokens = {};
   static final Set<String> _removing = {};
   static final Map<String, Completer<void>> _activeOperations = {};
+  static bool get hasActiveOperations => _activeOperations.isNotEmpty;
   static Future<void>? _initialization;
   static Future<void> _pendingSave = Future<void>.value();
 

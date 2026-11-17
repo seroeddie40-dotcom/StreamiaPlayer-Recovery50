@@ -15,11 +15,13 @@ import '../providers/content_provider.dart';
 /// Reads network and local playlists line by line. Keeps the original
 /// group-title as a category for Live TV, VOD and series.
 class PlaylistParser {
-  static Future<void> parseAndLoad(
+  static Future<bool> parseAndLoad(
     String urlOrContent,
     ContentProvider content, {
     String? sourceKeyOverride,
     int? activationGeneration,
+    bool Function()? mayPublish,
+    bool durableRefresh = false,
   }) async {
     final input = urlOrContent.trim();
     if (input.isEmpty) throw const FormatException('Die Playlist ist leer.');
@@ -41,33 +43,39 @@ class PlaylistParser {
             'Playlist konnte nicht geladen werden (HTTP ${response.statusCode}).',
           );
         }
-        await _parseLines(
+        return await _parseLines(
           response.transform(utf8.decoder).transform(const LineSplitter()),
           content,
           sourceKeyOverride: sourceKeyOverride,
           activationGeneration: activationGeneration,
+          mayPublish: mayPublish,
+          durableRefresh: durableRefresh,
           sourceHost: uri.host,
         );
       } finally {
         client.close(force: true);
       }
     } else {
-      await _parseLines(
+      return await _parseLines(
         Stream<String>.fromIterable(const LineSplitter().convert(input)),
         content,
         sourceKeyOverride: sourceKeyOverride,
         activationGeneration: activationGeneration,
+          mayPublish: mayPublish,
+          durableRefresh: durableRefresh,
       );
     }
   }
 
   /// The picker should supply a readable temporary path on Android.
   /// The file itself is not loaded into one large String.
-  static Future<void> parseAndLoadFile(
+  static Future<bool> parseAndLoadFile(
     String path,
     ContentProvider content, {
     String? sourceKeyOverride,
     int? activationGeneration,
+    bool Function()? mayPublish,
+    bool durableRefresh = false,
   }) async {
     final file = File(path);
     if (!await file.exists()) {
@@ -75,19 +83,23 @@ class PlaylistParser {
         'Die ausgewählte M3U-Datei ist nicht mehr verfügbar.',
       );
     }
-    await _parseLines(
+    return await _parseLines(
       file.openRead().transform(utf8.decoder).transform(const LineSplitter()),
       content,
       sourceKeyOverride: sourceKeyOverride,
       activationGeneration: activationGeneration,
+          mayPublish: mayPublish,
+          durableRefresh: durableRefresh,
     );
   }
 
-  static Future<void> _parseLines(
+  static Future<bool> _parseLines(
     Stream<String> lines,
     ContentProvider content, {
     String? sourceKeyOverride,
     int? activationGeneration,
+    bool Function()? mayPublish,
+    bool durableRefresh = false,
     String? sourceHost,
   }) async {
     final channels = <Channel>[];
@@ -265,7 +277,14 @@ class PlaylistParser {
             ))
         .toList(growable: false);
 
-    content.replaceLibrary(
+    if (mayPublish != null && !mayPublish()) return false;
+    if (durableRefresh) {
+      return await content.replaceRefreshedLibrary(channels: identifiedChannels,
+          vod: vod, series: series.values.toList(), sourceKey: sourceKey,
+          sourceLabel: sourceHost ?? 'M3U-Datei',
+          activationGeneration: activationGeneration, mayPublish: mayPublish);
+    }
+    return content.replaceLibrary(
       channels: identifiedChannels,
       vod: vod,
       series: series.values.toList(),
