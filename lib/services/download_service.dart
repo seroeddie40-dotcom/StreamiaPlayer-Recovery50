@@ -12,6 +12,8 @@ enum DownloadState { queued, downloading, completed, cancelled, failed, interrup
 
 class DownloadEntry {
   final String id;
+  final String? ownerAccountId;
+  final String? ownerProfileId;
   final String title;
   final String kind; // movie or episode
   final String? seriesTitle;
@@ -25,6 +27,8 @@ class DownloadEntry {
 
   const DownloadEntry({
     required this.id,
+    this.ownerAccountId,
+    this.ownerProfileId,
     required this.title,
     required this.kind,
     required this.sourceUrl,
@@ -37,23 +41,36 @@ class DownloadEntry {
     this.error,
   });
 
+  bool get isUnassigned => ownerAccountId == null && ownerProfileId == null;
+
+  bool get hasSafeFilename => filename.isNotEmpty && filename != '.' &&
+      filename != '..' && filename != 'downloads.json' &&
+      filename != 'downloads.json.tmp' && !filename.endsWith('.part') &&
+      !filename.contains('/') && !filename.contains('\\');
+
+  bool belongsTo(String accountId, String profileId) =>
+      accountId.isNotEmpty && profileId.isNotEmpty &&
+      ownerAccountId == accountId && ownerProfileId == profileId;
+
   DownloadEntry copyWith({DownloadState? state, double? progress, String? error}) =>
       DownloadEntry(
-        id: id, title: title, kind: kind, sourceUrl: sourceUrl,
+        id: id, ownerAccountId: ownerAccountId, ownerProfileId: ownerProfileId, title: title, kind: kind, sourceUrl: sourceUrl,
         filename: filename, state: state ?? this.state,
         seriesTitle: seriesTitle, season: season, episode: episode,
         progress: progress ?? this.progress, error: error,
       );
 
   Map<String, dynamic> toJson() => {
-    'id': id, 'title': title, 'kind': kind, 'sourceUrl': sourceUrl,
+    'id': id, 'ownerAccountId': ownerAccountId, 'ownerProfileId': ownerProfileId, 'title': title, 'kind': kind, 'sourceUrl': sourceUrl,
     'filename': filename, 'state': state.name, 'progress': progress,
     'seriesTitle': seriesTitle, 'season': season, 'episode': episode,
     'error': error,
   };
 
   factory DownloadEntry.fromJson(Map<String, dynamic> json) => DownloadEntry(
-    id: json['id'] as String, title: json['title'] as String,
+    id: json['id'] as String,
+    ownerAccountId: json['ownerAccountId'] as String?,
+    ownerProfileId: json['ownerProfileId'] as String?, title: json['title'] as String,
     kind: json['kind'] as String, sourceUrl: json['sourceUrl'] as String,
     filename: json['filename'] as String,
     state: DownloadState.values.firstWhere(
@@ -76,12 +93,27 @@ class DownloadService {
   static final Map<String, Completer<void>> _activeOperations = {};
   static bool get hasActiveOperations => _activeOperations.isNotEmpty;
   static Future<void>? _initialization;
+  static String? _directoryPath;
+
+  static bool authorizesOffline(String id, String accountId, String profileId, String? url) {
+    final path = _directoryPath;
+    if (path == null || url == null || _removing.contains(id)) return false;
+    return entries.value.where((entry) => entry.id == id).length == 1 &&
+        entries.value.any((entry) => entry.id == id &&
+        entry.belongsTo(accountId, profileId) &&
+        entry.state == DownloadState.completed &&
+        entry.hasSafeFilename &&
+        entries.value.where((other) => other.filename == entry.filename).length == 1 &&
+        File('$path/${entry.filename}').uri.toString() == url);
+  }
+
   static Future<void> _pendingSave = Future<void>.value();
 
   static Future<Directory> _directory() async {
     final root = await getApplicationDocumentsDirectory();
     final dir = Directory('${root.path}/downloads');
     await dir.create(recursive: true);
+    _directoryPath = dir.path;
     return dir;
   }
 
@@ -104,7 +136,7 @@ class DownloadService {
             entry.state == DownloadState.downloading) {
           entry = entry.copyWith(state: DownloadState.interrupted);
         } else if (entry.state == DownloadState.completed &&
-            !await File('${dir.path}/${entry.filename}').exists()) {
+            (!entry.hasSafeFilename || !await File('${dir.path}/${entry.filename}').exists())) {
           entry = entry.copyWith(state: DownloadState.missing);
         }
         result.add(entry);
@@ -123,7 +155,6 @@ class DownloadService {
       final temp = File('${dir.path}/downloads.json.tmp');
       await temp.writeAsString(jsonEncode(snapshot), flush: true);
       final target = File('${dir.path}/downloads.json');
-      if (await target.exists()) await target.delete();
       await temp.rename(target.path);
     });
     return _pendingSave;
@@ -166,21 +197,40 @@ class DownloadService {
     return hash.toRadixString(16).padLeft(8, '0');
   }
 
+  // Length-safe encoding keeps profile and playlist IDs distinct even when
+  // their content IDs are identical. Legacy entries remain unassigned.
+  static String scopedId(String accountId, String profileId, String sourceKey,
+      String contentId) => 'profile:${jsonEncode([accountId, profileId, sourceKey, contentId])}';
+
   static Future<File?> start({
     required String id,
     required String title,
     required String kind,
     required String url,
+    String? ownerAccountId,
+    String? ownerProfileId,
     String? seriesTitle,
     int? season,
     int? episode,
   }) async {
+    if ((ownerAccountId == null) != (ownerProfileId == null) ||
+        ownerAccountId == '' || ownerProfileId == '') {
+      throw ArgumentError('Incomplete download ownership');
+    }
     await initialize();
+    if (entries.value.where((e) => e.id == id).length > 1) {
+      throw StateError('Duplicate download ID');
+    }
+    if (entries.value.any((e) => e.id == id &&
+        (e.ownerAccountId != ownerAccountId || e.ownerProfileId != ownerProfileId))) {
+      throw StateError('Download ownership mismatch');
+    }
     if (_tokens.containsKey(id) || _removing.contains(id)) return null;
     // Never overwrite a valid offline copy when a screen retries the same ID.
     final previous = entries.value.where((entry) => entry.id == id);
     if (previous.isNotEmpty && previous.first.state == DownloadState.completed) {
       final dir = await _directory();
+      if (!previous.first.hasSafeFilename) throw StateError('Unsafe download filename');
       final existing = File('${dir.path}/${previous.first.filename}');
       if (await existing.exists()) return existing;
     }
@@ -190,13 +240,19 @@ class DownloadService {
     }
     final dir = await _directory();
     final filename = '${_safeName(title)}_${_safeName(id)}_${_idSuffix(id)}${_extensionFor(url)}';
+    // Recheck after asynchronous directory lookup: another request may have started.
+    if (_tokens.containsKey(id) || _removing.contains(id)) return null;
+    if (entries.value.any((entry) => entry.id != id && entry.filename == filename)) {
+      throw StateError('Download filename collision');
+    }
     final output = File('${dir.path}/$filename');
     final part = File('${output.path}.part');
     final token = CancelToken();
     _tokens[id] = token;
     final operation = Completer<void>();
     _activeOperations[id] = operation;
-    _put(DownloadEntry(id: id, title: title, kind: kind, sourceUrl: url,
+    _put(DownloadEntry(id: id, ownerAccountId: ownerAccountId,
+      ownerProfileId: ownerProfileId, title: title, kind: kind, sourceUrl: url,
       filename: filename, state: DownloadState.queued, seriesTitle: seriesTitle,
       season: season, episode: episode));
     try {
@@ -269,13 +325,25 @@ class DownloadService {
   /// cancelled transfer recreating a file after the user has deleted it.
   static Future<void> remove(String id) async {
     await initialize();
+    if (entries.value.where((entry) => entry.id == id).length > 1) {
+      throw StateError('Duplicate download ID');
+    }
     if (!_removing.add(id)) return;
     try {
       cancel(id);
       final active = _activeOperations[id];
       if (active != null) await active.future;
       final matches = entries.value.where((e) => e.id == id).toList();
+      if (matches.length > 1) throw StateError('Duplicate download ID');
       final dir = await _directory();
+      // Validate every entry before deleting any file. Never delete another
+      // profile's file even if an older or corrupt index shares its filename.
+      for (final item in matches) {
+        if (!item.hasSafeFilename) throw StateError('Unsafe download filename');
+        if (entries.value.any((other) => other.id != id && other.filename == item.filename)) {
+          throw StateError('Shared download filename');
+        }
+      }
       for (final item in matches) {
         for (final path in [
           '${dir.path}/${item.filename}',

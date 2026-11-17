@@ -1,5 +1,7 @@
 
 import 'dart:async';
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -19,6 +21,7 @@ class RecordingStatus {
   final int bytesWritten;
   final Duration elapsed;
   final String? outputPath;
+  final String? ownerKey;
   final String? error;
 
   const RecordingStatus({
@@ -28,6 +31,7 @@ class RecordingStatus {
     required this.bytesWritten,
     required this.elapsed,
     this.outputPath,
+    this.ownerKey,
     this.error,
   });
 
@@ -70,11 +74,22 @@ class RecordingService {
   static bool _awaitingNativeStart = false;
   static bool _stopSent = false;
 
+  static String ownerKey(String accountId, String profileId) {
+    if (accountId.isEmpty || profileId.isEmpty) {
+      throw ArgumentError('Incomplete recording ownership');
+    }
+    return sha256.convert(utf8.encode(jsonEncode([accountId, profileId]))).toString();
+  }
+
+  static bool ownsName(String name, String key) =>
+      RegExp(r'^[a-f0-9]{64}$').hasMatch(key) && name.startsWith('sp_${key}_');
+
   static bool get isActive => status.value.isBusy;
 
   static Future<bool> start(
     String channelName, {
     required String streamUrl,
+    required String ownerKey,
   }) async {
     if (_requestInProgress || status.value.isBusy) {
       return false;
@@ -111,6 +126,7 @@ class RecordingService {
         {
           'streamUrl': streamUrl,
           'channelName': channelName,
+          'ownerKey': ownerKey,
         },
       );
 
@@ -183,6 +199,7 @@ class RecordingService {
       bytesWritten: previous.bytesWritten,
       elapsed: previous.elapsed,
       outputPath: previous.outputPath,
+      ownerKey: previous.ownerKey,
     );
 
     try {
@@ -336,6 +353,7 @@ class RecordingService {
           milliseconds: elapsedMs < 0 ? 0 : elapsedMs,
         ),
         outputPath: path,
+        ownerKey: raw['ownerKey'] as String?,
         error: displayedError,
       );
 
@@ -427,6 +445,7 @@ class RecordingService {
       bytesWritten: previous.bytesWritten,
       elapsed: previous.elapsed,
       outputPath: previous.outputPath,
+      ownerKey: previous.ownerKey,
       error: message,
     );
   }
