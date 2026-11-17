@@ -16,10 +16,13 @@ class PlaylistSwitchService {
       : _sources = sources ?? PlaylistSourceStore(),
         _profiles = profiles ?? PlaylistProfileStore();
 
-  Future<bool> activate(PlaylistProfile profile, ContentProvider content) async {
+  Future<bool> refresh(PlaylistProfile profile, ContentProvider content) =>
+      activate(profile, content, forceRefresh: true);
+
+  Future<bool> activate(PlaylistProfile profile, ContentProvider content, {bool forceRefresh = false}) async {
     final generation = content.beginLibraryActivation();
     // A previously loaded source can be switched to immediately, even offline.
-    if (content.activateCachedLibrary(profile.sourceKey, activationGeneration: generation)) {
+    if (!forceRefresh && content.activateCachedLibrary(profile.sourceKey, activationGeneration: generation)) {
       if (content.isLibraryActivationCurrent(generation)) {
         await _profiles.setActive(profile.sourceKey);
       }
@@ -66,6 +69,13 @@ class PlaylistSwitchService {
       throw StateError('Dieser Playlist-Typ kann derzeit nicht automatisch erneut geladen werden.');
     }
     if (!content.isLibraryActivationCurrent(generation)) return false;
+    if (forceRefresh) {
+      await content.waitForCatalogWrites();
+      if (!content.isLibraryActivationCurrent(generation)) return false;
+      if (content.lastCatalogSaveError != null) {
+        throw StateError("Catalog persistence failed");
+      }
+    }
     await _profiles.setActive(profile.sourceKey);
     return content.isLibraryActivationCurrent(generation);
   }
