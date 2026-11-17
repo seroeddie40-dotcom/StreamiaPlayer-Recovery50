@@ -2,8 +2,15 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/widgets.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../services/watch_progress_service.dart';
+import '../services/profile_sync_clock.dart';
+import '../services/profile_preference_outbox.dart';
+import '../services/profile_favorite_outbox.dart';
+import '../services/profile_history_service.dart';
 
 import '../models/family_profile.dart';
 import '../services/family_content_access_service.dart';
@@ -47,6 +54,107 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   final SupabaseClient _client;
 
   StreamSubscription<AuthState>? _authSubscription;
+  Timer? _profileSyncTimer;
+  bool _profileSyncRunning = false;
+  int _profileSyncRevision = 0;
+  int get profileSyncRevision => _profileSyncRevision;
+  bool _foreground = true;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  Timer? _networkRetryTimer;
+  bool _syncRequested = false;
+
+  void _onConnectivityChanged(List<ConnectivityResult> results) {
+    _networkRetryTimer?.cancel();
+    if (_disposed || !_foreground || !isReady ||
+        !results.any((result) => result != ConnectivityResult.none)) return;
+    unawaited(_syncProfileCache());
+    // A transport event can precede internet reachability (e.g. Wi-Fi DHCP).
+    _networkRetryTimer = Timer(const Duration(seconds: 3), () {
+      unawaited(_syncProfileCache());
+    });
+  }
+
+  void _stopProfileSync() {
+    _profileSyncTimer?.cancel();
+    _profileSyncTimer = null;
+    _networkRetryTimer?.cancel();
+    _networkRetryTimer = null;
+    final subscription = _connectivitySubscription;
+    _connectivitySubscription = null;
+    if (subscription != null) unawaited(subscription.cancel());
+    _syncRequested = false;
+  }
+
+  void _startProfileSync() {
+    _stopProfileSync();
+    if (_disposed || !_foreground || !isReady) return;
+    _connectivitySubscription = Connectivity().onConnectivityChanged.listen(
+      _onConnectivityChanged,
+      onError: (Object error, StackTrace stack) {
+        // Periodic sync remains available if the platform stream fails.
+      },
+    );
+    _profileSyncTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      unawaited(_syncProfileCache());
+    });
+    unawaited(_syncProfileCache());
+  }
+
+  Future<void> _syncProfileCache() async {
+    final profile = activeProfile;
+    final generation = _generation;
+    if (_disposed || !_foreground || !isReady || profile == null) return;
+    if (_profileSyncRunning) {
+      _syncRequested = true;
+      return;
+    }
+    _profileSyncRunning = true;
+    bool current() => !_disposed && _foreground && isReady &&
+        generation == _generation && activeProfile?.id == profile.id;
+    try {
+      await ProfileSyncClock.calibrate(_client);
+      if (!current()) return;
+      await ProfileFavoriteOutbox.flush(_client, profile.accountUserId, profile.id, parentAccessToken, current);
+      if (!current()) return;
+      await ProfilePreferenceOutbox.flush(_client, profile.accountUserId, profile.id, parentAccessToken, current);
+      if (!current()) return;
+      // Adult display rules are personal preferences, not child permissions.
+      if (profile.isAdult && !_refreshing) {
+        final updated = await _accessService.loadSnapshot(
+          profile: profile, parentToken: parentAccessToken,
+        );
+        if (!current()) return;
+        if (!_refreshing && updated.isReady && updated.profileId == profile.id && !updated.isChild) {
+          _snapshot = updated;
+        }
+      }
+      await WatchProgressService(family: this, client: _client).flushPending();
+      if (!current()) return;
+      final prefs = await SharedPreferences.getInstance();
+      final prefix = 'streamia_history_v2:${profile.accountUserId}:${profile.id}:';
+      for (final key in prefs.getKeys().where((k) => k.startsWith(prefix))) {
+        if (!current()) return;
+        final source = key.substring(prefix.length);
+        if (source.isNotEmpty) {
+          await ProfileHistoryService(this, source, client: _client).refresh();
+        }
+      }
+      if (current()) {
+        _profileSyncRevision++;
+        _notify();
+      }
+    } catch (_) { /* Retry during the next foreground cycle. */ }
+    finally {
+      _profileSyncRunning = false;
+      if (_syncRequested) {
+        _syncRequested = false;
+        if (!_disposed && _foreground && isReady) {
+          unawaited(_syncProfileCache());
+        }
+      }
+    }
+  }
+
   Timer? _adultExpiryTimer;
   Timer? _childRefreshTimer;
   static const _childRefreshInterval = Duration(seconds: 60);
@@ -71,6 +179,12 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    if (_foreground) {
+      _startProfileSync();
+    } else {
+      _stopProfileSync();
+    }
     if (state == AppLifecycleState.resumed && !_disposed && isChild &&
         !_refreshing && !_isLoading && _belongsToCurrentAccount) {
       unawaited(refreshPermissions());
@@ -189,6 +303,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   }) async {
     final generation = ++_generation;
 
+    _stopProfileSync();
     _stopChildRefresh();
     _cancelAdultExpiry();
     _refreshing = false;
@@ -291,6 +406,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       final loaded =
           await _accessService.loadSnapshot(
         profile: verifiedProfile,
+        parentToken: adultToken,
       );
 
       if (generation != _generation ||
@@ -325,6 +441,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
 
       _notify();
+      if (_profileSyncTimer == null) _startProfileSync();
       return isReady;
     } catch (_) {
       _finishFailedActivation(generation);
@@ -335,6 +452,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   void _finishFailedActivation(int generation) {
     if (generation != _generation) return;
 
+    _stopProfileSync();
     _stopChildRefresh();
     _cancelAdultExpiry();
     _refreshing = false;
@@ -390,7 +508,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
         clearSession();
         return false;
       }
-      final loaded = await _accessService.loadSnapshot(profile: currentProfile);
+      final loaded = await _accessService.loadSnapshot(profile: currentProfile, parentToken: adultToken);
       if (!_refreshStillCurrent(generation, accountId, profile.id)) return false;
       if (!loaded.isReady || loaded.profileId != currentProfile.id ||
           loaded.isChild != (currentProfile.type == FamilyProfileType.child)) {
@@ -400,6 +518,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       _snapshot = loaded;
       _refreshing = false;
       _notify();
+      if (_profileSyncTimer == null) _startProfileSync();
       return isReady;
     } catch (_) {
       return _failRefresh(generation, profile);
@@ -458,6 +577,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   void clearSession() {
     ++_generation;
+    _stopProfileSync();
     _stopChildRefresh();
     _refreshing = false;
     _cancelAdultExpiry();
@@ -474,6 +594,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   void dispose() {
     _disposed = true;
     ++_generation;
+    _stopProfileSync();
     _stopChildRefresh();
     _refreshing = false;
     _cancelAdultExpiry();
