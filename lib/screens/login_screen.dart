@@ -364,7 +364,7 @@ class _LoginScreenState extends State<LoginScreen> {
               child: SingleChildScrollView(
                 controller: _formScrollController,
                 keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                padding: EdgeInsets.fromLTRB(28, isTv ? 10 : 20,
+                padding: EdgeInsets.fromLTRB(28, isTv ? 10 : 20, 28,
                     MediaQuery.viewInsetsOf(context).bottom > 0 ? 28 : 20),
                 child: FocusTraversalGroup(
                   child: _showConfirmation

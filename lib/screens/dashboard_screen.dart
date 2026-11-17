@@ -690,7 +690,7 @@ class _PremiumTileState extends State<_PremiumTile> {
                         widget.entry.title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: isTv ? 20 : 16,
                           fontWeight: FontWeight.w700,
                           color: Colors.white,
