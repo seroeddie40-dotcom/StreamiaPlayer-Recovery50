@@ -1,3 +1,4 @@
+import '../widgets/tv_catalog_focus.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -119,7 +120,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     final subtitle = entry.kind == 'episode'
         ? '${_t('season')} ${entry.season ?? '-'} · ${_t('episode')} ${entry.episode ?? '-'} · $status'
         : status;
-    return ListTile(
+    return TvCatalogFocus(child: ListTile(
       leading: Icon(entry.kind == 'episode' ? Icons.tv : Icons.movie_outlined),
       title: Text(entry.title),
       subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
@@ -140,7 +141,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           }),
         IconButton(tooltip: _t('delete'), icon: const Icon(Icons.delete_outline), onPressed: () => _confirmDelete(entry)),
       ]),
-    );
+    ));
   }
 
   Widget _content(List<DownloadEntry> items) {

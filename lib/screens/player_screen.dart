@@ -975,18 +975,17 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   Widget _controlButton(IconData icon, String tooltip, VoidCallback onPressed, {FocusNode? focusNode}) {
     return Tooltip(
       message: tooltip,
-      child: Focus(
-        focusNode: focusNode,
-        child: Material(
-          color: Colors.white.withOpacity(0.12),
+      child: Material(
+        color: Colors.white.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(22),
+        child: InkWell(
+          focusNode: focusNode,
+          focusColor: AppTheme.electricBlue.withOpacity(0.38),
           borderRadius: BorderRadius.circular(22),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(22),
-            onTap: onPressed,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-              child: Icon(icon, color: Colors.white, size: 20),
-            ),
+          onTap: onPressed,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+            child: Icon(icon, color: Colors.white, size: 20),
           ),
         ),
       ),

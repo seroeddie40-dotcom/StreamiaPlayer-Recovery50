@@ -47,8 +47,10 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
         child: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {
+              final tv = DeviceLayout.isTelevision;
+              final shortTv = tv && constraints.maxHeight < 440;
               final horizontalPadding =
-                  isCompact ? 16.0 : 24.0;
+                  tv ? 32.0 : (isCompact ? 16.0 : 24.0);
 
               final availableWidth =
                   constraints.maxWidth -
@@ -57,31 +59,31 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
               final itemSpacing =
                   isCompact ? 10.0 : 14.0;
 
-              final columns = DeviceLayout.isTelevision ? 4 : 2;
+              final columns = tv && availableWidth >= 520 ? 4 : 2;
               final itemWidth =
                   (availableWidth - itemSpacing * (columns - 1)) / columns;
 
               return SingleChildScrollView(
                 padding: EdgeInsets.symmetric(
                   horizontal: horizontalPadding,
-                  vertical: 20,
+                  vertical: shortTv ? 12 : 20,
                 ),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(
                     minHeight:
-                        constraints.maxHeight - 40,
+                        (constraints.maxHeight - (shortTv ? 24 : 40)).clamp(0.0, double.infinity).toDouble(),
                   ),
                   child: Column(
                     mainAxisAlignment:
                         MainAxisAlignment.center,
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.language,
-                        size: 56,
+                        size: shortTv ? 32 : 56,
                         color: Colors.white,
                       ),
 
-                      const SizedBox(height: 16),
+                      SizedBox(height: shortTv ? 6 : 16),
 
                       const Text(
                         'Choose your language',
@@ -104,7 +106,7 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
                         ),
                       ),
 
-                      const SizedBox(height: 30),
+                      SizedBox(height: shortTv ? 12 : 30),
 
                       Wrap(
                         spacing: itemSpacing,
@@ -146,8 +148,8 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
                                 },
                                 child: Container(
                                   constraints:
-                                      const BoxConstraints(
-                                    minHeight: 88,
+                                      BoxConstraints(
+                                    minHeight: shortTv ? 70 : 88,
                                   ),
                                   padding:
                                       const EdgeInsets.symmetric(
@@ -206,7 +208,7 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
                         }).toList(),
                       ),
 
-                      const SizedBox(height: 20),
+                      SizedBox(height: shortTv ? 8 : 20),
                     ],
                   ),
                 ),

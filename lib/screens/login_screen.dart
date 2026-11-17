@@ -4,6 +4,9 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/locale_provider.dart';
 import '../core/theme/app_theme.dart';
+import '../core/platform/device_layout.dart';
+import '../core/localization/app_localizations.dart';
+import '../widgets/tv_text_keyboard.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -345,6 +348,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final hintColor =
         isDark ? Colors.white38 : const Color(0xFF64748B);
 
+    final isTv = DeviceLayout.isTelevision;
     final isArabic = languageCode == 'ar';
 
     return Directionality(
@@ -356,11 +360,11 @@ class _LoginScreenState extends State<LoginScreen> {
         body: SafeArea(
           child: Center(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 440),
+              constraints: BoxConstraints(maxWidth: isTv ? 760 : 440),
               child: SingleChildScrollView(
                 controller: _formScrollController,
                 keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                padding: EdgeInsets.fromLTRB(28, 20, 28,
+                padding: EdgeInsets.fromLTRB(28, isTv ? 10 : 20,
                     MediaQuery.viewInsetsOf(context).bottom > 0 ? 28 : 20),
                 child: FocusTraversalGroup(
                   child: _showConfirmation
@@ -397,10 +401,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     crossAxisAlignment:
                         CrossAxisAlignment.stretch,
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.play_circle_filled_rounded,
                         color: AppTheme.electricBlue,
-                        size: 72,
+                        size: isTv ? 44 : 72,
                       ),
 
                       const SizedBox(height: 12),
@@ -432,10 +436,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
 
-                      const SizedBox(height: 28),
+                      SizedBox(height: isTv ? 12 : 28),
 
                       TextField(
-                        autofocus: false,
+                        autofocus: isTv,
                         controller: _email,
                         scrollPadding: const EdgeInsets.only(bottom: 140),
                         autocorrect: false,
@@ -454,7 +458,12 @@ class _LoginScreenState extends State<LoginScreen> {
                           Icons.email_outlined,
                           surfaceColor,
                           foregroundColor,
-                        ),
+                        ).copyWith(suffixIcon: isTv ? IconButton(
+                          tooltip: AppLocalizations.of(context).t('tv_keyboard_title'),
+                          icon: const Icon(Icons.keyboard_alt_outlined),
+                          onPressed: () => TvTextKeyboard.show(context,
+                            controller: _email, languageCode: languageCode),
+                        ) : null),
                       ),
 
                       const SizedBox(height: 14),
@@ -480,7 +489,14 @@ class _LoginScreenState extends State<LoginScreen> {
                           surfaceColor,
                           foregroundColor,
                         ).copyWith(
-                          suffixIcon: IconButton(
+                          suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [
+                            if (isTv) IconButton(
+                              tooltip: AppLocalizations.of(context).t('tv_keyboard_title'),
+                              icon: const Icon(Icons.keyboard_alt_outlined),
+                              onPressed: () => TvTextKeyboard.show(context,
+                                controller: _password, languageCode: languageCode, secret: true),
+                            ),
+                            IconButton(
                             tooltip: _t(
                               languageCode,
                               _showPassword
@@ -498,7 +514,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   : Icons.visibility,
                               color: hintColor,
                             ),
-                          ),
+                          ), ]),
                         ),
                       ),
 

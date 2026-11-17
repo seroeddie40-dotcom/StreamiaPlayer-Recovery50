@@ -1,3 +1,4 @@
+import '../widgets/tv_catalog_focus.dart';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -442,7 +443,7 @@ class _FavoritesLibraryScreenState
                       itemBuilder: (context, index) {
                         final row = rows[index];
 
-                        return ListTile(
+                        return TvCatalogFocus(child: ListTile(
                           autofocus: index == 0,
                           focusColor: color.withValues(
                             alpha: 0.14,
@@ -473,7 +474,7 @@ class _FavoritesLibraryScreenState
                             onPressed: () =>
                                 _remove(row),
                           ),
-                        );
+                        ));
                       },
                     ),
                   ),

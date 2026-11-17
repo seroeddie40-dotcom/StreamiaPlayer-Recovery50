@@ -1,3 +1,5 @@
+import '../widgets/tv_catalog_focus.dart';
+import '../core/platform/device_layout.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -430,7 +432,7 @@ class _FamilyProfileSelectionScreenState
     final isChild =
         profile.type == FamilyProfileType.child;
 
-    return Card(
+    return TvCatalogFocus(child: Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: _isSelecting || _isManaging
@@ -507,7 +509,7 @@ class _FamilyProfileSelectionScreenState
           ),
         ),
       ),
-    );
+    ));
   }
 
   Widget _buildEmptyContent() {
@@ -606,7 +608,9 @@ class _FamilyProfileSelectionScreenState
       builder: (context, constraints) {
         final width = constraints.maxWidth;
 
-        final columns = width >= 900
+        final columns = DeviceLayout.isTelevision
+            ? (width >= 1050 ? 4 : 3)
+            : width >= 900
             ? 5
             : width >= 600
                 ? 3
@@ -620,7 +624,7 @@ class _FamilyProfileSelectionScreenState
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
             childAspectRatio:
-                width >= 600 ? 1.05 : 0.82,
+                DeviceLayout.isTelevision ? 1.1 : (width >= 600 ? 1.05 : 0.82),
           ),
           itemCount: _profiles.length,
           itemBuilder: (context, index) {

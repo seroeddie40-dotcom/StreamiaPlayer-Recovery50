@@ -217,6 +217,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
 
 
     final screenWidth = MediaQuery.sizeOf(context).width;
+    final isTv = DeviceLayout.isTelevision;
     final compact = screenWidth < 600;
 
     // Pro is available during the trial as well.
@@ -261,10 +262,10 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
           children: [
             Padding(
               padding: EdgeInsets.fromLTRB(
-                compact ? 12 : 36,
-                12,
-                compact ? 12 : 36,
-                8,
+                compact ? 12 : (isTv ? 28 : 36),
+                isTv ? 8 : 12,
+                compact ? 12 : (isTv ? 28 : 36),
+                isTv ? 4 : 8,
               ),
               child: Row(
                 children: [
@@ -351,10 +352,12 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final width = constraints.maxWidth;
-                  final horizontal = width < 600 ? 16.0 : 36.0;
+                  final horizontal = isTv ? 28.0 : (width < 600 ? 16.0 : 36.0);
 
                   final int columns;
-                  if (width < 380) {
+                  if (isTv) {
+                    columns = width < 850 ? 2 : 3;
+                  } else if (width < 380) {
                     columns = 1;
                   } else if (width < 650) {
                     columns = 2;
@@ -363,7 +366,14 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                   }
 
                   final double aspectRatio;
-                  if (columns == 1) {
+                  if (isTv) {
+                    // Short TV viewports need shallow tiles to keep both rows reachable.
+                    final usableWidth = width - horizontal * 2 - (columns - 1) * 14;
+                    final tileWidth = usableWidth / columns;
+                    final availableHeight = constraints.maxHeight - (showTrialCard ? 110 : 48);
+                    final tileHeight = (availableHeight / 2 - 14).clamp(92.0, 190.0);
+                    aspectRatio = tileWidth / tileHeight;
+                  } else if (columns == 1) {
                     aspectRatio = 3.2;
                   } else if (columns == 2) {
                     aspectRatio = 1.45;
@@ -433,7 +443,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                             delegate: SliverChildBuilderDelegate(
                               (context, index) => _PremiumTile(
                                 entry: entries[index],
-                                autofocus: DeviceLayout.isTelevision && index == 0,
+                                autofocus: isTv && index == 0,
                               ),
                               childCount: entries.length,
                             ),
@@ -611,7 +621,7 @@ class _ProButton extends StatelessWidget {
   }
 }
 
-class _PremiumTile extends StatelessWidget {
+class _PremiumTile extends StatefulWidget {
   final _HomeEntry entry;
   final bool autofocus;
 
@@ -621,12 +631,28 @@ class _PremiumTile extends StatelessWidget {
   });
 
   @override
+  State<_PremiumTile> createState() => _PremiumTileState();
+}
+
+class _PremiumTileState extends State<_PremiumTile> {
+  bool _focused = false;
+
+  @override
   Widget build(BuildContext context) {
+    final isTv = DeviceLayout.isTelevision;
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        autofocus: autofocus,
-        onTap: entry.onTap,
+        autofocus: widget.autofocus,
+        onFocusChange: (focused) {
+          if (mounted) setState(() => _focused = focused);
+          if (focused && isTv) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) Scrollable.ensureVisible(context, duration: const Duration(milliseconds: 180), alignment: 0.35);
+            });
+          }
+        },
+        onTap: widget.entry.onTap,
         focusColor: AppTheme.electricBlue.withOpacity(0.28),
         borderRadius: BorderRadius.circular(20),
         child: Ink(
@@ -634,8 +660,10 @@ class _PremiumTile extends StatelessWidget {
             color: AppTheme.darkSurface,
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: AppTheme.electricBlue.withOpacity(0.45),
+              color: isTv && _focused ? AppTheme.electricBlue : AppTheme.electricBlue.withOpacity(0.45),
+              width: isTv && _focused ? 3 : 1,
             ),
+            boxShadow: isTv && _focused ? [BoxShadow(color: AppTheme.electricBlue.withOpacity(0.30), blurRadius: 16, spreadRadius: 1)] : null,
           ),
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -650,8 +678,8 @@ class _PremiumTile extends StatelessWidget {
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Icon(
-                    entry.icon,
-                    size: 24,
+                    widget.entry.icon,
+                    size: isTv ? 30 : 24,
                     color: AppTheme.electricBlue,
                   ),
                 ),
@@ -659,11 +687,11 @@ class _PremiumTile extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text(
-                        entry.title,
+                        widget.entry.title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          fontSize: 16,
+                          fontSize: isTv ? 20 : 16,
                           fontWeight: FontWeight.w700,
                           color: Colors.white,
                         ),

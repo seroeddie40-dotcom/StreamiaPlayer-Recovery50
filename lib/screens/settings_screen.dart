@@ -1,3 +1,4 @@
+import '../widgets/tv_catalog_focus.dart';
 import '../widgets/profile_clock.dart';
 
 import 'package:flutter/material.dart';
@@ -121,7 +122,7 @@ class SettingsScreen extends StatelessWidget {
                   vertical: DeviceLayout.isTelevision ? 28 : 16,
                 ),
                 children: [
-                  ListTile(
+                  TvCatalogFocus(child: ListTile(
                     autofocus: DeviceLayout.isTelevision,
                     focusColor: focusColor,
                     title: Text(_label(
@@ -140,13 +141,13 @@ class SettingsScreen extends StatelessWidget {
                       onChanged: (_) => theme.toggleTheme(),
                     ),
                     onTap: () => theme.toggleTheme(),
-                  ),
+                  )),
 
                   const Divider(),
                   const ProfileClock(settings: true),
                   const Divider(),
 
-                  ListTile(
+                  TvCatalogFocus(child: ListTile(
                     focusColor: focusColor,
                     leading: const Icon(Icons.language),
                     title: Text(_label(context, 'Sprache', 'Dil', 'Language',
@@ -175,11 +176,11 @@ class SettingsScreen extends StatelessWidget {
                       if (!context.mounted || selected == null) return;
                       locale.setLocale(selected);
                     },
-                  ),
+                  )),
 
                   const Divider(),
 
-                  ListTile(
+                  TvCatalogFocus(child: ListTile(
                     focusColor: focusColor,
                     leading: const Icon(Icons.gavel_outlined),
                     title: Text(_label(
@@ -199,11 +200,11 @@ class SettingsScreen extends StatelessWidget {
                       context,
                       const LegalDisclaimerScreen(),
                     ),
-                  ),
+                  )),
 
                   const Divider(),
 
-                  ListTile(
+                  TvCatalogFocus(child: ListTile(
                     focusColor: focusColor,
                     leading: const Icon(Icons.playlist_play),
                     title: Text(
@@ -218,11 +219,11 @@ class SettingsScreen extends StatelessWidget {
                       context,
                       const PlaylistManagementScreen(),
                     ),
-                  ),
+                  )),
 
                   const Divider(),
 
-                  ListTile(
+                  TvCatalogFocus(child: ListTile(
                     focusColor: focusColor,
                     leading: const Icon(
                       Icons.video_settings_outlined,
@@ -259,11 +260,11 @@ class SettingsScreen extends StatelessWidget {
                       context,
                       const RecordingStorageScreen(),
                     ),
-                  ),
+                  )),
 
                   const Divider(),
 
-                  ListTile(
+                  TvCatalogFocus(child: ListTile(
                     focusColor: focusColor,
                     leading: const Icon(Icons.favorite),
                     title: Text(_label(
@@ -294,11 +295,11 @@ class SettingsScreen extends StatelessWidget {
                       context,
                       const FavoritesLibraryScreen(),
                     ),
-                  ),
+                  )),
 
                   const Divider(),
 
-                  ListTile(
+                  TvCatalogFocus(child: ListTile(
                     focusColor: focusColor,
                     leading:
                         const Icon(Icons.favorite_outline),
@@ -330,7 +331,7 @@ class SettingsScreen extends StatelessWidget {
                       context,
                       const FavoritesBackupScreen(),
                     ),
-                  ),
+                  )),
 
                   const Divider(),
 
@@ -344,7 +345,7 @@ class SettingsScreen extends StatelessWidget {
                           return const SizedBox.shrink();
                         }
 
-                        return ListTile(
+                        return TvCatalogFocus(child: ListTile(
                           focusColor: focusColor,
                           leading: const Icon(
                             Icons.admin_panel_settings,
@@ -366,11 +367,11 @@ class SettingsScreen extends StatelessWidget {
                             context,
                             const AdminDevicesScreen(),
                           ),
-                        );
+                        ));
                       },
                     ),
 
-                  ListTile(
+                  TvCatalogFocus(child: ListTile(
                     focusColor: focusColor,
                     title: Text(_label(
                       context,
@@ -464,7 +465,7 @@ class SettingsScreen extends StatelessWidget {
                         }
                       }
                     },
-                  ),
+                  )),
                 ],
               ),
             ),

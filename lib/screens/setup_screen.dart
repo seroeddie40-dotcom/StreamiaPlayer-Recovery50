@@ -23,6 +23,7 @@ import '../models/playlist_profile.dart';
 import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
 import '../core/platform/device_layout.dart';
+import '../core/platform/tv_remote_navigation.dart';
 import '../widgets/voice_input_field.dart';
 import '../widgets/tv_text_keyboard.dart';
 
@@ -520,7 +521,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
 
   Widget _panel({required Widget child}) {
     return Container(
-      padding: const EdgeInsets.all(22),
+      padding: EdgeInsets.all(DeviceLayout.isTelevision ? 16 : 22),
       decoration: BoxDecoration(
         color: const Color(0xFF151F30),
         borderRadius: BorderRadius.circular(22),
@@ -575,10 +576,10 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
 
   Widget _pageContent({required IconData icon, required String title, required String description, required Widget form}) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 36),
+      padding: EdgeInsets.fromLTRB(16, DeviceLayout.isTelevision ? 12 : 20, 16, 36),
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 680),
+          constraints: BoxConstraints(maxWidth: DeviceLayout.isTelevision ? 940 : 680),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             Row(children: [
               Container(
@@ -632,16 +633,16 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     final l10n = AppLocalizations.of(context);
     final auth = context.watch<AuthProvider>();
     return Theme(
-      data: ThemeData.dark(useMaterial3: true).copyWith(
+      data: TvRemoteNavigation.theme(ThemeData.dark(useMaterial3: true).copyWith(
         colorScheme: const ColorScheme.dark(primary: _blue, secondary: _aqua, surface: Color(0xFF101A2A)),
         scaffoldBackgroundColor: const Color(0xFF0A1220),
-      ),
+      )),
       child: Scaffold(
         backgroundColor: const Color(0xFF0A1220),
         appBar: AppBar(
           backgroundColor: const Color(0xFF101A2A),
           automaticallyImplyLeading: widget.returnToPreviousOnSuccess,
-          toolbarHeight: 72,
+          toolbarHeight: DeviceLayout.isTelevision ? 56 : 72,
           title: Row(children: [
             Container(width: 36, height: 36, alignment: Alignment.center,
               decoration: BoxDecoration(gradient: const LinearGradient(colors: [_blue, _aqua]), borderRadius: BorderRadius.circular(11)),
@@ -726,7 +727,11 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       form: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _fieldTitle(l10n.t('playlist_display_name')),
         TextField(controller: _m3uNameController, textCapitalization: TextCapitalization.none,
-          decoration: _decoration(_copy('Meine Playlist', 'Oynatma listem', 'My playlist'), Icons.drive_file_rename_outline)),
+          decoration: _decoration(_copy('Meine Playlist', 'Oynatma listem', 'My playlist'), Icons.drive_file_rename_outline,
+            suffix: DeviceLayout.isTelevision ? IconButton(
+              tooltip: l10n.t('tv_keyboard_title'), icon: const Icon(Icons.keyboard_alt_outlined),
+              onPressed: () => TvTextKeyboard.show(context, controller: _m3uNameController, languageCode: language),
+            ) : null)),
         const SizedBox(height: 20),
         _fieldTitle(l10n.t('m3u_url')),
         VoiceInputField(controller: _m3uController, appLanguageCode: language,
@@ -784,7 +789,11 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       form: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _fieldTitle(l10n.t('playlist_display_name')),
         TextField(controller: _xtreamNameController, textCapitalization: TextCapitalization.none,
-          decoration: _decoration(_copy('Meine Xtream-Playlist', 'Xtream listem', 'My Xtream playlist'), Icons.drive_file_rename_outline)),
+          decoration: _decoration(_copy('Meine Xtream-Playlist', 'Xtream listem', 'My Xtream playlist'), Icons.drive_file_rename_outline,
+            suffix: DeviceLayout.isTelevision ? IconButton(
+              tooltip: l10n.t('tv_keyboard_title'), icon: const Icon(Icons.keyboard_alt_outlined),
+              onPressed: () => TvTextKeyboard.show(context, controller: _xtreamNameController, languageCode: language),
+            ) : null)),
         const SizedBox(height: 20),
         _fieldTitle(l10n.t('xtream_server')),
         Wrap(spacing: 10, runSpacing: 8, children: [

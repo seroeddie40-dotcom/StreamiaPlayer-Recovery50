@@ -1,3 +1,5 @@
+import '../core/platform/device_layout.dart';
+import '../widgets/tv_catalog_focus.dart';
 import '../widgets/profile_clock.dart';
 import '../widgets/category_sort_control.dart';
 import '../widgets/favorites_quick_filter.dart';
@@ -485,7 +487,9 @@ class _VodScreenState extends State<VodScreen> with CategorySortState<VodScreen>
                               builder: (context, size) {
                                 final width = size.maxWidth;
 
-                                final columns = width >= 1100
+                                final columns = DeviceLayout.isTelevision
+                                    ? (width / 205).floor().clamp(2, 6).toInt()
+                                    : width >= 1100
                                     ? 6
                                     : width >= 800
                                         ? 5
@@ -504,18 +508,18 @@ class _VodScreenState extends State<VodScreen> with CategorySortState<VodScreen>
                                       crossAxisCount: columns,
                                       mainAxisSpacing: 12,
                                       crossAxisSpacing: 12,
-                                      childAspectRatio: 0.57,
+                                      childAspectRatio: DeviceLayout.isTelevision ? 0.70 : 0.57,
                                     ),
                                     itemCount: filtered.length,
                                     itemBuilder: (context, index) =>
-                                        _VodTile(
+                                        TvCatalogFocus(key: ValueKey(filtered[index].id), child: _VodTile(
                                       key: ValueKey(
                                         filtered[index].id,
                                       ),
                                       item: filtered[index],
                                       autofocus:
                                           index == 0 && !wide,
-                                    ),
+                                    )),
                                   ),
                                 );
                               },
@@ -531,7 +535,7 @@ class _VodScreenState extends State<VodScreen> with CategorySortState<VodScreen>
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 220),
                       curve: Curves.easeInOut,
-                      width: _folderFocusExpanded
+                      width: _folderFocusExpanded && !DeviceLayout.isTelevision
                           ? (constraints.maxWidth * 0.46).clamp(sidebarWidth, 480.0)
                           : sidebarWidth,
                       child: Focus(
@@ -986,7 +990,7 @@ class VodDetailScreen extends StatelessWidget {
       body: ListView(
         children: [
           SizedBox(
-            height: 260,
+            height: DeviceLayout.isTelevision ? 190 : 260,
             child: Stack(
               fit: StackFit.expand,
               children: [

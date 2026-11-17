@@ -1,3 +1,4 @@
+import '../widgets/tv_catalog_focus.dart';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -155,7 +156,7 @@ class _ContinueWatchingScreenState
                           .toDouble()
                       : 0.0;
 
-                  return ListTile(
+                  return TvCatalogFocus(child: ListTile(
                     autofocus:
                         DeviceLayout.isTelevision && index == 0,
                     focusColor: Theme.of(context)
@@ -193,7 +194,7 @@ class _ContinueWatchingScreenState
                         await _refresh();
                       }
                     },
-                  );
+                  ));
                 },
               ),
             ),

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
+import '../core/platform/device_layout.dart';
 import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
 import '../models/channel.dart';
@@ -119,7 +120,9 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
                 final selected = _selectedCategory == category;
                 final count = category == _all
                     ? channels.length : (_cachedCounts[category] ?? 0);
-                return Padding(
+                return _TvVisibleFocus(
+                  key: ValueKey(category),
+                  child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
                   child: Material(
                     color: selected
@@ -152,7 +155,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
                                     maxLines: 1,
                                     softWrap: false,
                                     style: TextStyle(
-                                      fontSize: 13,
+                                      fontSize: DeviceLayout.isTelevision ? 16 : 13,
                                       fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
                                     ),
                                     ),
@@ -170,7 +173,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
                         ),
                       ),
                     ),
-                );
+                ));
               },
             ),
           ),
@@ -203,7 +206,8 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
     }
 
     return LayoutBuilder(builder: (context, constraints) {
-      final compact = constraints.maxWidth < 700;
+      final tv = DeviceLayout.isTelevision;
+      final compact = constraints.maxWidth < (tv ? 560 : 700);
       final language = context.watch<LocaleProvider>().locale.languageCode;
       return Scaffold(
         resizeToAvoidBottomInset: true,
@@ -243,7 +247,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
             AnimatedContainer(
               duration: const Duration(milliseconds: 220),
               curve: Curves.easeInOut,
-              width: _folderFocusExpanded
+              width: tv ? (constraints.maxWidth * 0.32).clamp(180.0, 420.0).toDouble() : _folderFocusExpanded
                   ? (constraints.maxWidth * 0.46).clamp(285.0, 480.0)
                   : (constraints.maxWidth >= 1100 ? 340.0 : 285.0),
               child: Focus(
@@ -314,7 +318,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
                 ))
               : LayoutBuilder(builder: (context, area) {
                   final width = area.maxWidth;
-                  final columns = width >= 1000 ? 6 : width >= 760 ? 5
+                  final columns = tv ? (width / 180).floor().clamp(2, 6).toInt() : width >= 1000 ? 6 : width >= 760 ? 5
                       : width >= 520 ? 4 : width >= 330 ? 3 : 2;
                   return FocusTraversalGroup(
                     child: GridView.builder(
@@ -324,10 +328,11 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
                         crossAxisCount: columns,
                         mainAxisSpacing: 8,
                         crossAxisSpacing: 8,
-                        mainAxisExtent: width < 520 ? 118 : 136,
+                        mainAxisExtent: tv ? 150 : (width < 520 ? 118 : 136),
                       ),
                       itemCount: filtered.length,
                       itemBuilder: (context, index) => _ChannelTile(
+                        key: ValueKey(filtered[index].id),
                         channel: filtered[index],
                       ),
                     ),
@@ -342,13 +347,13 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
 
 class _ChannelTile extends StatelessWidget {
   final Channel channel;
-  const _ChannelTile({required this.channel});
+  const _ChannelTile({super.key, required this.channel});
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final logo = channel.logoUrl?.trim();
-    return InkWell(
+    return _TvVisibleFocus(child: InkWell(
       borderRadius: BorderRadius.circular(12),
       focusColor: AppTheme.electricBlue.withValues(alpha: 0.22),
       onTap: () {
@@ -385,14 +390,14 @@ class _ChannelTile extends StatelessWidget {
                   )
                 : const Icon(Icons.tv_rounded, size: 30)),
             )),
-            SizedBox(height: 39, child: Padding(
+            SizedBox(height: DeviceLayout.isTelevision ? 46 : 39, child: Padding(
               padding: const EdgeInsets.fromLTRB(7, 1, 7, 5),
               child: Center(child: Text(
                 channel.name,
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12, height: 1.15, fontWeight: FontWeight.w600),
+                style: TextStyle(fontSize: DeviceLayout.isTelevision ? 15 : 12, height: 1.15, fontWeight: FontWeight.w600),
               )),
             )),
           ]),
@@ -402,6 +407,45 @@ class _ChannelTile extends StatelessWidget {
             title: channel.name,
           )),
         ]),
+      ),
+    ));
+  }
+}
+
+/// Highlights focused TV catalogue items without creating another focus stop.
+class _TvVisibleFocus extends StatefulWidget {
+  const _TvVisibleFocus({super.key, required this.child});
+  final Widget child;
+  @override
+  State<_TvVisibleFocus> createState() => _TvVisibleFocusState();
+}
+
+class _TvVisibleFocusState extends State<_TvVisibleFocus> {
+  bool _focused = false;
+  @override
+  Widget build(BuildContext context) {
+    if (!DeviceLayout.isTelevision) return widget.child;
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onFocusChange: (focused) {
+        if (!mounted) return;
+        setState(() => _focused = focused);
+        if (focused) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || !_focused || ModalRoute.of(context)?.isCurrent != true) return;
+            if (Scrollable.maybeOf(context) != null) {
+              Scrollable.ensureVisible(context, duration: const Duration(milliseconds: 120));
+            }
+          });
+        }
+      },
+      child: Container(
+        foregroundDecoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _focused ? AppTheme.electricBlue : Colors.transparent, width: 3),
+        ),
+        child: widget.child,
       ),
     );
   }

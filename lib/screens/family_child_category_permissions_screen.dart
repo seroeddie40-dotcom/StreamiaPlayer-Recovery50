@@ -1,3 +1,4 @@
+import '../widgets/tv_catalog_focus.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/family_session_provider.dart';
@@ -559,7 +560,7 @@ class _FamilyChildCategoryPermissionsScreenState
         final category = filtered[index];
         final selected = _selectedKeys.contains(category.categoryKey);
         final visible = _isCategoryVisible(category);
-        return Row(key: ValueKey(category.categoryKey), children: [
+        return TvCatalogFocus(child: Row(key: ValueKey(category.categoryKey), children: [
           Expanded(child: CheckboxListTile(
           dense: true,
           controlAffinity: ListTileControlAffinity.leading,
@@ -585,7 +586,7 @@ class _FamilyChildCategoryPermissionsScreenState
               color: visible ? null : Theme.of(context).colorScheme.error,
             ),
           ),
-        ]);
+        ]));
       },
     );
   }
@@ -675,11 +676,11 @@ class _FamilyChildCategoryPermissionsScreenState
           Expanded(child: _buildCategoryList()),
         ]);
         if (wide) {
-          return Row(children: [
+          return TvCatalogFocus(child: Row(children: [
             SizedBox(width: constraints.maxWidth * 0.38, child: controls),
             const VerticalDivider(width: 1),
             Expanded(child: list),
-          ]);
+          ]));
         }
         return Column(children: [
           SizedBox(height: constraints.maxHeight * 0.43, child: controls),

@@ -229,7 +229,7 @@ class _LegalDisclaimerScreenState
   }
 
   KeyEventResult _handleReadingKey(FocusNode node, KeyEvent event) {
-    if (!DeviceLayout.isTelevision || event is! KeyDownEvent) {
+    if (!DeviceLayout.isTelevision || (event is! KeyDownEvent && event is! KeyRepeatEvent)) {
       return KeyEventResult.ignored;
     }
     final offset = switch (event.logicalKey) {
@@ -245,7 +245,7 @@ class _LegalDisclaimerScreenState
     final position = _scrollController.position;
     final target = (position.pixels + offset)
         .clamp(position.minScrollExtent, position.maxScrollExtent);
-    if (target == position.pixels && offset > 0 && widget.requireAcceptance) {
+    if (target == position.pixels && offset > 0 && widget.requireAcceptance && _readingComplete) {
       _confirmationFocus.requestFocus();
       return KeyEventResult.handled;
     }
@@ -300,10 +300,20 @@ class _LegalDisclaimerScreenState
                       focusNode: _readingFocus,
                       autofocus: isTv,
                       onKeyEvent: _handleReadingKey,
-                      child: ListView(
+                      child: ListenableBuilder(
+                        listenable: _readingFocus,
+                        builder: (context, child) => DecoratedBox(
+                          position: DecorationPosition.foreground,
+                          decoration: BoxDecoration(border: Border.all(
+                            color: isTv && _readingFocus.hasFocus ? AppTheme.electricBlue : Colors.transparent,
+                            width: 2), borderRadius: BorderRadius.circular(8)),
+                          child: child,
+                        ),
+                        child: ListView(
                         controller: _scrollController,
                         padding: const EdgeInsets.only(bottom: 16),
                         children: paragraphs,
+                      ),
                       ),
                     ),
                   ),

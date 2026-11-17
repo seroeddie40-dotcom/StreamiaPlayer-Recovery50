@@ -1,3 +1,4 @@
+import '../widgets/tv_catalog_focus.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -132,7 +133,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
 
     final price = _examplePrices[_period][index];
 
-    return Card(
+    return TvCatalogFocus(child: Card(
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
       elevation: selected ? 3 : 0,
@@ -274,7 +275,7 @@ class _PaywallScreenState extends State<PaywallScreen> {
           ),
         ),
       ),
-    );
+    ));
   }
 
   @override

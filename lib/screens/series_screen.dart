@@ -1,3 +1,5 @@
+import '../core/platform/device_layout.dart';
+import '../widgets/tv_catalog_focus.dart';
 import '../widgets/profile_clock.dart';
 import '../widgets/category_sort_control.dart';
 import '../widgets/favorites_quick_filter.dart';
@@ -159,7 +161,7 @@ class _SeriesScreenState extends State<SeriesScreen> with CategorySortState<Seri
             AnimatedContainer(
               duration: const Duration(milliseconds: 220),
               curve: Curves.easeInOut,
-              width: _folderFocusExpanded
+              width: _folderFocusExpanded && !DeviceLayout.isTelevision
                   ? (width * 0.46).clamp(285.0, 480.0)
                   : (width >= 1100 ? 340.0 : 285.0),
               child: Focus(
@@ -220,7 +222,7 @@ class _SeriesScreenState extends State<SeriesScreen> with CategorySortState<Seri
                           : _seriesText(lang, 'noResults')))
                       : LayoutBuilder(
                           builder: (context, constraints) {
-                            final columns = (constraints.maxWidth / 165).floor().clamp(2, 7);
+                            final columns = (constraints.maxWidth / (DeviceLayout.isTelevision ? 205 : 165)).floor().clamp(2, 7).toInt();
                             return FocusTraversalGroup(
                               child: GridView.builder(
                                 padding: const EdgeInsets.all(12),
@@ -228,13 +230,13 @@ class _SeriesScreenState extends State<SeriesScreen> with CategorySortState<Seri
                                   crossAxisCount: columns,
                                   mainAxisSpacing: 12,
                                   crossAxisSpacing: 12,
-                                  childAspectRatio: 0.62,
+                                  childAspectRatio: DeviceLayout.isTelevision ? 0.70 : 0.62,
                                 ),
                                 itemCount: filtered.length,
-                                itemBuilder: (context, i) => _SeriesTile(
+                                itemBuilder: (context, i) => TvCatalogFocus(key: ValueKey(filtered[i].id), child: _SeriesTile(
                                   series: filtered[i],
                                   autofocus: i == 0,
-                                ),
+                                )),
                               ),
                             );
                           },
@@ -727,12 +729,12 @@ class _SeriesEpisodesPanel extends StatelessWidget {
         if (episodeIndex < 0) {
           return _SeasonHeader(series: series, season: season, language: lang);
         }
-        return _EpisodeRow(
+        return TvCatalogFocus(key: ValueKey(index), child: _EpisodeRow(
           series: series,
           season: season,
           index: episodeIndex,
           autofocus: index == 1,
-        );
+        ));
       },
     );
   }
@@ -837,15 +839,15 @@ class _EpisodeRow extends StatelessWidget {
         ),
       ),
       child: ListTile(
-        dense: true,
+        dense: !DeviceLayout.isTelevision,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
         leading: ep.stillUrl != null && ep.stillUrl!.isNotEmpty
             ? ClipRRect(
                 borderRadius: BorderRadius.circular(6),
                 child: CachedNetworkImage(
                   imageUrl: ep.stillUrl!,
-                  width: 68,
-                  height: 46,
+                  width: DeviceLayout.isTelevision ? 88 : 68,
+                  height: DeviceLayout.isTelevision ? 56 : 46,
                   memCacheWidth: 136,
                   fit: BoxFit.cover,
                   errorWidget: (_, __, ___) => CircleAvatar(

@@ -1,3 +1,4 @@
+import '../widgets/tv_catalog_focus.dart';
 
 import 'dart:io';
 
@@ -587,7 +588,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
     final date = entry.modified?.toLocal().toString();
 
     final isTv = DeviceLayout.isTelevision;
-    return Card(
+    return TvCatalogFocus(child: Card(
       margin: const EdgeInsets.symmetric(
         horizontal: 12,
         vertical: 5,
@@ -625,7 +626,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
           onPressed: () => _delete(entry),
         ),
       ),
-    );
+    ));
   }
 
   @override

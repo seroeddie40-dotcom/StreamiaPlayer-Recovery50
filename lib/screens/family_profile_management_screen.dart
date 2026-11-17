@@ -1,3 +1,4 @@
+import '../widgets/tv_catalog_focus.dart';
 
 import 'package:flutter/material.dart';
 import '../core/localization/app_localizations.dart';
@@ -862,7 +863,7 @@ class _FamilyProfileManagementScreenState
     final isAdult =
         profile.type == FamilyProfileType.adult;
 
-    return Card(
+    return TvCatalogFocus(child: Card(
       child: ListTile(
         leading: CircleAvatar(
           child: Icon(
@@ -930,7 +931,7 @@ class _FamilyProfileManagementScreenState
           ],
         ),
       ),
-    );
+    ));
   }
 
   Widget _buildLockedContent() {

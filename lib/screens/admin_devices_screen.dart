@@ -1,3 +1,4 @@
+import '../widgets/tv_catalog_focus.dart';
 
 import 'package:flutter/material.dart';
 import '../core/platform/device_layout.dart';
@@ -229,7 +230,7 @@ class _AdminDevicesScreenState
             final isTv = platform == 'android' ||
                 platform == 'android_tv';
 
-            return ListTile(
+            return TvCatalogFocus(child: ListTile(
               leading: Icon(
                 isTv ? Icons.tv : Icons.devices,
               ),
@@ -258,7 +259,7 @@ class _AdminDevicesScreenState
                   ),
                 ],
               ),
-            );
+            ));
           },
         ),
       ),

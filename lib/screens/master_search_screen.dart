@@ -1,3 +1,4 @@
+import '../widgets/tv_catalog_focus.dart';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -213,7 +214,7 @@ class _MasterSearchScreenState
   Widget _channelTile(Channel channel) {
     final l10n = AppLocalizations.of(context);
 
-    return ListTile(
+    return TvCatalogFocus(child: ListTile(
       focusColor: Theme.of(context)
           .colorScheme
           .primary
@@ -232,13 +233,13 @@ class _MasterSearchScreenState
           ),
         ),
       ),
-    );
+    ));
   }
 
   Widget _movieTile(VodItem movie) {
     final l10n = AppLocalizations.of(context);
 
-    return ListTile(
+    return TvCatalogFocus(child: ListTile(
       focusColor: Theme.of(context)
           .colorScheme
           .primary
@@ -256,13 +257,13 @@ class _MasterSearchScreenState
           ),
         ),
       ),
-    );
+    ));
   }
 
   Widget _seriesTile(Series series) {
     final l10n = AppLocalizations.of(context);
 
-    return ListTile(
+    return TvCatalogFocus(child: ListTile(
       focusColor: Theme.of(context)
           .colorScheme
           .primary
@@ -278,6 +279,6 @@ class _MasterSearchScreenState
           ),
         ),
       ),
-    );
+    ));
   }
 }
