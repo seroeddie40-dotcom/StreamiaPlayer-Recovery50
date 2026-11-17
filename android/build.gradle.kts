@@ -1,63 +1,93 @@
 
-import org.gradle.api.tasks.compile.JavaCompile
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-import com.android.build.api.variant.LibraryAndroidComponentsExtension
+plugins {
+    id("com.android.application")
+    id("kotlin-android")
+    id("dev.flutter.flutter-gradle-plugin")
+}
 
-allprojects {
-    repositories {
-        google()
-        mavenCentral()
+android {
+    namespace = "com.streamia.streamia_player"
+    compileSdk = 36
+    ndkVersion = "26.1.10909125"
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
-}
 
-val newBuildDir: Directory =
-    rootProject.layout.buildDirectory
-        .dir("../../build")
-        .get()
+    defaultConfig {
+        applicationId = "com.streamia.streamia_player"
+        minSdk = 21
+        targetSdk = 34
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
 
-rootProject.layout.buildDirectory.value(newBuildDir)
+    val permanentDebugKeystore = file(
+        "${System.getProperty("user.home")}/.android/debug.keystore"
+    )
 
-subprojects {
-    val newSubprojectBuildDir: Directory =
-        newBuildDir.dir(project.name)
+    val isDebugBuildRequested = gradle.startParameter.taskNames.any { task ->
+        task.contains("debug", ignoreCase = true)
+    }
 
-    project.layout.buildDirectory.value(newSubprojectBuildDir)
-}
+    if (isDebugBuildRequested) {
+        require(permanentDebugKeystore.isFile) {
+            "Permanent Streamia debug keystore missing: $permanentDebugKeystore"
+        }
+    }
 
-subprojects {
-    project.evaluationDependsOn(":app")
-}
+    val signingVars = listOf("KEYSTORE_PASSWORD", "KEY_ALIAS", "KEY_PASSWORD")
+    val hasReleaseSigning = signingVars.all { !System.getenv(it).isNullOrBlank() } &&
+        file("upload-keystore.jks").isFile
 
-// Keep Java and Kotlin JVM targets consistent for volume_controller.
-subprojects {
-    if (project.name == "volume_controller") {
-        tasks.withType<JavaCompile>().configureEach {
-            sourceCompatibility = "11"
-            targetCompatibility = "11"
+    signingConfigs {
+        getByName("debug") {
+            storeFile = permanentDebugKeystore
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
         }
 
-        tasks.withType<KotlinCompile>().configureEach {
-            compilerOptions {
-                jvmTarget.set(
-                    org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
-                )
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file("upload-keystore.jks")
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
             }
         }
     }
-}
 
-// Apply Android API 36 to every Android library plugin.
-// This also covers plugins that are added later.
-subprojects {
-    plugins.withId("com.android.library") {
-        extensions.configure<LibraryAndroidComponentsExtension> {
-            finalizeDsl { androidDsl ->
-                androidDsl.compileSdk = 36
+    val performanceTestSigning = System.getenv("STREAMIA_PERFORMANCE_TEST_SIGNING") == "1"
+    if (performanceTestSigning) {
+        require(permanentDebugKeystore.isFile) { "Permanent test signing key missing" }
+        require(!hasReleaseSigning) { "Performance test signing must not override production signing" }
+    }
+
+    buildTypes {
+        getByName("debug") {
+            signingConfig = signingConfigs["debug"]
+        }
+
+        release {
+            if (performanceTestSigning) {
+                signingConfig = signingConfigs["debug"]
+            } else if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
             }
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
 
-tasks.register<Delete>("clean") {
-    delete(rootProject.layout.buildDirectory)
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+flutter {
+    source = "../.."
 }
