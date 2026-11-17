@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/content_provider.dart';
+import '../providers/family_session_provider.dart';
 import '../services/playlist_switch_service.dart';
 import '../core/focus_navigation.dart';
 import '../core/platform/device_layout.dart';
@@ -73,19 +74,23 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
     await _persist(updated);
   }
 
-  Future<void> _activate(PlaylistProfile profile) async {
+  Future<void> _activate(PlaylistProfile profile, {bool refresh = false}) async {
+    if (_switchingKey != null) return;
+    if (refresh && context.read<FamilySessionProvider>().isChild) return;
     setState(() => _switchingKey = profile.sourceKey);
     try {
-      final activated = await PlaylistSwitchService().activate(profile, context.read<ContentProvider>());
+      final service = PlaylistSwitchService();
+      final content = context.read<ContentProvider>();
+      final activated = await (refresh ? service.refresh(profile, content) : service.activate(profile, content));
       await _load();
       if (!activated) return;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${profile.displayName} · ${AppLocalizations.of(context).t('playlist_active')}')),
+        SnackBar(content: Text('${profile.displayName} · ${AppLocalizations.of(context).t(refresh ? 'playlist_refresh_success' : 'playlist_active')}')),
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString())));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(refresh ? AppLocalizations.of(context).t('playlist_refresh_error') : error.toString())));
     } finally {
       if (mounted) setState(() => _switchingKey = null);
     }
@@ -113,6 +118,7 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final content = context.watch<ContentProvider>();
+    final canRefresh = !context.watch<FamilySessionProvider>().isChild;
     final grouped = <String, List<PlaylistProfile>>{};
     for (final profile in _profiles) {
       final folder = profile.folderName.trim().isEmpty ? l10n.t('playlist_no_folder') : profile.folderName.trim();
@@ -122,7 +128,7 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
     return Scaffold(
       appBar: AppBar(title: Text(l10n.t('playlist_management'))),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () async {
+        onPressed: _switchingKey != null ? null : () async {
           final added = await pushWithFocusRestore<bool>(context,
             MaterialPageRoute<bool>(builder: (_) => const SetupScreen(returnToPreviousOnSuccess: true)));
           if (added == true) await _load();
@@ -146,7 +152,8 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
                   ),
                   for (final profile in entry.value)
                     Card(
-                      child: ListTile(
+                      child: Column(children: [
+                      ListTile(
                         autofocus: DeviceLayout.isTelevision &&
                             _profiles.first.sourceKey == profile.sourceKey,
                         focusColor: Theme.of(context).colorScheme.primary.withOpacity(.15),
@@ -163,6 +170,7 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
                           ),
                           PopupMenuButton<String>(
                             tooltip: l10n.t('playlist_edit'),
+                            enabled: _switchingKey == null,
                             onSelected: (action) {
                               if (action == 'up') _move(profile, -1);
                               if (action == 'down') _move(profile, 1);
@@ -175,10 +183,22 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
                             ],
                             child: const Padding(padding: EdgeInsets.all(8), child: Icon(Icons.more_vert)),
                           ),
-                          Switch(value: profile.isVisible, onChanged: (value) => _toggleVisibility(profile, value)),
+                          Switch(value: profile.isVisible, onChanged: _switchingKey != null ? null : (value) => _toggleVisibility(profile, value)),
                         ]),
-                        onTap: () => _edit(profile),
+                        onTap: _switchingKey != null ? null : () => _edit(profile),
                       ),
+                      if (canRefresh && (content.isLoaded ? content.sourceKey == profile.sourceKey : profile.isActive))
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                          child: Row(children: [
+                            Expanded(child: OutlinedButton.icon(
+                              onPressed: _switchingKey != null ? null : () => _activate(profile, refresh: true),
+                              icon: const Icon(Icons.refresh),
+                              label: Text(l10n.t(_switchingKey == profile.sourceKey ? 'playlist_refreshing' : 'playlist_refresh')),
+                            )),
+                          ]),
+                        ),
+                      ]),
                     ),
                 ],
                 const SizedBox(height: 16),
