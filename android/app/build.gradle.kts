@@ -1,8 +1,7 @@
-
 plugins {
     id("com.android.application")
-    id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
+    id("org.jetbrains.kotlin.android")
 }
 
 android {
@@ -37,9 +36,15 @@ android {
         }
     }
 
-    val signingVars = listOf("KEYSTORE_PASSWORD", "KEY_ALIAS", "KEY_PASSWORD")
-    val hasReleaseSigning = signingVars.all { !System.getenv(it).isNullOrBlank() } &&
-        file("upload-keystore.jks").isFile
+    val signingVars = listOf(
+        "KEYSTORE_PASSWORD",
+        "KEY_ALIAS",
+        "KEY_PASSWORD"
+    )
+
+    val hasReleaseSigning =
+        signingVars.all { !System.getenv(it).isNullOrBlank() } &&
+            file("upload-keystore.jks").isFile
 
     signingConfigs {
         getByName("debug") {
@@ -59,15 +64,31 @@ android {
         }
     }
 
+    val performanceTestSigning =
+        System.getenv("STREAMIA_PERFORMANCE_TEST_SIGNING") == "1"
+
+    if (performanceTestSigning) {
+        require(permanentDebugKeystore.isFile) {
+            "Permanent test signing key missing"
+        }
+
+        require(!hasReleaseSigning) {
+            "Performance test signing must not override production signing"
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             signingConfig = signingConfigs["debug"]
         }
 
         release {
-            if (hasReleaseSigning) {
+            if (performanceTestSigning) {
+                signingConfig = signingConfigs["debug"]
+            } else if (hasReleaseSigning) {
                 signingConfig = signingConfigs.getByName("release")
             }
+
             isMinifyEnabled = false
             isShrinkResources = false
         }
@@ -76,7 +97,9 @@ android {
 
 kotlin {
     compilerOptions {
-        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        jvmTarget.set(
+            org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        )
     }
 }
 
