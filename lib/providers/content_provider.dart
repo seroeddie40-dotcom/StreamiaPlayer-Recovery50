@@ -247,6 +247,45 @@ class ContentProvider extends ChangeNotifier {
     _persistRecentHistory();
   }
 
+  /// Persist the new catalog before exposing it to the UI. A failed database
+  /// transaction leaves the previously loaded library untouched.
+  Future<bool> replaceRefreshedLibrary({
+    required List<Channel> channels,
+    required List<VodItem> vod,
+    required List<Series> series,
+    required String sourceKey,
+    String? sourceLabel,
+    int? activationGeneration,
+    bool Function()? mayPublish,
+  }) async {
+    bool allowed() => (activationGeneration == null ||
+        isLibraryActivationCurrent(activationGeneration)) &&
+        (mayPublish == null || mayPublish());
+    if (!allowed()) return false;
+    if (channels.isEmpty && vod.isEmpty && series.isEmpty) {
+      throw StateError('Empty refreshed catalog');
+    }
+    for (final channel in channels) {
+      channel.sourceKey = sourceKey;
+    }
+    var saved = false;
+    final operation = _catalogWriteQueue.catchError((Object _) {}).then((_) async {
+      if (!allowed()) return;
+      await IptvLibraryDatabase.instance.replace(sourceKey: sourceKey,
+          channels: channels, vod: vod, series: series);
+      saved = true;
+      _lastCatalogSaveError = null;
+    });
+    _catalogWriteQueue = operation.catchError((Object error) {
+      _lastCatalogSaveError = error;
+    });
+    await operation;
+    if (!saved || !allowed()) return false;
+    return replaceLibrary(channels: channels, vod: vod, series: series,
+        sourceKey: sourceKey, sourceLabel: sourceLabel,
+        activationGeneration: activationGeneration, persist: false);
+  }
+
   bool replaceLibrary({
     required List<Channel> channels,
     required List<VodItem> vod,
