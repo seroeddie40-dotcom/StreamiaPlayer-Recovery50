@@ -8,6 +8,8 @@ import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.content.Intent
 import android.net.Uri
+import android.content.pm.ActivityInfo
+import android.os.Bundle
 import android.os.Build
 import android.os.SystemClock
 import android.provider.DocumentsContract
@@ -35,6 +37,22 @@ class MainActivity : FlutterActivity() {
             "streamia_recording_storage"
 
         private const val FOLDER_KEY = "folder_uri"
+    }
+
+    private fun isTelevisionDevice(): Boolean {
+        val modeManager = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+        return modeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+            (resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION ||
+            packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+            packageManager.hasSystemFeature("android.software.leanback_only") ||
+            packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        if (isTelevisionDevice()) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
+        super.onCreate(savedInstanceState)
     }
 
     private val storagePreferences by lazy {
@@ -637,11 +655,7 @@ class MainActivity : FlutterActivity() {
 
             when (call.method) {
                 "isTelevision" -> {
-                    val modeManager = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
-                    val isTv = modeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
-                        packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
-                        packageManager.hasSystemFeature("android.software.leanback_only") ||
-                        packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
+                    val isTv = isTelevisionDevice()
                     result.success(isTv)
                 }
 
