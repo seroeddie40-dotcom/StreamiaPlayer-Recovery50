@@ -131,6 +131,9 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     return _snapshot;
   }
 
+  /// A verified parent token is available only during an active adult session.
+  String? get parentAccessToken => isAdult && isReady ? _adultAccessToken : null;
+
   bool get hasActiveProfile => activeProfile != null;
   bool get isLoading => _isLoading;
 
