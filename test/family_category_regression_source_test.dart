@@ -27,9 +27,15 @@ void main() {
     final bulk = source.substring(bulkStart, bulkEnd);
     final verifyIndex = bulk.indexOf('final confirmed = chosen.every(');
     final rejectIndex = bulk.indexOf('if (!confirmed)');
-    final clearIndex = bulk.indexOf('_selectedKeys.clear();');
+    final childStart = bulk.indexOf('for (final category in chosen)');
+    expect(childStart, greaterThanOrEqualTo(0));
+    expect(verifyIndex, greaterThan(childStart));
+    expect(rejectIndex, greaterThanOrEqualTo(0));
+    final clearIndex = bulk.indexOf('_selectedKeys.clear();', childStart);
+    expect(clearIndex, greaterThanOrEqualTo(0));
     expect(verifyIndex, lessThan(rejectIndex));
     expect(rejectIndex, lessThan(clearIndex));
-    expect(bulk.contains('throw const _FamilyPermissionError('), isTrue);
+    expect(bulk.substring(rejectIndex, clearIndex),
+        contains('throw const _FamilyPermissionError('));
   });
 }
