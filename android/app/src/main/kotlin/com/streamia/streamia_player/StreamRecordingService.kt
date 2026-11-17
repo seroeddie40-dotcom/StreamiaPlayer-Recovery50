@@ -28,6 +28,7 @@ class StreamRecordingService : Service() {
         const val ACTION_STOP = "com.streamia.recording.STOP"
         const val EXTRA_URL = "streamUrl"
         const val EXTRA_NAME = "channelName"
+        const val EXTRA_OWNER = "ownerKey"
 
         private const val CHANNEL_ID = "streamia_recordings"
         private const val NOTIFICATION_ID = 2401
@@ -61,6 +62,10 @@ class StreamRecordingService : Service() {
 
         @Volatile
         var outputPath: String? = null
+            private set
+
+        @Volatile
+        var ownerKey: String? = null
             private set
 
         val isRecording: Boolean
@@ -127,6 +132,13 @@ class StreamRecordingService : Service() {
                     intent.getStringExtra(EXTRA_NAME)
                         ?: "Live_TV"
 
+                val requestedOwner = intent.getStringExtra(EXTRA_OWNER)
+                if (requestedOwner == null || !Regex("[a-f0-9]{64}").matches(requestedOwner)) {
+                    busy.set(false)
+                    stopSelfResult(startId)
+                    return START_NOT_STICKY
+                }
+                ownerKey = requestedOwner
                 stopRequested.set(false)
                 writing.set(false)
                 bytesWritten = 0L
@@ -159,7 +171,8 @@ class StreamRecordingService : Service() {
                     try {
                         recordStream(
                             streamUrl,
-                            channelName
+                            channelName,
+                            requestedOwner
                         )
                     } finally {
                         writing.set(false)
@@ -343,7 +356,8 @@ class StreamRecordingService : Service() {
 
     private fun recordStream(
         streamUrl: String,
-        channelName: String
+        channelName: String,
+        recordingOwner: String
     ) {
         var target: RecordingTarget? = null
         var partBytes = 0L
@@ -406,7 +420,7 @@ class StreamRecordingService : Service() {
                 selectedRecordingFolder()
 
             val baseName =
-                recordingBaseName(channelName)
+                "sp_${recordingOwner}_" + recordingBaseName(channelName)
 
             http.inputStream.use { input ->
 

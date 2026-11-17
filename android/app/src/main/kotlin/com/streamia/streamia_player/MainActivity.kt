@@ -680,6 +680,12 @@ class MainActivity : FlutterActivity() {
                         call.argument<String>("channelName")
                             ?: "Live_TV"
 
+                    val ownerKey = call.argument<String>("ownerKey")
+                    if (ownerKey == null || !Regex("[a-f0-9]{64}").matches(ownerKey)) {
+                        result.error("INVALID_OWNER", "Invalid recording owner", null)
+                        return@setMethodCallHandler
+                    }
+
                     if (streamUrl.isNullOrBlank()) {
                         result.error(
                             "INVALID_URL",
@@ -715,6 +721,7 @@ class MainActivity : FlutterActivity() {
                                 StreamRecordingService.EXTRA_NAME,
                                 channelName
                             )
+                            putExtra(StreamRecordingService.EXTRA_OWNER, ownerKey)
                         }
 
                         if (Build.VERSION.SDK_INT >= 26) {
@@ -779,6 +786,7 @@ class MainActivity : FlutterActivity() {
                             "bytesWritten" to
                                 StreamRecordingService.bytesWritten,
                             "elapsedMs" to elapsedMs,
+                            "ownerKey" to StreamRecordingService.ownerKey,
                             "outputPath" to
                                 StreamRecordingService.outputPath,
                             "error" to
