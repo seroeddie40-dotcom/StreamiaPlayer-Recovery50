@@ -1,3 +1,4 @@
+import '../widgets/profile_clock.dart';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -141,6 +142,8 @@ class SettingsScreen extends StatelessWidget {
                     onTap: () => theme.toggleTheme(),
                   ),
 
+                  const Divider(),
+                  const ProfileClock(settings: true),
                   const Divider(),
 
                   ListTile(

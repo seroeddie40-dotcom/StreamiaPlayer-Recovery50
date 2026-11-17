@@ -20,14 +20,14 @@ class ContinueWatchingScreen extends StatefulWidget {
 
 class _ContinueWatchingScreenState
     extends State<ContinueWatchingScreen> {
-  final WatchProgressService _service =
-      WatchProgressService();
+  late final WatchProgressService _service;
 
   late Future<List<Map<String, dynamic>>> _items;
 
   @override
   void initState() {
     super.initState();
+    _service = WatchProgressService(family: context.read<FamilySessionProvider>());
     _load();
   }
 
@@ -97,7 +97,7 @@ class _ContinueWatchingScreenState
           final content = context.watch<ContentProvider>();
           final family = context.watch<FamilySessionProvider>();
           final rows =
-              (snapshot.data ?? const <Map<String, dynamic>>[])
+              (_service.isCurrent ? (snapshot.data ?? const <Map<String, dynamic>>[]) : const <Map<String, dynamic>>[])
                   .where((row) => _isAllowed(row, content, family))
                   .toList(growable: false);
 
@@ -209,7 +209,6 @@ class _ContinueWatchingScreenState
     FamilySessionProvider family,
   ) {
     if (!family.isReady) return false;
-    if (!family.isChild) return true;
 
     final type = row['content_type']?.toString() ?? '';
     final id = row['content_id']?.toString() ?? '';

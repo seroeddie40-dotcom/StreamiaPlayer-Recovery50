@@ -804,7 +804,7 @@ class _FamilyProfileManagementScreenState
   ) async {
     if (_busy ||
         !_accessGranted ||
-        profile.type != FamilyProfileType.child) {
+        (profile.isAdult && context.read<FamilySessionProvider>().activeProfile?.id != profile.id)) {
       return;
     }
 
@@ -875,6 +875,7 @@ class _FamilyProfileManagementScreenState
         title: Text(profile.displayName),
         subtitle: Text(
           '${_t(isAdult ? 'family_adult' : 'family_child')}'
+          '${widget.rulesOnly ? " · ${_t(isAdult ? 'adult_folder_hide' : 'family_lock_folder')}" : ""}'
           '${profile.isDefault ? " · ${_t('family_default')}" : ""}',
         ),
         trailing: widget.rulesOnly ? const Icon(Icons.chevron_right) : PopupMenuButton<String>(
@@ -1000,7 +1001,8 @@ class _FamilyProfileManagementScreenState
     }
 
     if (widget.rulesOnly) {
-      final children = _profiles.where((p) => p.type == FamilyProfileType.child).toList();
+      final active = context.watch<FamilySessionProvider>().activeProfile;
+      final children = _profiles.where((p) => p.isChild || (p.isAdult && p.id == active?.id)).toList();
       return children.isEmpty ? Center(child: Text(_t('family_no_child_profiles'))) : ListView.builder(itemCount: children.length, itemBuilder: (_, i) => _buildProfileTile(children[i]));
     }
     return Column(

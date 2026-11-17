@@ -1,3 +1,5 @@
+import '../widgets/profile_clock.dart';
+import '../services/profile_history_service.dart';
 import 'dart:async';
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
@@ -15,6 +17,7 @@ import '../providers/family_session_provider.dart';
 import '../services/recording_service.dart';
 import '../services/download_service.dart';
 import '../services/watch_progress_service.dart';
+import '../widgets/favorites_quick_filter.dart';
 
 class PlayerScreen extends StatefulWidget {
   final Channel? channel;
@@ -39,10 +42,46 @@ class PlayerScreen extends StatefulWidget {
 
 enum PlaybackStartChoice { resume, fromBeginning, cancel }
 
-class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver {
+class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver, FavoritesQuickFilter<PlayerScreen> {
+  @override
+  String get sortArea => 'live';
   late final Player _player;
   late final VideoController _videoController;
   late final FamilySessionProvider _familySession;
+  late final ProfileHistoryService _historyService;
+  List<Map<String,dynamic>> _profileHistory = [];
+  Future<void> _updateHistory(Future<List<Map<String,dynamic>>> request) async {
+    try {
+      final rows = await request;
+      if (mounted && _historyService.isCurrent && _historyService.source == _contentProvider.sourceKey) {
+        setState(() => _profileHistory = rows);
+      }
+    } catch (_) { /* Playback must not depend on history storage. */ }
+  }
+  List<RecentPlaybackEntry> _historyEntries(RecentPlaybackType type, ContentProvider library) {
+    if (!_historyService.isCurrent || _historyService.source != library.sourceKey) return [];
+    final result = <RecentPlaybackEntry>[];
+    for (final row in _profileHistory) {
+      if (row['content_type'] != type.name) continue;
+      final id = row['content_id'] as String;
+      final viewed = DateTime.tryParse(row['viewed_at'] as String? ?? '');
+      if (viewed == null) continue;
+      if (type == RecentPlaybackType.live) {
+        for (final item in library.channels) { if (item.id == id) { result.add(RecentPlaybackEntry(type:type,id:id,title:item.name,imageUrl:item.logoUrl,channel:item,viewedAt:viewed,sourceKey:library.sourceKey)); break; } }
+      } else if (type == RecentPlaybackType.vod) {
+        for (final item in library.vodItems) { if (item.id == id) { result.add(RecentPlaybackEntry(type:type,id:id,title:item.title,imageUrl:item.posterUrl ?? item.backdropUrl,vod:item,viewedAt:viewed,sourceKey:library.sourceKey)); break; } }
+      } else {
+        for (final item in library.series) {
+          if (!id.startsWith('${item.id}::')) continue;
+          for (final season in item.seasons) { for (final episode in season.episodes) {
+            if (id == '${item.id}::${episode.id}') result.add(RecentPlaybackEntry(type:type,id:id,title:'${item.title} · S${season.number} E${episode.number} · ${episode.title}',imageUrl:episode.stillUrl ?? item.posterUrl,series:item,viewedAt:viewed,sourceKey:library.sourceKey));
+          } }
+          break;
+        }
+      }
+    }
+    return result;
+  }
   late final ContentProvider _contentProvider;
   bool _playbackRevoked = false;
   StreamSubscription? _posSub, _durSub, _playSub, _errorSub, _bufferingSub;
@@ -73,8 +112,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       } else if (widget.channel != null && _channelListScroll.hasClients) {
         final channels = context.read<ContentProvider>().channels
             .where(_canPlayChannel).toList(growable: false);
-        final visible = _selectedLiveCategory == null ? channels : channels
-            .where((c) => (c.category ?? '') == _selectedLiveCategory).toList();
+        final visible = _visibleLiveChannels(channels);
         final index = visible.indexWhere((c) => c.id == widget.channel!.id);
         if (index >= 0) _jumpToNavigationIndex(_channelListScroll, index);
       }
@@ -134,7 +172,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   int _automaticReconnects = 0;
   int _streamLoadGeneration = 0;
   static const int _maxAutomaticReconnects = 2;
-  final WatchProgressService _progressService = WatchProgressService();
+  late final WatchProgressService _progressService;
   final FocusNode _playerSurfaceFocus = FocusNode(debugLabel: 'Player-Oberfläche');
   final FocusNode _subtitleButtonFocus = FocusNode(debugLabel: 'Untertitel');
   final FocusNode _audioButtonFocus = FocusNode(debugLabel: 'Audiosprache');
@@ -172,11 +210,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _player = Player();
     _videoController = VideoController(_player);
     _familySession = context.read<FamilySessionProvider>();
+    _progressService = WatchProgressService(family: _familySession);
     _familySession.addListener(_onFamilySessionChanged);
     if (widget.offlineDownloadId != null) {
       DownloadService.entries.addListener(_onFamilySessionChanged);
     }
     _contentProvider = context.read<ContentProvider>();
+    _historyService = ProfileHistoryService(_familySession, _contentProvider.sourceKey);
     _contentProvider.addListener(_onFamilySessionChanged);
     _currentEpisode = widget.initialEpisodeIndex ?? 0;
     _posSub = _player.stream.position.listen((p) {
@@ -220,7 +260,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _stallMonitor = Timer.periodic(const Duration(seconds: 5), (_) => _checkPlaybackStall());
     _progressTimer = Timer.periodic(const Duration(seconds: 15), (_) => _saveProgress());
     // Retry queued offline progress while the player remains open.
-    _queueSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) => _progressService.flushPending());
+    _queueSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) { _progressService.flushPending(); _updateHistory(_historyService.refresh()); });
     _startHideTimer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Live TV starts with folders on the left and channels beside them.
@@ -230,10 +270,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         _openNavigationDrawer();
       }
       final library = context.read<ContentProvider>();
-      if (widget.channel != null) library.addToHistory(widget.channel!);
+      if (widget.channel != null) _updateHistory(_historyService.record('live', widget.channel!.id));
       if (widget.contentId != null && !widget.isLive && widget.episodes == null) {
         for (final item in library.vodItems) {
-          if (item.id == widget.contentId) { library.addVodToHistory(item); break; }
+          if (item.id == widget.contentId) { _updateHistory(_historyService.record('vod', item.id)); break; }
         }
       }
       if (widget.series != null) _recordCurrentEpisodeHistory(library);
@@ -242,20 +282,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   void _recordCurrentEpisodeHistory([ContentProvider? provider]) {
     if (!mounted || _playbackRevoked || !_isCurrentStreamAuthorized()) return;
-    final library = provider ?? context.read<ContentProvider>();
     final series = widget.series;
     final episodes = widget.episodes;
     if (series == null || episodes == null || episodes.isEmpty ||
         _currentEpisode < 0 || _currentEpisode >= episodes.length) return;
     final episode = episodes[_currentEpisode];
-    var seasonNumber = 1;
-    for (final season in series.seasons) {
-      if (season.episodes.any((candidate) => candidate.id == episode.id)) {
-        seasonNumber = season.number;
-        break;
-      }
-    }
-    library.addSeriesEpisodeToHistory(series, episode, seasonNumber);
+    _updateHistory(_historyService.record('series', '${series.id}::${episode.id}'));
   }
 
   // Detect streams that silently stop advancing without emitting a player error.
@@ -328,7 +360,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         candidate.categoryKey == channel.categoryKey &&
         candidate.sourceKey == channel.sourceKey);
     if (current.isEmpty) return false;
-    if (!family.isChild) return true;
     return family.canAccessCategory(
       sourceKey: channel.sourceKey ?? '',
       contentType: 'live',
@@ -344,7 +375,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         candidate.id == item.id && candidate.streamUrl == item.streamUrl &&
         candidate.categoryKey == item.categoryKey);
     if (current.isEmpty) return false;
-    if (!family.isChild) return true;
     return family.canAccessCategory(
       sourceKey: library.sourceKey, contentType: 'vod',
       categoryKey: item.categoryKey ?? '',
@@ -360,7 +390,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         (episodeUrl == null || candidate.seasons.any((season) =>
             season.episodes.any((episode) => episode.streamUrl == episodeUrl))));
     if (current.isEmpty) return false;
-    if (!family.isChild) return true;
     return family.canAccessCategory(
       sourceKey: library.sourceKey, contentType: 'series',
       categoryKey: item.categoryKey ?? '',
@@ -394,7 +423,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       permitted = _canPlayChannel(channel);
     } else if (permitted && widget.episodes != null && widget.series != null) {
       permitted = _canPlaySeries(widget.series!, episodeUrl: _currentUrl);
-    } else if (permitted && family.isChild) {
+    } else if (permitted && (family.isChild || widget.contentId != null)) {
       // A child may only play an item that is still present in the
       // current source catalog with an explicitly permitted category.
       // Bare URLs, downloaded files and stale history entries fail closed.
@@ -790,6 +819,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                        ],
                      ),
                    ),
+                   const ProfileClock(onVideo: true),
                    if (widget.isLive)
                      ValueListenableBuilder<RecordingStatus>(
                        valueListenable: RecordingService.status,
@@ -1150,9 +1180,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   Widget _buildHistorySidebar() {
     final library = context.watch<ContentProvider>();
     final lists = <List<RecentPlaybackEntry>>[
-      library.recentLive,
-      library.recentVod,
-      library.recentSeries,
+      _historyEntries(RecentPlaybackType.live, library),
+      _historyEntries(RecentPlaybackType.vod, library),
+      _historyEntries(RecentPlaybackType.series, library),
     ];
     final names = <String>[AppLocalizations.of(context).t('nav_live'), AppLocalizations.of(context).t('nav_vod'), AppLocalizations.of(context).t('nav_series')];
     final types = <RecentPlaybackType>[
@@ -1328,7 +1358,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       ),
     );
     if (confirmed == true && mounted) {
-      context.read<ContentProvider>().clearRecentHistory(type);
+      await _updateHistory(_historyService.clear(type.name));
     }
   }
 
@@ -1426,6 +1456,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _closeHistorySidebar();
       return;
     }
+    _updateHistory(_historyService.refresh());
     _hideTimer?.cancel();
     setState(() {
       _showDrawer = false;
@@ -1464,15 +1495,19 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   void _zapPrevious() => _zapBy(-1);
   void _zapNext() => _zapBy(1);
 
+  List<Channel> _visibleLiveChannels(List<Channel> channels) => channels
+      .where((c) => matchesFavorite(c.id) &&
+          (favoritesOnly || _selectedLiveCategory == null ||
+              (c.category ?? '') == _selectedLiveCategory))
+      .toList(growable: false);
+
   Widget _buildLiveNavigationDrawer() {
     context.watch<FamilySessionProvider>();
     final channels = context.watch<ContentProvider>().channels
         .where(_canPlayChannel).toList(growable: false);
     final categories = channels.map((c) => c.category ?? '')
         .where((c) => c.isNotEmpty).toSet().toList()..sort();
-    final visible = _selectedLiveCategory == null
-        ? channels
-        : channels.where((c) => (c.category ?? '') == _selectedLiveCategory).toList();
+    final visible = _visibleLiveChannels(channels);
     return Positioned(
       left: 0, top: 0, bottom: 0,
       child: ClipRRect(
@@ -1486,6 +1521,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
             child: Column(children: [
               Padding(padding: const EdgeInsets.fromLTRB(16, 18, 12, 10), child: Row(children: [
                 Expanded(child: Text(AppLocalizations.of(context).t('player_channels_folders'), style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold))),
+                favoritesButton(),
                 IconButton(focusNode: _drawerCloseFocus, tooltip: AppLocalizations.of(context).t('player_close'), focusColor: AppTheme.electricBlue.withOpacity(0.38), onPressed: _closeNavigationDrawer, icon: const Icon(Icons.close, color: Colors.white70)),
               ])),
               const Divider(color: Colors.white24, height: 1),
@@ -1494,7 +1530,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      SizedBox(
+                      if (!favoritesOnly) SizedBox(
                         width: MediaQuery.sizeOf(context).width >= 900 ? 230 : 180,
                         child: ListView(
                           controller: _categoryListScroll,
@@ -1505,7 +1541,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                           ],
                         ),
                       ),
-                      const VerticalDivider(color: Colors.white24, width: 1),
+                      if (!favoritesOnly) const VerticalDivider(color: Colors.white24, width: 1),
                       Expanded(
                         child: ListView.builder(
                           controller: _channelListScroll,
@@ -1549,7 +1585,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   Widget _categoryTile(String label, String? category, {bool autofocus = false}) {
-    final selected = _selectedLiveCategory == category;
+    final selected = !favoritesOnly && _selectedLiveCategory == category;
     return Padding(
       padding: const EdgeInsets.only(bottom: 5),
       child: Material(

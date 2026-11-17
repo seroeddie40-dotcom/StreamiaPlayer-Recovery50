@@ -28,9 +28,17 @@ class FavoritesLibraryScreen extends StatefulWidget {
 class _FavoritesLibraryScreenState
     extends State<FavoritesLibraryScreen> {
   late final FavoritesBackupService _service;
+  String? _profileScope;
+  bool get _scopeCurrent {
+    if (!mounted) return false;
+    final family = context.read<FamilySessionProvider>();
+    final profile = family.activeProfile;
+    return family.isReady && profile != null && _profileScope == '${profile.accountUserId}:${profile.id}';
+  }
   late Future<List<Map<String, dynamic>>> _favorites;
 
   int _selectedType = 0;
+  int _seenSyncRevision = -1;
 
   static const _types = [
     'live',
@@ -54,11 +62,29 @@ class _FavoritesLibraryScreenState
   void initState() {
     super.initState();
 
+    final profile = context.read<FamilySessionProvider>().activeProfile;
+    _profileScope = profile == null ? null : '${profile.accountUserId}:${profile.id}';
     _service = FavoritesBackupService(
       Supabase.instance.client,
+      profileId: profile?.id ?? '',
+      isCurrent: () => _scopeCurrent,
+      parentToken: () => _scopeCurrent ? context.read<FamilySessionProvider>().parentAccessToken : null,
     );
 
     _favorites = _service.loadAll();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final revision = context.watch<FamilySessionProvider>().profileSyncRevision;
+    if (_seenSyncRevision == revision) return;
+    final initial = _seenSyncRevision == -1;
+    _seenSyncRevision = revision;
+    if (initial || !_scopeCurrent) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scopeCurrent && _seenSyncRevision == revision) _reload();
+    });
   }
 
   void _reload() {
@@ -70,6 +96,7 @@ class _FavoritesLibraryScreenState
   Future<void> _openFavorite(
     Map<String, dynamic> row,
   ) async {
+    if (!_scopeCurrent) return;
     final content = context.read<ContentProvider>();
     final sourceKey = row['source_key']?.toString();
 
@@ -110,14 +137,11 @@ class _FavoritesLibraryScreenState
 
       if (item != null && mounted) {
         final categoryKey = item.categoryKey;
-        if (family.isChild &&
-            (categoryKey == null ||
-                categoryKey.isEmpty ||
-                !family.canAccessCategory(
+        if (!family.canAccessCategory(
                   sourceKey: sourceKey,
                   contentType: 'live',
-                  categoryKey: categoryKey,
-                ))) {
+                  categoryKey: categoryKey ?? '',
+                )) {
           _showAccessDenied();
           return;
         }
@@ -144,14 +168,11 @@ class _FavoritesLibraryScreenState
 
       if (item != null && mounted) {
         final categoryKey = item.categoryKey;
-        if (family.isChild &&
-            (categoryKey == null ||
-                categoryKey.isEmpty ||
-                !family.canAccessCategory(
+        if (!family.canAccessCategory(
                   sourceKey: sourceKey,
                   contentType: 'vod',
-                  categoryKey: categoryKey,
-                ))) {
+                  categoryKey: categoryKey ?? '',
+                )) {
           _showAccessDenied();
           return;
         }
@@ -177,14 +198,11 @@ class _FavoritesLibraryScreenState
 
       if (item != null && mounted) {
         final categoryKey = item.categoryKey;
-        if (family.isChild &&
-            (categoryKey == null ||
-                categoryKey.isEmpty ||
-                !family.canAccessCategory(
+        if (!family.canAccessCategory(
                   sourceKey: sourceKey,
                   contentType: 'series',
-                  categoryKey: categoryKey,
-                ))) {
+                  categoryKey: categoryKey ?? '',
+                )) {
           _showAccessDenied();
           return;
         }
@@ -209,6 +227,22 @@ class _FavoritesLibraryScreenState
           ),
         ),
       );
+    }
+  }
+
+  bool _isVisible(Map<String, dynamic> row, ContentProvider content,
+      FamilySessionProvider family) {
+    if (!family.isReady || row['source_key'] != content.sourceKey) return false;
+    final id = row['content_id']?.toString();
+    final type = row['content_type']?.toString();
+    if (id == null || type == null) return false;
+    bool allowed(String? key) => family.canAccessCategory(
+        sourceKey: content.sourceKey, contentType: type, categoryKey: key ?? '');
+    switch (type) {
+      case 'live': return content.channels.any((i) => i.id == id && allowed(i.categoryKey));
+      case 'vod': return content.vodItems.any((i) => i.id == id && allowed(i.categoryKey));
+      case 'series': return content.series.any((i) => i.id == id && allowed(i.categoryKey));
+      default: return false;
     }
   }
 
@@ -293,6 +327,9 @@ class _FavoritesLibraryScreenState
 
   @override
   Widget build(BuildContext context) {
+    final family = context.watch<FamilySessionProvider>();
+    final content = context.watch<ContentProvider>();
+    if (!_scopeCurrent) return Scaffold(appBar: AppBar());
     final color = Theme.of(context).colorScheme.primary;
 
     return Scaffold(
@@ -339,7 +376,7 @@ class _FavoritesLibraryScreenState
               future: _favorites,
               builder: (context, snapshot) {
                 if (snapshot.connectionState ==
-                    ConnectionState.waiting) {
+                    ConnectionState.waiting && !snapshot.hasData) {
                   return const Center(
                     child: CircularProgressIndicator(),
                   );
@@ -359,7 +396,8 @@ class _FavoritesLibraryScreenState
                     .where(
                       (row) =>
                           row['content_type'] ==
-                          _types[_selectedType],
+                          _types[_selectedType] &&
+                          _isVisible(row, content, family),
                     )
                     .toList();
 

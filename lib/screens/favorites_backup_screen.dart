@@ -1,5 +1,7 @@
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/family_session_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../services/favorites_backup_service.dart';
@@ -15,6 +17,13 @@ class FavoritesBackupScreen extends StatefulWidget {
 class _FavoritesBackupScreenState
     extends State<FavoritesBackupScreen> {
   late final FavoritesBackupService _service;
+  String? _profileScope;
+  bool get _scopeCurrent {
+    if (!mounted) return false;
+    final family = context.read<FamilySessionProvider>();
+    final profile = family.activeProfile;
+    return family.isReady && profile != null && _profileScope == '${profile.accountUserId}:${profile.id}';
+  }
 
   bool _busy = false;
   String? _message;
@@ -29,8 +38,13 @@ class _FavoritesBackupScreenState
   @override
   void initState() {
     super.initState();
+    final profile = context.read<FamilySessionProvider>().activeProfile;
+    _profileScope = profile == null ? null : '${profile.accountUserId}:${profile.id}';
     _service = FavoritesBackupService(
       Supabase.instance.client,
+      profileId: profile?.id ?? '',
+      isCurrent: () => _scopeCurrent,
+      parentToken: () => _scopeCurrent ? context.read<FamilySessionProvider>().parentAccessToken : null,
     );
     _refresh();
   }
@@ -111,6 +125,8 @@ class _FavoritesBackupScreenState
 
   @override
   Widget build(BuildContext context) {
+    context.watch<FamilySessionProvider>();
+    if (!_scopeCurrent) return Scaffold(appBar: AppBar());
     return Scaffold(
       appBar: AppBar(
         title: const Text(

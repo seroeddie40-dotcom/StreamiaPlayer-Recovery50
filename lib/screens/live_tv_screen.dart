@@ -1,3 +1,7 @@
+import '../widgets/profile_clock.dart';
+import '../widgets/category_sort_control.dart';
+import '../widgets/favorites_quick_filter.dart';
+import '../services/category_sort_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -21,7 +25,9 @@ class LiveTvScreen extends StatefulWidget {
   State<LiveTvScreen> createState() => _LiveTvScreenState();
 }
 
-class _LiveTvScreenState extends State<LiveTvScreen> {
+class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<LiveTvScreen>, FavoritesQuickFilter<LiveTvScreen> {
+  @override
+  String get sortArea => 'live';
   static const _all = '__streamia_all__';
   static const _other = '__streamia_other__';
   final _searchController = TextEditingController();
@@ -30,7 +36,6 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
   bool _folderFocusExpanded = false;
   String _search = '';
 
-  List<Channel>? _cachedChannels;
   List<String> _cachedCategories = const [];
   Map<String, int> _cachedCounts = const {};
 
@@ -69,16 +74,12 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
   }
 
   void _updateCategories(List<Channel> channels) {
-    if (identical(channels, _cachedChannels)) return;
     final counts = <String, int>{};
     for (final channel in channels) {
       final category = _categoryFor(channel);
       counts[category] = (counts[category] ?? 0) + 1;
     }
-    final categories = counts.keys.where((key) => key != _other).toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-    if (counts.containsKey(_other)) categories.add(_other);
-    _cachedChannels = channels;
+    final categories = CategorySortService.sorted(counts, sortOrder);
     _cachedCounts = counts;
     _cachedCategories = <String>[_all, ...categories];
   }
@@ -105,12 +106,8 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
-            child: Text(
-              _text('Kategorien', 'Kategoriler', 'Categories'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: colors.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-            ),
+            child: sortHeader(_text('Kategorien', 'Kategoriler', 'Categories'),
+              colors.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
           ),
           Expanded(
             child: ListView.builder(
@@ -199,7 +196,8 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
         ? _selectedCategory : _all;
     final filtered = <Channel>[];
     for (final channel in channels) {
-      if (category != _all && _categoryFor(channel) != category) continue;
+      if (!matchesFavorite(channel.id)) continue;
+      if (!favoritesOnly && category != _all && _categoryFor(channel) != category) continue;
       if (_search.isNotEmpty && !channel.name.toLowerCase().contains(_search)) continue;
       filtered.add(channel);
     }
@@ -216,13 +214,13 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
             onPressed: () => Navigator.of(context).maybePop(),
           ),
           title: Text(_text('Live-TV', 'Canlı TV', 'Live TV')),
-          actions: compact ? [
+          actions: [const ProfileClock(), if (compact)
             Builder(builder: (buttonContext) => IconButton(
               tooltip: _text('Kategorien', 'Kategoriler', 'Categories'),
               icon: const Icon(Icons.folder_open_outlined),
               onPressed: () => Scaffold.of(buttonContext).openEndDrawer(),
             )),
-          ] : null,
+          ],
         ),
         endDrawer: compact ? Drawer(
           child: SafeArea(child: _categoryPanel(channels, inDrawer: true)),
@@ -292,6 +290,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                     ),
                   ),
                 )),
+                favoritesButton(),
               ]),
             ),
             Padding(
@@ -299,7 +298,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  '${_label(category)} · ${filtered.length}',
+                  '${_label(favoritesOnly ? _all : category)} · ${filtered.length}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.labelMedium,

@@ -97,7 +97,7 @@ class _MasterSearchScreenState
     final family = context.watch<FamilySessionProvider>();
     final l10n = AppLocalizations.of(context);
 
-    final channels = family.isReady && family.isChild
+    final channels = family.isReady
         ? family.filterItems<Channel>(
             items: content.channels,
             sourceKey: content.sourceKey,
@@ -106,7 +106,7 @@ class _MasterSearchScreenState
           ).where((c) => _matches([c.name, c.category])).toList()
         : family.isReady ? content.channels.where((c) => _matches([c.name, c.category])).toList() : <Channel>[];
 
-    final movies = family.isReady && family.isChild
+    final movies = family.isReady
         ? family.filterItems<VodItem>(
             items: content.vodItems,
             sourceKey: content.sourceKey,
@@ -115,7 +115,7 @@ class _MasterSearchScreenState
           ).where((v) => _matches([v.title, v.plot])).toList()
         : family.isReady ? content.vodItems.where((v) => _matches([v.title, v.plot])).toList() : <VodItem>[];
 
-    final series = family.isReady && family.isChild
+    final series = family.isReady
         ? family.filterItems<Series>(
             items: content.series,
             sourceKey: content.sourceKey,

@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/family_session_provider.dart';
+import '../providers/content_provider.dart';
 import '../core/localization/app_localizations.dart';
 
 import '../models/family_profile.dart';
 import '../models/playlist_profile.dart';
 
 import '../services/family_pin_service.dart';
+import '../services/adult_folder_visibility_service.dart';
 import '../services/family_profile_service.dart';
 import '../services/family_profile_management_service.dart';
 import '../services/family_category_catalog_service.dart';
@@ -81,8 +83,13 @@ class _FamilyChildCategoryPermissionsScreenState
       widget.childProfile.type ==
       FamilyProfileType.child;
 
+  final _adultVisibility = AdultFolderVisibilityService();
+  bool get _ownAdult => mounted && widget.childProfile.isAdult &&
+      context.read<FamilySessionProvider>().activeProfile?.id == widget.childProfile.id &&
+      context.read<FamilySessionProvider>().activeProfile?.accountUserId == widget.childProfile.accountUserId;
+
   Future<bool> _hasParentAuthorization() async {
-    if (!_isChild || !mounted) return false;
+    if (!mounted || (!_isChild && !_ownAdult)) return false;
     if (widget.requireActiveSession && context.read<FamilySessionProvider>().parentAccessToken != widget.parentAccessToken) return false;
 
     try {
@@ -90,14 +97,14 @@ class _FamilyChildCategoryPermissionsScreenState
         scope: FamilyPinScope.parent,
         accessToken: widget.parentAccessToken,
       );
-      return mounted && valid && (!widget.requireActiveSession || context.read<FamilySessionProvider>().parentAccessToken == widget.parentAccessToken);
+      return mounted && valid && (_isChild || _ownAdult) && (!widget.requireActiveSession || context.read<FamilySessionProvider>().parentAccessToken == widget.parentAccessToken);
     } catch (_) {
       return false;
     }
   }
 
   Future<void> _initialize() async {
-    if (!_isChild) {
+    if (!_isChild && !_ownAdult) {
       setState(() {
         _loading = false;
         _errorMessage = 'family_child_only';
@@ -124,9 +131,7 @@ class _FamilyChildCategoryPermissionsScreenState
           await _playlistCategories.loadPlaylists();
 
       final rules =
-          await _profileService.loadCategoryRules(
-        widget.childProfile.id,
-      );
+          _isChild ? await _profileService.loadCategoryRules(widget.childProfile.id) : await _adultVisibility.load(widget.childProfile, parentToken: widget.parentAccessToken);
 
       if (!mounted) return;
 
@@ -190,20 +195,48 @@ class _FamilyChildCategoryPermissionsScreenState
         return;
       }
 
-      if (sourceType ==
-          FamilyPlaylistSourceType.m3u) {
-        setState(() {
-          _loading = false;
-          _errorMessage = 'family_m3u_notice';
-        });
-        return;
+      final List<FamilyContentCategory> categories;
+      if (sourceType == FamilyPlaylistSourceType.m3u) {
+        final content = context.read<ContentProvider>();
+        if (!content.isLoaded || content.sourceKey != sourceKey) {
+          setState(() {
+            _loading = false;
+            _errorMessage = 'family_m3u_notice';
+          });
+          return;
+        }
+        final Iterable<String?> keys;
+        switch (requestedType) {
+          case FamilyContentType.live:
+            keys = content.channels.map((item) => item.categoryKey);
+            break;
+          case FamilyContentType.vod:
+            keys = content.vodItems.map((item) => item.categoryKey);
+            break;
+          case FamilyContentType.series:
+            keys = content.series.map((item) => item.categoryKey);
+            break;
+        }
+        categories = await _playlistCategories.loadM3uCategoriesFromGroups(
+          sourceKey: sourceKey,
+          contentType: requestedType,
+          groupNames: keys.whereType<String>().toList(),
+        );
+        if (!mounted || _selectedSourceKey != sourceKey ||
+            _selectedContentType != requestedType) return;
+        if (content.sourceKey != sourceKey || !content.isLoaded) {
+          setState(() {
+            _loading = false;
+            _errorMessage = 'family_m3u_notice';
+          });
+          return;
+        }
+      } else {
+        categories = await _playlistCategories.loadXtreamCategories(
+          sourceKey: sourceKey,
+          contentType: requestedType,
+        );
       }
-
-      final categories =
-          await _playlistCategories.loadXtreamCategories(
-        sourceKey: sourceKey,
-        contentType: requestedType,
-      );
 
       if (!mounted ||
           _selectedSourceKey != sourceKey ||
@@ -261,6 +294,16 @@ class _FamilyChildCategoryPermissionsScreenState
         );
       }
 
+      if (!_isChild) {
+        await _adultVisibility.setVisibility(profile: widget.childProfile, sourceKey: category.sourceKey,
+            contentType: category.contentTypeKey, categoryKeys: [category.categoryKey], visible: visible, parentToken: widget.parentAccessToken);
+        final rules = await _adultVisibility.load(widget.childProfile, parentToken: widget.parentAccessToken);
+        if (!mounted) return;
+        setState(() => _rules = rules);
+        await context.read<FamilySessionProvider>().refreshPermissions();
+        _showMessage(visible ? 'adult_folder_show' : 'adult_folder_hide');
+        return;
+      }
       final success = await _managementService
           .setChildCategoryVisibility(
         parentAccessToken:
@@ -434,6 +477,18 @@ class _FamilyChildCategoryPermissionsScreenState
       final chosen = _categories
           .where((c) => _selectedKeys.contains(c.categoryKey))
           .toList(growable: false);
+      if (!_isChild) {
+        if (chosen.isEmpty) return;
+        await _adultVisibility.setVisibility(profile: widget.childProfile,
+            sourceKey: chosen.first.sourceKey, contentType: chosen.first.contentTypeKey,
+            categoryKeys: chosen.map((c) => c.categoryKey), visible: visible, parentToken: widget.parentAccessToken);
+        final rules = await _adultVisibility.load(widget.childProfile, parentToken: widget.parentAccessToken);
+        if (!mounted) return;
+        setState(() { _rules = rules; _selectedKeys.clear(); });
+        await context.read<FamilySessionProvider>().refreshPermissions();
+        _showMessage(visible ? 'adult_folder_show' : 'adult_folder_hide');
+        return;
+      }
       for (final category in chosen) {
         final ok = await _managementService.setChildCategoryVisibility(
           parentAccessToken: widget.parentAccessToken,
@@ -470,7 +525,7 @@ class _FamilyChildCategoryPermissionsScreenState
     } catch (error) {
       // Einzelne bereits bestätigte Änderungen bleiben gespeichert.
       try {
-        final rules = await _profileService.loadCategoryRules(widget.childProfile.id);
+        final rules = _isChild ? await _profileService.loadCategoryRules(widget.childProfile.id) : await _adultVisibility.load(widget.childProfile, parentToken: widget.parentAccessToken);
         if (mounted) setState(() => _rules = rules);
       } catch (_) {}
       _showMessage('folder_bulk_interrupted', count: updated);
@@ -504,7 +559,8 @@ class _FamilyChildCategoryPermissionsScreenState
         final category = filtered[index];
         final selected = _selectedKeys.contains(category.categoryKey);
         final visible = _isCategoryVisible(category);
-        return CheckboxListTile(
+        return Row(key: ValueKey(category.categoryKey), children: [
+          Expanded(child: CheckboxListTile(
           dense: true,
           controlAffinity: ListTileControlAffinity.leading,
           value: selected,
@@ -516,18 +572,20 @@ class _FamilyChildCategoryPermissionsScreenState
             }
           }),
           title: Text(category.displayName, maxLines: 2, overflow: TextOverflow.ellipsis),
-          subtitle: Text(visible ? _t('family_visible') : _t('family_blocked')),
-          secondary: IconButton(
-            tooltip: visible ? _t('family_lock_folder') : _t('family_unlock_folder'),
+          subtitle: Text(visible ? _t('family_visible') : _t(_isChild ? 'family_blocked' : 'adult_folder_hidden')),
+          )),
+          IconButton(
+            focusColor: Theme.of(context).colorScheme.primary.withOpacity(0.35),
+            tooltip: visible ? _t(_isChild ? 'family_lock_folder' : 'adult_folder_hide') : _t(_isChild ? 'family_unlock_folder' : 'adult_folder_show'),
             onPressed: _saving || _loading
                 ? null
                 : () => _changeVisibility(category, !visible),
             icon: Icon(
-              visible ? Icons.lock_open_outlined : Icons.lock_outline,
+              _isChild ? (visible ? Icons.lock_open_outlined : Icons.lock_outline) : (visible ? Icons.visibility_outlined : Icons.visibility_off_outlined),
               color: visible ? null : Theme.of(context).colorScheme.error,
             ),
           ),
-        );
+        ]);
       },
     );
   }
@@ -536,10 +594,10 @@ class _FamilyChildCategoryPermissionsScreenState
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('${_t('family_child')}: ${widget.childProfile.displayName}',
+        Text('${_t(_isChild ? 'family_child' : 'family_adult')}: ${widget.childProfile.displayName}',
             style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 4),
-        Text(_t('family_lock_hint')),
+        Text(_t(_isChild ? 'family_lock_hint' : 'adult_folder_hint')),
         const SizedBox(height: 12),
         _buildPlaylistSelector(),
         const SizedBox(height: 12),
@@ -565,7 +623,7 @@ class _FamilyChildCategoryPermissionsScreenState
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       child: Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Text('${_selectedKeys.length} ${_t('family_selected')} · ${_categories.where((c) => !_isCategoryVisible(c)).length} ${_t('family_blocked_count')}'),
+          Text('${_selectedKeys.length} ${_t('family_selected')} · ${_categories.where((c) => !_isCategoryVisible(c)).length} ${_t(_isChild ? 'family_blocked_count' : 'adult_folder_hidden')}'),
           OutlinedButton(
             onPressed: _saving || _loading ? null : () => setState(() {
               _selectedKeys.addAll(filtered.map((c) => c.categoryKey));
@@ -578,13 +636,13 @@ class _FamilyChildCategoryPermissionsScreenState
           ),
           FilledButton.icon(
             onPressed: _saving || _selectedKeys.isEmpty ? null : () => _applyBulk(false),
-            icon: const Icon(Icons.lock_outline),
-            label: Text(_t('family_lock')),
+            icon: Icon(_isChild ? Icons.lock_outline : Icons.visibility_off_outlined),
+            label: Text(_t(_isChild ? 'family_lock' : 'adult_folder_hide')),
           ),
           OutlinedButton.icon(
             onPressed: _saving || _selectedKeys.isEmpty ? null : () => _applyBulk(true),
-            icon: const Icon(Icons.lock_open_outlined),
-            label: Text(_t('family_unlock')),
+            icon: Icon(_isChild ? Icons.lock_open_outlined : Icons.visibility_outlined),
+            label: Text(_t(_isChild ? 'family_unlock' : 'adult_folder_show')),
           ),
         ],
       ),
@@ -594,11 +652,11 @@ class _FamilyChildCategoryPermissionsScreenState
   @override
   Widget build(BuildContext context) {
     if (widget.requireActiveSession && context.watch<FamilySessionProvider>().parentAccessToken != widget.parentAccessToken) {
-      return Scaffold(appBar: AppBar(title: Text(_t('family_folder_rules'))), body: Center(child: Text(_t('family_pin_expired'))));
+      return Scaffold(appBar: AppBar(title: Text(_t(_isChild ? 'family_folder_rules' : 'adult_folder_hide'))), body: Center(child: Text(_t('family_pin_expired'))));
     }
     return Scaffold(
       appBar: AppBar(
-        title: Text(_t('family_folder_rules')),
+        title: Text(_t(_isChild ? 'family_folder_rules' : 'adult_folder_hide')),
         actions: [IconButton(
           tooltip: _t('playlist_refresh'),
           onPressed: _loading || _saving ? null : _initialize,

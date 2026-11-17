@@ -1,3 +1,7 @@
+import '../widgets/profile_clock.dart';
+import '../widgets/category_sort_control.dart';
+import '../widgets/favorites_quick_filter.dart';
+import '../services/category_sort_service.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -23,7 +27,9 @@ class SeriesScreen extends StatefulWidget {
   State<SeriesScreen> createState() => _SeriesScreenState();
 }
 
-class _SeriesScreenState extends State<SeriesScreen> {
+class _SeriesScreenState extends State<SeriesScreen> with CategorySortState<SeriesScreen>, FavoritesQuickFilter<SeriesScreen> {
+  @override
+  String get sortArea => 'series';
   String? _category;
   bool _folderFocusExpanded = false;
   String _query = '';
@@ -52,14 +58,14 @@ class _SeriesScreenState extends State<SeriesScreen> {
   Widget build(BuildContext context) {
     final content = context.watch<ContentProvider>();
     final family = context.watch<FamilySessionProvider>();
-    final all = family.isReady && family.isChild
+    final all = family.isReady
         ? family.filterItems<Series>(
             items: content.series,
             sourceKey: content.sourceKey,
             contentType: 'series',
             categoryKeyOf: (item) => item.categoryKey,
           )
-        : family.isReady ? content.series : <Series>[];
+        : <Series>[];
     final lang = context.watch<LocaleProvider>().locale.languageCode;
     // Keep Xtream category labels intact. Separators may be part of a name.
     final categoryCounts = <String, int>{};
@@ -69,10 +75,11 @@ class _SeriesScreenState extends State<SeriesScreen> {
         categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
       }
     }
-    final categories = categoryCounts.keys.toList(growable: false);
+    final categories = CategorySortService.sorted(categoryCounts, sortOrder);
     final selected = categories.contains(_category) ? _category : null;
     final filtered = all.where((item) {
-      final inCategory = selected == null || item.genre?.trim() == selected;
+      if (!matchesFavorite(item.id)) return false;
+      final inCategory = favoritesOnly || selected == null || item.genre?.trim() == selected;
       return inCategory && item.title.toLowerCase().contains(_query.trim().toLowerCase());
     }).toList(growable: false);
     final width = MediaQuery.sizeOf(context).width;
@@ -114,6 +121,8 @@ class _SeriesScreenState extends State<SeriesScreen> {
         leading: const BackButton(),
         title: Text(_seriesText(lang, 'series')),
         actions: [
+          const ProfileClock(),
+          if (!wide) sortMenu(),
           if (!wide)
             IconButton(
               tooltip: _seriesText(lang, 'categories'),
@@ -164,8 +173,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
                 children: [
                   Padding(
                     padding: const EdgeInsets.all(16),
-                    child: Text(_seriesText(lang, 'categories'),
-                        style: Theme.of(context).textTheme.titleMedium),
+                    child: sortHeader(_seriesText(lang, 'categories'), Theme.of(context).textTheme.titleMedium),
                   ),
                   Expanded(child: categoryList()),
                 ],
@@ -178,11 +186,12 @@ class _SeriesScreenState extends State<SeriesScreen> {
               children: [
                 Padding(
                   padding: const EdgeInsets.all(12),
-                  child: SizedBox(
+                  child: Row(children: [Expanded(child: SizedBox(
                     height: 48,
                     child: VoiceInputField(
                       controller: _searchController,
                       appLanguageCode: lang,
+                      textInputAction: TextInputAction.search,
                       decoration: InputDecoration(
                         prefixIcon: const Icon(Icons.search),
                         hintText: _seriesText(lang, 'search'),
@@ -191,7 +200,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
                         contentPadding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
                       ),
                     ),
-                  ),
+                  )), favoritesButton()]),
                 ),
                 if (!wide && selected != null)
                   Padding(

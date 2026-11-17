@@ -1,3 +1,7 @@
+import '../widgets/profile_clock.dart';
+import '../widgets/category_sort_control.dart';
+import '../widgets/favorites_quick_filter.dart';
+import '../services/category_sort_service.dart';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
@@ -12,6 +16,7 @@ import '../providers/family_session_provider.dart';
 import '../providers/locale_provider.dart';
 import '../services/download_service.dart';
 import '../widgets/favorite_toggle_button.dart';
+import '../widgets/voice_input_field.dart';
 import 'player_screen.dart';
 
 String _vodText(BuildContext context, String key) {
@@ -218,7 +223,9 @@ class VodScreen extends StatefulWidget {
   State<VodScreen> createState() => _VodScreenState();
 }
 
-class _VodScreenState extends State<VodScreen> {
+class _VodScreenState extends State<VodScreen> with CategorySortState<VodScreen>, FavoritesQuickFilter<VodScreen> {
+  @override
+  String get sortArea => 'vod';
   final TextEditingController _searchController =
       TextEditingController();
 
@@ -227,7 +234,20 @@ class _VodScreenState extends State<VodScreen> {
   String _query = '';
 
   @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    if (mounted && _query != _searchController.text) {
+      setState(() => _query = _searchController.text);
+    }
+  }
+
+  @override
   void dispose() {
+    _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     super.dispose();
   }
@@ -241,14 +261,14 @@ class _VodScreenState extends State<VodScreen> {
   Widget build(BuildContext context) {
     final content = context.watch<ContentProvider>();
     final family = context.watch<FamilySessionProvider>();
-    final items = family.isReady && family.isChild
+    final items = family.isReady
         ? family.filterItems<VodItem>(
             items: content.vodItems,
             sourceKey: content.sourceKey,
             contentType: 'vod',
             categoryKeyOf: (item) => item.categoryKey,
           )
-        : family.isReady ? content.vodItems : <VodItem>[];
+        : <VodItem>[];
 
     final counts = <String, int>{};
 
@@ -257,13 +277,14 @@ class _VodScreenState extends State<VodScreen> {
       counts[genre] = (counts[genre] ?? 0) + 1;
     }
 
-    final genres = counts.keys.toList(growable: false);
+    final genres = CategorySortService.sorted(counts, sortOrder);
 
     final selected =
         genres.contains(_selectedGenre) ? _selectedGenre : null;
 
     final filtered = items.where((item) {
-      if (selected != null && _genre(item) != selected) {
+      if (!matchesFavorite(item.id)) return false;
+      if (!favoritesOnly && selected != null && _genre(item) != selected) {
         return false;
       }
 
@@ -278,6 +299,7 @@ class _VodScreenState extends State<VodScreen> {
           onPressed: () => Navigator.of(context).maybePop(),
         ),
         title: Text(_vodText(context, 'movies')),
+        actions: [const ProfileClock(), if (MediaQuery.sizeOf(context).width < 720) sortMenu()],
       ),
       body: !family.isReady
           ? Center(child: Column(
@@ -302,29 +324,26 @@ class _VodScreenState extends State<VodScreen> {
 
                 final search = Padding(
                   padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-                  child: TextField(
+                  child: Row(children: [Expanded(child: VoiceInputField(
                     controller: _searchController,
-                    onChanged: (value) =>
-                        setState(() => _query = value),
+                    appLanguageCode: context.watch<LocaleProvider>().locale.languageCode,
+                    textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
                       hintText: _vodText(context, 'search'),
                       prefixIcon: const Icon(Icons.search),
                       suffixIcon: _query.isEmpty
                           ? null
                           : IconButton(
-                              tooltip: 'Clear',
+                              tooltip: AppLocalizations.of(context).t('family_clear_selection'),
                               icon: const Icon(Icons.close),
-                              onPressed: () {
-                                _searchController.clear();
-                                setState(() => _query = '');
-                              },
+                              onPressed: _searchController.clear,
                             ),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(14),
                       ),
                       isDense: true,
                     ),
-                  ),
+                  )), favoritesButton()]),
                 );
 
                 final genreList = ListView(
@@ -530,18 +549,7 @@ class _VodScreenState extends State<VodScreen> {
                             Padding(
                               padding:
                                   const EdgeInsets.all(16),
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  _vodText(
-                                    context,
-                                    'categories',
-                                  ),
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleMedium,
-                                ),
-                              ),
+                              child: sortHeader(_vodText(context, 'categories'), Theme.of(context).textTheme.titleMedium),
                             ),
                             Expanded(child: genreList),
                           ],

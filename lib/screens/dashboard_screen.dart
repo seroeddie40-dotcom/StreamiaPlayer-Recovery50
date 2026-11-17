@@ -1,3 +1,4 @@
+import '../widgets/profile_clock.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -298,6 +299,7 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
                       ),
                     ),
                   ),
+                  const Flexible(child: ProfileClock(dashboard: true)),
                   if (showPro) ...[
                     _ProButton(
                       label: l10n.t('nav_pro'),
