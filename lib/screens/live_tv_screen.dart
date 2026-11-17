@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
+import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
 import '../models/channel.dart';
 import '../providers/content_provider.dart';
@@ -230,12 +231,12 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
           ? Center(child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Profilberechtigungen konnten nicht geladen werden.'),
+                Text(AppLocalizations.of(context).t('family_permissions_load_failed')),
                 const SizedBox(height: 12),
                 ElevatedButton(
                   onPressed: family.isRefreshingPermissions
                       ? null : () => family.refreshPermissions(),
-                  child: const Text('Erneut versuchen'),
+                  child: Text(AppLocalizations.of(context).t('family_retry')),
                 ),
               ],
             ))
@@ -308,7 +309,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
             Expanded(child: filtered.isEmpty
               ? Center(child: Text(
                   channels.isEmpty
-                      ? '${_text('Keine Sender vorhanden', 'Kanal bulunamadı', 'No channels available')}\n${family.isChild && family.snapshot != null ? family.snapshot!.catalogDiagnostics<Channel>(items: allChannels, sourceKey: content.sourceKey, contentType: 'live', categoryKeyOf: (item) => item.categoryKey) : ''}'
+                      ? _text('Keine Sender vorhanden', 'Kanal bulunamadı', 'No channels available')
                       : _text('Keine passenden Sender', 'Eşleşen kanal yok', 'No matching channels'),
                   textAlign: TextAlign.center,
                 ))

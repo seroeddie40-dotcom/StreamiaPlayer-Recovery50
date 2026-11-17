@@ -135,12 +135,12 @@ class _SeriesScreenState extends State<SeriesScreen> {
           ? Center(child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Profilberechtigungen konnten nicht geladen werden.'),
+                Text(AppLocalizations.of(context).t('family_permissions_load_failed')),
                 const SizedBox(height: 12),
                 ElevatedButton(
                   onPressed: family.isRefreshingPermissions
                       ? null : () => family.refreshPermissions(),
-                  child: const Text('Erneut versuchen'),
+                  child: Text(AppLocalizations.of(context).t('family_retry')),
                 ),
               ],
             ))
@@ -207,7 +207,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
                 Expanded(
                   child: filtered.isEmpty
                       ? Center(child: Text(all.isEmpty
-                          ? '${_seriesText(lang, 'empty')}\n${family.isChild && family.snapshot != null ? family.snapshot!.catalogDiagnostics<Series>(items: content.series, sourceKey: content.sourceKey, contentType: 'series', categoryKeyOf: (item) => item.categoryKey) : ''}'
+                          ? _seriesText(lang, 'empty')
                           : _seriesText(lang, 'noResults')))
                       : LayoutBuilder(
                           builder: (context, constraints) {

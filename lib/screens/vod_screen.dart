@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
+import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
 import '../models/vod_item.dart';
 import '../providers/content_provider.dart';
@@ -282,17 +283,17 @@ class _VodScreenState extends State<VodScreen> {
           ? Center(child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('Profilberechtigungen konnten nicht geladen werden.'),
+                Text(AppLocalizations.of(context).t('family_permissions_load_failed')),
                 const SizedBox(height: 12),
                 ElevatedButton(
                   onPressed: family.isRefreshingPermissions
                       ? null : () => family.refreshPermissions(),
-                  child: const Text('Erneut versuchen'),
+                  child: Text(AppLocalizations.of(context).t('family_retry')),
                 ),
               ],
             ))
           : items.isEmpty
-          ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Text(_vodText(context, 'empty')), if (family.isChild && family.snapshot != null) Padding(padding: const EdgeInsets.all(12), child: Text(family.snapshot!.catalogDiagnostics<VodItem>(items: content.vodItems, sourceKey: content.sourceKey, contentType: 'vod', categoryKeyOf: (item) => item.categoryKey), textAlign: TextAlign.center))]))
+          ? Center(child: Text(_vodText(context, 'empty')))
           : LayoutBuilder(
               builder: (context, constraints) {
                 final wide = constraints.maxWidth >= 750;

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../models/family_profile.dart';
+import '../core/localization/app_localizations.dart';
 import '../providers/family_session_provider.dart';
 import '../services/family_profile_service.dart';
 import 'family_profile_management_screen.dart';
@@ -18,6 +19,8 @@ class FamilyProfileSelectionScreen extends StatefulWidget {
 
 class _FamilyProfileSelectionScreenState
     extends State<FamilyProfileSelectionScreen> {
+  String _t(String key) => AppLocalizations.of(context).t(key);
+
   final FamilyProfileService _profileService =
       FamilyProfileService();
 
@@ -157,17 +160,8 @@ class _FamilyProfileSelectionScreenState
             context: context,
             builder: (dialogContext) {
               return AlertDialog(
-                title: const Text(
-                  'Profil nicht entsperrt',
-                ),
-                content: const Text(
-                  'Das Erwachsenenprofil konnte nicht '
-                  'mit der Eltern-PIN entsperrt werden. '
-                  'Bitte überprüfe deine PIN und die '
-                  'Verbindung zum Server. Falls noch '
-                  'keine Eltern-PIN eingerichtet wurde, '
-                  'öffne die Familienverwaltung.',
-                ),
+                title: Text(_t('family_profile_locked')),
+                content: Text(_t('family_profile_unlock_failed')),
                 actions: [
                   TextButton(
                     autofocus: true,
@@ -175,16 +169,14 @@ class _FamilyProfileSelectionScreenState
                       Navigator.of(dialogContext)
                           .pop(false);
                     },
-                    child: const Text('Schließen'),
+                    child: Text(_t('player_close')),
                   ),
                   FilledButton(
                     onPressed: () {
                       Navigator.of(dialogContext)
                           .pop(true);
                     },
-                    child: const Text(
-                      'Familienverwaltung',
-                    ),
+                    child: Text(_t('family_manage')),
                   ),
                 ],
               );
@@ -325,8 +317,8 @@ class _FamilyProfileSelectionScreenState
                                   .digitsOnly,
                             ],
                             decoration:
-                                const InputDecoration(
-                              labelText: 'Eltern-PIN',
+                                InputDecoration(
+                              labelText: _t('family_parent_pin'),
                               counterText: '',
                               prefixIcon: Icon(
                                 Icons.lock_outline,
@@ -489,8 +481,8 @@ class _FamilyProfileSelectionScreenState
                   Flexible(
                     child: Text(
                       isChild
-                          ? 'Kinderprofil'
-                          : 'Erwachsenenprofil',
+                          ? _t('family_child')
+                          : _t('family_adult'),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context)
@@ -502,8 +494,8 @@ class _FamilyProfileSelectionScreenState
               ),
               if (profile.isDefault) ...[
                 const SizedBox(height: 10),
-                const Text(
-                  'Standardprofil',
+                Text(
+                  _t('family_default'),
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 12,
@@ -561,7 +553,7 @@ class _FamilyProfileSelectionScreenState
             OutlinedButton.icon(
               onPressed: _loadProfiles,
               icon: const Icon(Icons.refresh),
-              label: const Text('Aktualisieren'),
+              label: Text(_t('playlist_refresh')),
             ),
           ],
         ),
@@ -645,11 +637,11 @@ class _FamilyProfileSelectionScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Wer schaut gerade?'),
+        title: Text(_t('family_who')),
         actions: [
           if (_profiles.isNotEmpty)
             IconButton(
-              tooltip: 'Familienprofile verwalten',
+              tooltip: _t('family_manage'),
               onPressed: _isLoading ||
                       _isSelecting ||
                       _isManaging
@@ -660,7 +652,7 @@ class _FamilyProfileSelectionScreenState
               ),
             ),
           IconButton(
-            tooltip: 'Profile aktualisieren',
+            tooltip: _t('family_refresh'),
             onPressed: _isLoading ||
                     _isSelecting ||
                     _isManaging

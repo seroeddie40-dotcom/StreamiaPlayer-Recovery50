@@ -147,41 +147,35 @@ class SettingsScreen extends StatelessWidget {
 
                   const Divider(),
 
-                  Padding(
-                    padding:
-                        const EdgeInsets.symmetric(vertical: 16),
-                    child: Text(
-                      _label(
-                        context,
-                        'Sprache',
-                        'Dil',
-                        'Language',
-                        'Язык',
-                        'اللغة',
-                        'Język',
-                        'Idioma',
-                        'Langue',
-                      ),
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-
-                  ..._languages.map(
-                    (lang) => ListTile(
-                      focusColor: focusColor,
-                      title: Text(lang.$2),
-                      trailing:
-                          locale.locale.languageCode == lang.$1
-                              ? const Icon(
-                                  Icons.check,
-                                  color: Colors.green,
-                                )
-                              : null,
-                      onTap: () => locale.setLocale(lang.$1),
-                    ),
+                  ListTile(
+                    focusColor: focusColor,
+                    leading: const Icon(Icons.language),
+                    title: Text(_label(context, 'Sprache', 'Dil', 'Language',
+                      'Язык', 'اللغة', 'Język', 'Idioma', 'Langue')),
+                    subtitle: Text(_languages.firstWhere(
+                      (lang) => lang.$1 == locale.locale.languageCode,
+                      orElse: () => _languages.first).$2),
+                    trailing: const Icon(Icons.expand_more),
+                    onTap: () async {
+                      final selected = await showDialog<String>(
+                        context: context,
+                        builder: (dialogContext) => SimpleDialog(
+                          children: [
+                            for (final lang in _languages)
+                              SimpleDialogOption(
+                                onPressed: () => Navigator.of(dialogContext).pop(lang.$1),
+                                child: Row(children: [
+                                  Expanded(child: Text(lang.$2)),
+                                  if (locale.locale.languageCode == lang.$1)
+                                    const Icon(Icons.check),
+                                ]),
+                              ),
+                          ],
+                        ),
+                      );
+                      if (!context.mounted || selected == null) return;
+                      locale.setLocale(selected);
+                    },
                   ),
 
                   const Divider(),
@@ -347,10 +341,8 @@ class SettingsScreen extends StatelessWidget {
                     leading: const Icon(
                       Icons.family_restroom_outlined,
                     ),
-                    title: const Text('Familienprofile'),
-                    subtitle: const Text(
-                      'Profile auswählen und Kinderschutz verwalten',
-                    ),
+                    title: Text(l10n.t('family_settings_profiles')),
+                    subtitle: Text(l10n.t('family_settings_profiles_hint')),
                     trailing:
                         const Icon(Icons.chevron_right),
                     onTap: () => _open(
@@ -364,12 +356,8 @@ class SettingsScreen extends StatelessWidget {
                     leading: const Icon(
                       Icons.manage_accounts_outlined,
                     ),
-                    title: const Text(
-                      'Familienprofile verwalten',
-                    ),
-                    subtitle: const Text(
-                      'Eltern-PIN, Profile und Ordnersperren',
-                    ),
+                    title: Text(l10n.t('family_settings_manage')),
+                    subtitle: Text(l10n.t('family_settings_manage_hint')),
                     trailing:
                         const Icon(Icons.chevron_right),
                     onTap: () => _open(

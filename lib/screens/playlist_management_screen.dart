@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../providers/content_provider.dart';
 import '../providers/family_session_provider.dart';
 import '../services/playlist_switch_service.dart';
+import '../services/playlist_refresh_schedule.dart';
 import '../core/focus_navigation.dart';
 import '../core/platform/device_layout.dart';
 import '../core/localization/app_localizations.dart';
@@ -22,6 +23,7 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
   final _store = PlaylistProfileStore();
   List<PlaylistProfile> _profiles = [];
   bool _loading = true;
+  Map<String, int> _refreshHours = {};
   String? _switchingKey;
 
   @override
@@ -32,11 +34,30 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
 
   Future<void> _load() async {
     final profiles = await _store.load();
+    final hours = <String, int>{};
+    for (final profile in profiles) {
+      hours[profile.sourceKey] = await PlaylistRefreshSchedule.hours(profile.sourceKey);
+    }
     if (!mounted) return;
     setState(() {
+      _refreshHours = hours;
       _profiles = profiles;
       _loading = false;
     });
+  }
+
+  Future<void> _setRefreshHours(PlaylistProfile profile, int value) async {
+    if (_switchingKey != null || context.read<FamilySessionProvider>().isChild) return;
+    setState(() => _switchingKey = profile.sourceKey);
+    try {
+      await PlaylistRefreshSchedule.setHours(profile.sourceKey, value);
+      if (mounted) setState(() => _refreshHours[profile.sourceKey] = value);
+    } catch (_) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(AppLocalizations.of(context).t('playlist_refresh_error'))));
+    } finally {
+      if (mounted) setState(() => _switchingKey = null);
+    }
   }
 
   Future<void> _persist(List<PlaylistProfile> updated) async {
@@ -45,29 +66,11 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
   }
 
   Future<void> _edit(PlaylistProfile profile) async {
-    final name = TextEditingController(text: profile.displayName);
-    final folder = TextEditingController(text: profile.folderName);
-    final result = await showDialog<(String, String)?>(
+    final result = await showDialog<(String, String)>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(AppLocalizations.of(context).t('playlist_edit')),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: name, autofocus: !DeviceLayout.isTelevision, textCapitalization: TextCapitalization.none,
-            decoration: InputDecoration(labelText: AppLocalizations.of(context).t('playlist_display_name'))),
-          const SizedBox(height: 12),
-          TextField(controller: folder, textCapitalization: TextCapitalization.none,
-            decoration: InputDecoration(labelText: AppLocalizations.of(context).t('playlist_folder'))),
-        ]),
-        actions: [
-          TextButton(autofocus: DeviceLayout.isTelevision, onPressed: () => Navigator.pop(dialogContext), child: Text(AppLocalizations.of(context).t('playlist_cancel'))),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, (name.text.trim(), folder.text.trim())),
-            child: Text(AppLocalizations.of(context).t('playlist_save'))),
-        ],
-      ),
+      builder: (_) => _PlaylistEditDialog(profile: profile),
     );
-    name.dispose();
-    folder.dispose();
-    if (result == null) return;
+    if (!mounted || result == null) return;
     final updated = _profiles.map((p) => p.sourceKey == profile.sourceKey
       ? p.copyWith(displayName: result.$1.isEmpty ? p.displayName : result.$1, folderName: result.$2)
       : p).toList();
@@ -127,20 +130,25 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
 
     return Scaffold(
       appBar: AppBar(title: Text(l10n.t('playlist_management'))),
-      floatingActionButton: FloatingActionButton.extended(
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+          child: FilledButton.icon(
         onPressed: _switchingKey != null ? null : () async {
           final added = await pushWithFocusRestore<bool>(context,
             MaterialPageRoute<bool>(builder: (_) => const SetupScreen(returnToPreviousOnSuccess: true)));
           if (added == true) await _load();
         },
         icon: const Icon(Icons.add), label: Text(l10n.t('playlist_add')),
+          ),
+        ),
       ),
       body: _loading
         ? const Center(child: CircularProgressIndicator())
         : _profiles.isEmpty
           ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(l10n.t('playlist_empty'))))
           : ListView(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 88),
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
               children: [
                 Text(l10n.t('playlist_visibility_hint'), style: Theme.of(context).textTheme.bodyMedium),
                 const SizedBox(height: 16),
@@ -187,6 +195,21 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
                         ]),
                         onTap: _switchingKey != null ? null : () => _edit(profile),
                       ),
+                      if (canRefresh)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                          child: DropdownButtonFormField<int>(
+                            key: ValueKey('${profile.sourceKey}:${_refreshHours[profile.sourceKey]}'),
+                            initialValue: _refreshHours[profile.sourceKey] ?? PlaylistRefreshSchedule.defaultHours,
+                            isExpanded: true,
+                            decoration: InputDecoration(labelText: l10n.t('playlist_auto_refresh')),
+                            items: [for (final hours in PlaylistRefreshSchedule.intervals)
+                              DropdownMenuItem(value: hours, child: Text(l10n.t('playlist_interval_$hours')))],
+                            onChanged: _switchingKey != null ? null : (value) {
+                              if (value != null) _setRefreshHours(profile, value);
+                            },
+                          ),
+                        ),
                       if (canRefresh && (content.isLoaded ? content.sourceKey == profile.sourceKey : profile.isActive))
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -202,9 +225,58 @@ class _PlaylistManagementScreenState extends State<PlaylistManagementScreen> {
                     ),
                 ],
                 const SizedBox(height: 16),
-                Text(l10n.t('playlist_security_note'), style: Theme.of(context).textTheme.bodySmall),
               ],
             ),
+    );
+  }
+}
+
+class _PlaylistEditDialog extends StatefulWidget {
+  const _PlaylistEditDialog({required this.profile});
+  final PlaylistProfile profile;
+
+  @override
+  State<_PlaylistEditDialog> createState() => _PlaylistEditDialogState();
+}
+
+class _PlaylistEditDialogState extends State<_PlaylistEditDialog> {
+  late final TextEditingController _name;
+  late final TextEditingController _folder;
+
+  @override
+  void initState() {
+    super.initState();
+    _name = TextEditingController(text: widget.profile.displayName);
+    _folder = TextEditingController(text: widget.profile.folderName);
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _folder.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return AlertDialog(
+      scrollable: true,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      title: Text(l10n.t('playlist_edit')),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        TextField(controller: _name, textCapitalization: TextCapitalization.none,
+          decoration: InputDecoration(labelText: l10n.t('playlist_display_name'))),
+        const SizedBox(height: 8),
+        TextField(controller: _folder, textCapitalization: TextCapitalization.none,
+          decoration: InputDecoration(labelText: l10n.t('playlist_folder'))),
+      ]),
+      actions: [
+        TextButton(autofocus: true, onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.t('playlist_cancel'))),
+        FilledButton(onPressed: () => Navigator.of(context).pop((_name.text.trim(), _folder.text.trim())),
+          child: Text(l10n.t('playlist_save'))),
+      ],
     );
   }
 }

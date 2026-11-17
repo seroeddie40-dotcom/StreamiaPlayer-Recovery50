@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/family_pin_service.dart';
+import '../core/localization/app_localizations.dart';
 
 class FamilyParentPinSetupScreen extends StatefulWidget {
   const FamilyParentPinSetupScreen({
@@ -19,6 +20,8 @@ class FamilyParentPinSetupScreen extends StatefulWidget {
 
 class _FamilyParentPinSetupScreenState
     extends State<FamilyParentPinSetupScreen> {
+  String _t(String key) => AppLocalizations.of(context).t(key);
+
   final FamilyPinService _pinService = FamilyPinService();
 
   final TextEditingController _pinController =
@@ -54,7 +57,7 @@ class _FamilyParentPinSetupScreenState
     if (!RegExp(r'^[0-9]{6,10}$').hasMatch(pin)) {
       setState(() {
         _errorMessage =
-            'Die PIN muss aus 6 bis 10 Ziffern bestehen.';
+            _t('family_setup_pin_length');
       });
       return;
     }
@@ -62,7 +65,7 @@ class _FamilyParentPinSetupScreenState
     if (pin != confirmation) {
       setState(() {
         _errorMessage =
-            'Die beiden PIN-Eingaben stimmen nicht überein.';
+            _t('family_setup_pin_mismatch');
       });
       return;
     }
@@ -84,9 +87,9 @@ class _FamilyParentPinSetupScreenState
           _confirmController.clear();
 
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
+            SnackBar(
               content: Text(
-                'Eltern-PIN wurde erfolgreich eingerichtet.',
+                _t('family_setup_pin_saved'),
               ),
             ),
           );
@@ -101,29 +104,28 @@ class _FamilyParentPinSetupScreenState
         case 'already_configured':
           setState(() {
             _errorMessage =
-                'Für dieses Konto existiert bereits eine '
-                'Eltern-PIN.';
+                _t('family_setup_pin_exists');
           });
           break;
 
         case 'invalid_pin':
           setState(() {
             _errorMessage =
-                'Ungültige PIN. Bitte 6 bis 10 Ziffern verwenden.';
+                _t('family_setup_pin_invalid');
           });
           break;
 
         case 'unauthorized':
           setState(() {
             _errorMessage =
-                'Bitte melde dich erneut an.';
+                _t('family_setup_pin_login');
           });
           break;
 
         default:
           setState(() {
             _errorMessage =
-                'Die PIN konnte nicht eingerichtet werden.';
+                _t('family_setup_pin_failed');
           });
       }
     } catch (_) {
@@ -131,8 +133,7 @@ class _FamilyParentPinSetupScreenState
 
       setState(() {
         _errorMessage =
-            'Verbindung zum Server fehlgeschlagen. '
-            'Bitte erneut versuchen.';
+            _t('family_setup_pin_network');
       });
     } finally {
       if (mounted) {
@@ -176,7 +177,7 @@ class _FamilyParentPinSetupScreenState
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Eltern-PIN einrichten'),
+        title: Text(_t('family_setup_pin_setup')),
       ),
       body: SafeArea(
         child: LayoutBuilder(
@@ -203,7 +204,7 @@ class _FamilyParentPinSetupScreenState
                       const SizedBox(height: 16),
 
                       Text(
-                        'Familienprofile schützen',
+                        _t('family_setup_pin_protect'),
                         textAlign: TextAlign.center,
                         style:
                             theme.textTheme.headlineSmall,
@@ -211,18 +212,15 @@ class _FamilyParentPinSetupScreenState
 
                       const SizedBox(height: 12),
 
-                      const Text(
-                        'Lege eine Eltern-PIN fest. '
-                        'Damit schützt du die Verwaltung '
-                        'der Familienprofile und die '
-                        'Freigaben für Kinder.',
+                      Text(
+                        _t('family_setup_pin_intro'),
                         textAlign: TextAlign.center,
                       ),
 
                       const SizedBox(height: 28),
 
                       _buildPinField(
-                        label: 'Neue Eltern-PIN',
+                        label: _t('family_setup_pin_new'),
                         controller: _pinController,
                         focusNode: _pinFocus,
                         textInputAction:
@@ -235,7 +233,7 @@ class _FamilyParentPinSetupScreenState
                       const SizedBox(height: 16),
 
                       _buildPinField(
-                        label: 'Eltern-PIN bestätigen',
+                        label: _t('family_setup_pin_confirm'),
                         controller: _confirmController,
                         focusNode: _confirmFocus,
                         textInputAction:
@@ -254,7 +252,7 @@ class _FamilyParentPinSetupScreenState
                                   _showPin = value ?? false;
                                 });
                               },
-                        title: const Text('PIN anzeigen'),
+                        title: Text(_t('family_setup_pin_show')),
                         controlAffinity:
                             ListTileControlAffinity.leading,
                         contentPadding: EdgeInsets.zero,
@@ -291,18 +289,15 @@ class _FamilyParentPinSetupScreenState
                               ),
                         label: Text(
                           _isSaving
-                              ? 'PIN wird gespeichert ...'
-                              : 'Eltern-PIN speichern',
+                              ? _t('family_setup_pin_saving')
+                              : _t('family_setup_pin_save'),
                         ),
                       ),
 
                       const SizedBox(height: 16),
 
                       Text(
-                        'Bewahre deine PIN sicher auf. '
-                        'Die Zurücksetzung wird später '
-                        'über eine erneute '
-                        'Identitätsprüfung abgesichert.',
+                        _t('family_setup_pin_note'),
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodySmall,
                       ),

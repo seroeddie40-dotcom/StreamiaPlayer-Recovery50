@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../core/localization/app_localizations.dart';
 
 import '../models/family_profile.dart';
 import '../models/playlist_profile.dart';
@@ -28,6 +29,7 @@ class FamilyChildCategoryPermissionsScreen
 
 class _FamilyChildCategoryPermissionsScreenState
     extends State<FamilyChildCategoryPermissionsScreen> {
+  String _t(String key) => AppLocalizations.of(context).t(key);
   final FamilyPinService _pinService =
       FamilyPinService();
 
@@ -92,9 +94,7 @@ class _FamilyChildCategoryPermissionsScreenState
     if (!_isChild) {
       setState(() {
         _loading = false;
-        _errorMessage =
-            'Ordnerfreigaben sind nur für '
-            'Kinderprofile verfügbar.';
+        _errorMessage = 'family_child_only';
       });
       return;
     }
@@ -110,8 +110,7 @@ class _FamilyChildCategoryPermissionsScreenState
 
       if (!authorized) {
         throw const _FamilyPermissionError(
-          'Die Eltern-PIN-Sitzung ist abgelaufen. '
-          'Bitte die Verwaltung erneut entsperren.',
+          'family_session_expired',
         );
       }
 
@@ -147,9 +146,7 @@ class _FamilyChildCategoryPermissionsScreenState
 
       setState(() {
         _loading = false;
-        _errorMessage =
-            'Die Ordnerfreigaben konnten nicht '
-            'geladen werden.';
+        _errorMessage = 'family_rules_load';
       });
     }
   }
@@ -191,9 +188,7 @@ class _FamilyChildCategoryPermissionsScreenState
           FamilyPlaylistSourceType.m3u) {
         setState(() {
           _loading = false;
-          _errorMessage =
-              'M3U-Ordner können hier noch nicht verwaltet werden. '
-              'Vorhandene Sperren bleiben erhalten.';
+          _errorMessage = 'family_m3u_notice';
         });
         return;
       }
@@ -224,10 +219,7 @@ class _FamilyChildCategoryPermissionsScreenState
 
       setState(() {
         _loading = false;
-        _errorMessage =
-            'Die Kategorien konnten nicht '
-            'geladen werden. Bitte die '
-            'Playlistverbindung prüfen.';
+        _errorMessage = 'family_categories_load';
       });
     }
   }
@@ -259,8 +251,7 @@ class _FamilyChildCategoryPermissionsScreenState
 
       if (!authorized) {
         throw const _FamilyPermissionError(
-          'Die Eltern-PIN-Sitzung ist abgelaufen. '
-          'Bitte erneut entsperren.',
+          'family_session_expired',
         );
       }
 
@@ -278,8 +269,7 @@ class _FamilyChildCategoryPermissionsScreenState
 
       if (!success) {
         throw const _FamilyPermissionError(
-          'Die Freigabe wurde vom Server '
-          'nicht bestätigt.',
+          'folder_server_unconfirmed',
         );
       }
 
@@ -303,22 +293,20 @@ class _FamilyChildCategoryPermissionsScreenState
 
       if (!confirmed) {
         _showMessage(
-          'Die Freigabe konnte nicht '
-          'bestätigt werden. Bitte aktualisieren.',
+          'folder_verify_failed',
         );
       } else {
         _showMessage(
           visible
-              ? 'Ordner freigegeben.'
-              : 'Ordner gesperrt.',
+              ? 'folder_allowed'
+              : 'folder_denied',
         );
       }
     } on _FamilyPermissionError catch (error) {
       _showMessage(error.message);
     } catch (_) {
       _showMessage(
-        'Die Änderung konnte nicht '
-        'gespeichert werden.',
+        'folder_save_failed',
       );
     } finally {
       if (mounted) {
@@ -329,12 +317,12 @@ class _FamilyChildCategoryPermissionsScreenState
     }
   }
 
-  void _showMessage(String message) {
+  void _showMessage(String message, {int? count}) {
     if (!mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Text(_t(message).replaceAll('{count}', count?.toString() ?? '')),
       ),
     );
   }
@@ -390,8 +378,8 @@ class _FamilyChildCategoryPermissionsScreenState
       key: ValueKey(_selectedSourceKey),
       initialValue: _selectedSourceKey,
       isExpanded: true,
-      decoration: const InputDecoration(
-        labelText: 'Playlist auswählen',
+      decoration: InputDecoration(
+        labelText: _t('family_choose_playlist'),
         border: OutlineInputBorder(),
         prefixIcon: Icon(Icons.playlist_play),
       ),
@@ -412,34 +400,18 @@ class _FamilyChildCategoryPermissionsScreenState
   }
 
   Widget _buildContentTypeSelector() {
-    return SegmentedButton<FamilyContentType>(
-      segments: const [
-        ButtonSegment(
-          value: FamilyContentType.live,
-          icon: Icon(Icons.live_tv),
-          label: Text('Live-TV'),
-        ),
-        ButtonSegment(
-          value: FamilyContentType.vod,
-          icon: Icon(Icons.movie_outlined),
-          label: Text('Filme'),
-        ),
-        ButtonSegment(
-          value: FamilyContentType.series,
-          icon: Icon(Icons.tv_outlined),
-          label: Text('Serien'),
-        ),
+    return DropdownButtonFormField<FamilyContentType>(
+      initialValue: _selectedContentType,
+      isExpanded: true,
+      decoration: InputDecoration(border: OutlineInputBorder(), isDense: true),
+      items: [
+        DropdownMenuItem(value: FamilyContentType.live, child: Text(_t('nav_live'))),
+        DropdownMenuItem(value: FamilyContentType.vod, child: Text(_t('nav_vod'))),
+        DropdownMenuItem(value: FamilyContentType.series, child: Text(_t('nav_series'))),
       ],
-      selected: {_selectedContentType},
-      onSelectionChanged: _saving || _loading
-          ? null
-          : (selection) {
-              if (selection.isNotEmpty) {
-                _selectContentType(
-                  selection.first,
-                );
-              }
-            },
+      onChanged: _saving || _loading ? null : (value) {
+        if (value != null) _selectContentType(value);
+      },
     );
   }
 
@@ -450,7 +422,7 @@ class _FamilyChildCategoryPermissionsScreenState
     try {
       if (!await _hasParentAuthorization()) {
         throw const _FamilyPermissionError(
-          'Eltern-PIN-Sitzung abgelaufen. Bitte Verwaltung erneut entsperren.',
+          'family_session_expired',
         );
       }
       final chosen = _categories
@@ -466,7 +438,7 @@ class _FamilyChildCategoryPermissionsScreenState
           isVisible: visible,
         );
         if (!ok) throw const _FamilyPermissionError(
-          'Der Server hat eine Änderung nicht bestätigt.',
+          'folder_server_unconfirmed',
         );
         updated++;
       }
@@ -480,7 +452,7 @@ class _FamilyChildCategoryPermissionsScreenState
           ) == visible);
       if (!confirmed) {
         throw const _FamilyPermissionError(
-          'Gespeicherte Ordnersperren stimmen nicht mit der Auswahl überein.',
+          'folder_rules_mismatch',
         );
       }
       if (!mounted) return;
@@ -488,14 +460,14 @@ class _FamilyChildCategoryPermissionsScreenState
         _rules = rules;
         _selectedKeys.clear();
       });
-      _showMessage('$updated Ordner ${visible ? 'entsperrt' : 'gesperrt'}.');
+      _showMessage(visible ? 'folder_bulk_allowed' : 'folder_bulk_denied', count: updated);
     } catch (error) {
       // Einzelne bereits bestätigte Änderungen bleiben gespeichert.
       try {
         final rules = await _profileService.loadCategoryRules(widget.childProfile.id);
         if (mounted) setState(() => _rules = rules);
       } catch (_) {}
-      _showMessage('Änderung unterbrochen ($updated erfolgreich). Bitte erneut prüfen.');
+      _showMessage('folder_bulk_interrupted', count: updated);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -507,18 +479,18 @@ class _FamilyChildCategoryPermissionsScreenState
       return Center(child: SingleChildScrollView(
         padding: const EdgeInsets.all(12),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Text(_errorMessage!, textAlign: TextAlign.center),
+          Text(_t(_errorMessage!), textAlign: TextAlign.center),
           OutlinedButton.icon(
             onPressed: _loadSelectedCategories,
             icon: const Icon(Icons.refresh),
-            label: const Text('Erneut versuchen'),
+            label: Text(_t('family_retry')),
           ),
         ]),
       ));
     }
     final filtered = _categories.where((c) =>
         c.displayName.toLowerCase().contains(_search.toLowerCase())).toList();
-    if (filtered.isEmpty) return const Center(child: Text('Keine Ordner gefunden.'));
+    if (filtered.isEmpty) return Center(child: Text(_t('family_no_folders')));
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 8),
       itemCount: filtered.length,
@@ -538,9 +510,9 @@ class _FamilyChildCategoryPermissionsScreenState
             }
           }),
           title: Text(category.displayName, maxLines: 2, overflow: TextOverflow.ellipsis),
-          subtitle: Text(visible ? 'Sichtbar für das Kind' : 'Für das Kind gesperrt'),
+          subtitle: Text(visible ? _t('family_visible') : _t('family_blocked')),
           secondary: IconButton(
-            tooltip: visible ? 'Diesen Ordner sperren' : 'Diesen Ordner freigeben',
+            tooltip: visible ? _t('family_lock_folder') : _t('family_unlock_folder'),
             onPressed: _saving || _loading
                 ? null
                 : () => _changeVisibility(category, !visible),
@@ -558,22 +530,19 @@ class _FamilyChildCategoryPermissionsScreenState
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Kinderprofil: ${widget.childProfile.displayName}',
+        Text('${_t('family_child')}: ${widget.childProfile.displayName}',
             style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 4),
-        const Text('Alle Ordner sind zunächst sichtbar. Das Schloss rechts zeigt den gespeicherten Status und ändert ihn direkt. Die Kästchen links dienen nur zur Mehrfachauswahl.'),
+        Text(_t('family_lock_hint')),
         const SizedBox(height: 12),
         _buildPlaylistSelector(),
         const SizedBox(height: 12),
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: _buildContentTypeSelector(),
-        ),
+        _buildContentTypeSelector(),
         const SizedBox(height: 12),
         TextField(
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             prefixIcon: Icon(Icons.search),
-            hintText: 'Ordner suchen',
+            hintText: _t('family_search_folder'),
             border: OutlineInputBorder(),
             isDense: true,
           ),
@@ -590,26 +559,26 @@ class _FamilyChildCategoryPermissionsScreenState
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       child: Wrap(spacing: 8, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Text('${_selectedKeys.length} ausgewählt · ${_categories.where((c) => !_isCategoryVisible(c)).length} gesperrt'),
+          Text('${_selectedKeys.length} ${_t('family_selected')} · ${_categories.where((c) => !_isCategoryVisible(c)).length} ${_t('family_blocked_count')}'),
           OutlinedButton(
             onPressed: _saving || _loading ? null : () => setState(() {
               _selectedKeys.addAll(filtered.map((c) => c.categoryKey));
             }),
-            child: const Text('Alle auswählen'),
+            child: Text(_t('family_select_all')),
           ),
           OutlinedButton(
             onPressed: _saving || _loading ? null : () => setState(_selectedKeys.clear),
-            child: const Text('Auswahl löschen'),
+            child: Text(_t('family_clear_selection')),
           ),
           FilledButton.icon(
             onPressed: _saving || _selectedKeys.isEmpty ? null : () => _applyBulk(false),
             icon: const Icon(Icons.lock_outline),
-            label: const Text('Sperren'),
+            label: Text(_t('family_lock')),
           ),
           OutlinedButton.icon(
             onPressed: _saving || _selectedKeys.isEmpty ? null : () => _applyBulk(true),
             icon: const Icon(Icons.lock_open_outlined),
-            label: const Text('Entsperren'),
+            label: Text(_t('family_unlock')),
           ),
         ],
       ),
@@ -620,9 +589,9 @@ class _FamilyChildCategoryPermissionsScreenState
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Kinder-Ordnersperren'),
+        title: Text(_t('family_folder_rules')),
         actions: [IconButton(
-          tooltip: 'Aktualisieren',
+          tooltip: _t('playlist_refresh'),
           onPressed: _loading || _saving ? null : _initialize,
           icon: const Icon(Icons.refresh),
         )],
@@ -632,7 +601,10 @@ class _FamilyChildCategoryPermissionsScreenState
         final controls = SingleChildScrollView(child: _buildControls());
         final list = Column(children: [
           if (_saving) const LinearProgressIndicator(),
-          _buildActions(),
+          ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: constraints.maxHeight * (wide ? 0.30 : 0.19)),
+            child: SingleChildScrollView(child: _buildActions()),
+          ),
           Expanded(child: _buildCategoryList()),
         ]);
         if (wide) {

@@ -1,5 +1,6 @@
 
 import 'package:flutter/material.dart';
+import '../core/localization/app_localizations.dart';
 import 'package:provider/provider.dart';
 import '../providers/family_session_provider.dart';
 import 'package:flutter/services.dart';
@@ -21,6 +22,7 @@ class FamilyProfileManagementScreen extends StatefulWidget {
 
 class _FamilyProfileManagementScreenState
     extends State<FamilyProfileManagementScreen> {
+  String _t(String key) => AppLocalizations.of(context).t(key);
   final FamilyProfileService _profileService =
       FamilyProfileService();
 
@@ -206,7 +208,7 @@ class _FamilyProfileManagementScreenState
                 if (!RegExp(r'^[0-9]{6,12}$').hasMatch(pin)) {
                   updateDialog(() {
                     errorMessage =
-                        'Bitte eine gültige Eltern-PIN eingeben.';
+                        _t('family_pin_valid');
                   });
                   return;
                 }
@@ -240,23 +242,23 @@ class _FamilyProfileManagementScreenState
                     switch (verification.status) {
                       case 'not_configured':
                         errorMessage =
-                            'Die Eltern-PIN ist noch nicht eingerichtet.';
+                            _t('family_pin_not_configured');
                         break;
                       case 'locked':
                         errorMessage =
-                            'Zu viele Fehlversuche. Bitte später erneut versuchen.';
+                            _t('family_pin_locked');
                         break;
                       case 'invalid_pin':
                         errorMessage =
-                            'Die Eltern-PIN ist falsch.';
+                            _t('family_pin_wrong');
                         break;
                       case 'unauthorized':
                         errorMessage =
-                            'Die Anmeldung ist abgelaufen.';
+                            _t('family_pin_expired');
                         break;
                       default:
                         errorMessage =
-                            'PIN-Prüfung fehlgeschlagen.';
+                            _t('family_pin_verify_failed');
                     }
                   });
                 } catch (_) {
@@ -264,7 +266,7 @@ class _FamilyProfileManagementScreenState
 
                   updateDialog(() {
                     errorMessage =
-                        'Serverprüfung fehlgeschlagen.';
+                        _t('family_server_verify_failed');
                   });
                 } finally {
                   if (dialogContext.mounted) {
@@ -290,7 +292,7 @@ class _FamilyProfileManagementScreenState
                             CrossAxisAlignment.stretch,
                         children: [
                           Text(
-                            'Eltern-PIN erforderlich',
+                            _t('family_pin_required'),
                             style: Theme.of(dialogContext)
                                 .textTheme
                                 .titleLarge,
@@ -311,8 +313,8 @@ class _FamilyProfileManagementScreenState
                             inputFormatters: [
                               FilteringTextInputFormatter.digitsOnly,
                             ],
-                            decoration: const InputDecoration(
-                              labelText: 'Eltern-PIN',
+                            decoration: InputDecoration(
+                              labelText: _t('family_parent_pin'),
                               counterText: '',
                               border: OutlineInputBorder(),
                             ),
@@ -321,7 +323,7 @@ class _FamilyProfileManagementScreenState
                           CheckboxListTile(
                             value: showPin,
                             contentPadding: EdgeInsets.zero,
-                            title: const Text('PIN anzeigen'),
+                            title: Text(_t('family_show_pin')),
                             controlAffinity:
                                 ListTileControlAffinity.leading,
                             onChanged: checking
@@ -355,7 +357,7 @@ class _FamilyProfileManagementScreenState
                                     ? null
                                     : () => Navigator.of(dialogContext)
                                         .pop(),
-                                child: const Text('Abbrechen'),
+                                child: Text(_t('playlist_cancel')),
                               ),
                               FilledButton(
                                 onPressed: checking ? null : submit,
@@ -367,7 +369,7 @@ class _FamilyProfileManagementScreenState
                                           strokeWidth: 2,
                                         ),
                                       )
-                                    : const Text('Bestätigen'),
+                                    : Text(_t('family_confirm')),
                               ),
                             ],
                           ),
@@ -426,7 +428,7 @@ class _FamilyProfileManagementScreenState
       setState(() {
         _loading = false;
         _error =
-            'Die Familienprofile konnten nicht geladen werden.';
+            _t('family_profiles_load_failed');
       });
     }
   }
@@ -456,8 +458,8 @@ class _FamilyProfileManagementScreenState
               return AlertDialog(
                 title: Text(
                   firstProfile
-                      ? 'Erstes Erwachsenenprofil'
-                      : 'Profil hinzufügen',
+                      ? _t('family_first_adult')
+                      : _t('family_add'),
                 ),
                 content: SizedBox(
                   width: 360,
@@ -466,11 +468,7 @@ class _FamilyProfileManagementScreenState
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (firstProfile) ...[
-                          const Text(
-                            'Das erste Familienprofil muss '
-                            'ein Erwachsenenprofil sein. '
-                            'Danach können weitere Erwachsenen- '
-                            'und Kinderprofile hinzugefügt werden.',
+                          Text(_t('family_first_adult_hint'),
                           ),
                           const SizedBox(height: 16),
                         ],
@@ -478,35 +476,35 @@ class _FamilyProfileManagementScreenState
                           controller: nameController,
                           autofocus: true,
                           maxLength: 60,
-                          decoration: const InputDecoration(
-                            labelText: 'Profilname',
+                          decoration: InputDecoration(
+                            labelText: _t('family_name'),
                             border: OutlineInputBorder(),
                           ),
                         ),
                         const SizedBox(height: 12),
                         if (firstProfile)
-                          const InputDecorator(
+                          InputDecorator(
                             decoration: InputDecoration(
-                              labelText: 'Profiltyp',
+                              labelText: _t('family_type'),
                               border: OutlineInputBorder(),
                             ),
-                            child: Text('Erwachsenenprofil'),
+                            child: Text(_t('family_adult')),
                           )
                         else
                           DropdownButtonFormField<String>(
                             initialValue: type,
-                            decoration: const InputDecoration(
-                              labelText: 'Profiltyp',
+                            decoration: InputDecoration(
+                              labelText: _t('family_type'),
                               border: OutlineInputBorder(),
                             ),
-                            items: const [
+                            items: [
                               DropdownMenuItem(
                                 value: 'adult',
-                                child: Text('Erwachsenenprofil'),
+                                child: Text(_t('family_adult')),
                               ),
                               DropdownMenuItem(
                                 value: 'child',
-                                child: Text('Kinderprofil'),
+                                child: Text(_t('family_child')),
                               ),
                             ],
                             onChanged: (value) {
@@ -525,7 +523,7 @@ class _FamilyProfileManagementScreenState
                   TextButton(
                     onPressed: () =>
                         Navigator.of(dialogContext).pop(),
-                    child: const Text('Abbrechen'),
+                    child: Text(_t('playlist_cancel')),
                   ),
                   FilledButton(
                     onPressed: () {
@@ -537,7 +535,7 @@ class _FamilyProfileManagementScreenState
                         'type': firstProfile ? 'adult' : type,
                       });
                     },
-                    child: const Text('Erstellen'),
+                    child: Text(_t('family_create')),
                   ),
                 ],
               );
@@ -568,14 +566,12 @@ class _FamilyProfileManagementScreenState
       // Every adult profile uses the shared parent PIN.
       _showMessage(
         input['type'] == 'adult'
-            ? 'Erwachsenenprofil erstellt. '
-                'Es verwendet die gemeinsame Eltern-PIN.'
-            : 'Kinderprofil erstellt. '
-                'Du kannst jetzt die Ordnersperren festlegen.',
+            ? _t('family_adult_created')
+            : _t('family_child_created'),
       );
     } catch (_) {
       _showMessage(
-        'Das Profil konnte nicht erstellt werden.',
+        _t('family_create_failed'),
       );
     } finally {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -605,14 +601,14 @@ class _FamilyProfileManagementScreenState
         context: context,
         builder: (dialogContext) {
           return AlertDialog(
-            title: const Text('Profil umbenennen'),
+            title: Text(_t('family_rename')),
             content: SingleChildScrollView(
               child: TextField(
                 controller: controller,
                 autofocus: true,
                 maxLength: 60,
-                decoration: const InputDecoration(
-                  labelText: 'Profilname',
+                decoration: InputDecoration(
+                  labelText: _t('family_name'),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -621,7 +617,7 @@ class _FamilyProfileManagementScreenState
               TextButton(
                 onPressed: () =>
                     Navigator.of(dialogContext).pop(),
-                child: const Text('Abbrechen'),
+                child: Text(_t('playlist_cancel')),
               ),
               FilledButton(
                 onPressed: () {
@@ -631,7 +627,7 @@ class _FamilyProfileManagementScreenState
                     Navigator.of(dialogContext).pop(name);
                   }
                 },
-                child: const Text('Speichern'),
+                child: Text(_t('playlist_save')),
               ),
             ],
           );
@@ -653,14 +649,14 @@ class _FamilyProfileManagementScreenState
       if (!mounted) return;
 
       if (success) {
-        _showMessage('Profil aktualisiert.');
+        _showMessage(_t('family_feedback_updated'));
         await _loadData();
       } else {
-        _showMessage('Profil nicht gefunden.');
+        _showMessage(_t('family_feedback_missing'));
       }
     } catch (_) {
       _showMessage(
-        'Das Profil konnte nicht geändert werden.',
+        _t('family_feedback_update_failed'),
       );
     } finally {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -698,16 +694,16 @@ class _FamilyProfileManagementScreenState
       if (!mounted) return;
 
       if (success) {
-        _showMessage('Standardprofil geändert.');
+        _showMessage(_t('family_feedback_default_changed'));
         await _loadData();
       } else {
         _showMessage(
-          'Nur Erwachsenenprofile sind zulässig.',
+          _t('family_feedback_default_adult'),
         );
       }
     } catch (_) {
       _showMessage(
-        'Standardprofil konnte nicht geändert werden.',
+        _t('family_feedback_default_failed'),
       );
     } finally {
       if (mounted) {
@@ -732,25 +728,22 @@ class _FamilyProfileManagementScreenState
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Profil löschen?'),
+          title: Text(_t('family_delete_question')),
           content: SingleChildScrollView(
             child: Text(
-              'Möchtest du "${profile.displayName}" '
-              'wirklich löschen? '
-              'Die zugehörigen Profildaten und '
-              'Ordnerfreigaben werden entfernt.',
+              _t('family_delete_details').replaceAll('{name}', profile.displayName),
             ),
           ),
           actions: [
             TextButton(
               onPressed: () =>
                   Navigator.of(dialogContext).pop(false),
-              child: const Text('Abbrechen'),
+              child: Text(_t('playlist_cancel')),
             ),
             FilledButton(
               onPressed: () =>
                   Navigator.of(dialogContext).pop(true),
-              child: const Text('Löschen'),
+              child: Text(_t('family_delete')),
             ),
           ],
         );
@@ -771,16 +764,14 @@ class _FamilyProfileManagementScreenState
       if (!mounted) return;
 
       if (success) {
-        _showMessage('Profil gelöscht.');
+        _showMessage(_t('family_feedback_deleted'));
         await _loadData();
       } else {
-        _showMessage('Profil nicht gefunden.');
+        _showMessage(_t('family_feedback_missing'));
       }
     } catch (_) {
       _showMessage(
-        'Profil konnte nicht gelöscht werden. '
-        'Standardprofile und das letzte '
-        'Erwachsenenprofil sind geschützt.',
+        _t('family_feedback_delete_failed'),
       );
     } finally {
       if (mounted) {
@@ -834,7 +825,7 @@ class _FamilyProfileManagementScreenState
       }
     } catch (_) {
       _showMessage(
-        'Die Ordnersperren konnten nicht geöffnet werden.',
+        _t('family_feedback_rules_failed'),
       );
     }
   }
@@ -854,12 +845,12 @@ class _FamilyProfileManagementScreenState
         ),
         title: Text(profile.displayName),
         subtitle: Text(
-          '${isAdult ? "Erwachsenenprofil" : "Kinderprofil"}'
-          '${profile.isDefault ? " · Standard" : ""}',
+          '${_t(isAdult ? 'family_adult' : 'family_child')}'
+          '${profile.isDefault ? " · ${_t('family_default')}" : ""}',
         ),
         trailing: PopupMenuButton<String>(
           enabled: !_busy,
-          tooltip: 'Profil verwalten',
+          tooltip: _t('family_manage_one'),
           onSelected: (action) {
             switch (action) {
               case 'permissions':
@@ -878,23 +869,23 @@ class _FamilyProfileManagementScreenState
           },
           itemBuilder: (context) => [
             if (!isAdult)
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'permissions',
-                child: Text('Ordnersperren verwalten'),
+                child: Text(_t('family_manage_rules')),
               ),
-            const PopupMenuItem(
+            PopupMenuItem(
               value: 'rename',
-              child: Text('Umbenennen'),
+              child: Text(_t('family_rename')),
             ),
             if (isAdult && !profile.isDefault)
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'default',
-                child: Text('Als Standard festlegen'),
+                child: Text(_t('family_set_default')),
               ),
             if (!profile.isDefault)
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'delete',
-                child: Text('Löschen'),
+                child: Text(_t('family_delete')),
               ),
           ],
         ),
@@ -920,23 +911,18 @@ class _FamilyProfileManagementScreenState
               size: 56,
             ),
             const SizedBox(height: 16),
-            const Text(
-              'Familienverwaltung geschützt',
+            Text(_t('family_management_protected'),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 12),
-            const Text(
-              'Richte deine Eltern-PIN ein oder '
-              'entsperre die Verwaltung mit '
-              'deiner bestehenden PIN.',
+            Text(_t('family_management_unlock_hint'),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
             FilledButton.icon(
               onPressed: _unlockManagement,
               icon: const Icon(Icons.lock_open),
-              label: const Text(
-                'Familienverwaltung entsperren',
+              label: Text(_t('family_management_unlock'),
               ),
             ),
           ],
@@ -966,7 +952,7 @@ class _FamilyProfileManagementScreenState
               const SizedBox(height: 16),
               FilledButton(
                 onPressed: _loadData,
-                child: const Text('Erneut versuchen'),
+                child: Text(_t('family_retry')),
               ),
             ],
           ),
@@ -987,7 +973,7 @@ class _FamilyProfileManagementScreenState
                 WrapCrossAlignment.center,
             children: [
               Text(
-                'Profile: ${_profiles.length} / $_profileLimit',
+                "${_t('family_profile_count')}: ${_profiles.length} / $_profileLimit",
                 style: Theme.of(context)
                     .textTheme
                     .titleMedium,
@@ -1001,8 +987,8 @@ class _FamilyProfileManagementScreenState
                 icon: const Icon(Icons.add),
                 label: Text(
                   _profiles.isEmpty
-                      ? 'Erstes Profil erstellen'
-                      : 'Profil hinzufügen',
+                      ? _t('family_first_profile')
+                      : _t('family_add'),
                 ),
               ),
             ],
@@ -1021,21 +1007,16 @@ class _FamilyProfileManagementScreenState
                           size: 56,
                         ),
                         const SizedBox(height: 16),
-                        const Text(
-                          'Noch keine Familienprofile vorhanden.',
+                        Text(_t('family_no_profiles'),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 8),
-                        const Text(
-                          'Erstelle zuerst ein Erwachsenenprofil.',
+                        Text(_t('family_create_adult_first'),
                           textAlign: TextAlign.center,
                         ),
                         if (_profileLimit <= 0) ...[
                           const SizedBox(height: 12),
-                          const Text(
-                            'Der Server hat derzeit '
-                            'keinen verfügbaren '
-                            'Profilplatz gemeldet.',
+                          Text(_t('family_no_slots'),
                             textAlign: TextAlign.center,
                           ),
                         ],
@@ -1062,21 +1043,21 @@ class _FamilyProfileManagementScreenState
     final isChild = context.watch<FamilySessionProvider>().isChild;
     if (isChild) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Familienprofile verwalten')),
-        body: const Center(
+        appBar: AppBar(title: Text(_t('family_manage'))),
+        body: Center(
           child: Padding(
-            padding: EdgeInsets.all(24),
-            child: Text('Die Familienverwaltung ist nur im Erwachsenenprofil verfügbar.'),
+            padding: const EdgeInsets.all(24),
+            child: Text(_t('family_adult_only')),
           ),
         ),
       );
     }
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Familienprofile verwalten'),
+        title: Text(_t('family_manage')),
         actions: [
           IconButton(
-            tooltip: 'Aktualisieren',
+            tooltip: _t('playlist_refresh'),
             onPressed: _busy || _unlocking
                 ? null
                 : _accessGranted

@@ -1,3 +1,4 @@
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +8,13 @@ import '../core/platform/device_layout.dart';
 import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
 import '../providers/auth_provider.dart';
+import '../providers/content_provider.dart';
+import '../services/playlist_profile_store.dart';
+import '../services/playlist_refresh_schedule.dart';
+import '../services/playlist_switch_service.dart';
+import '../services/recording_service.dart';
+import '../services/download_service.dart';
+import '../providers/family_session_provider.dart';
 import '../providers/theme_provider.dart';
 import 'live_tv_screen.dart';
 import 'downloads_screen.dart';
@@ -24,7 +32,73 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
+class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingObserver {
+  Timer? _refreshTimer;
+  bool _refreshRunning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _refreshTimer = Timer.periodic(const Duration(minutes: 1), (_) => _checkRefresh());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkRefresh());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkRefresh());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  bool _canRefresh() => mounted &&
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+      ModalRoute.of(context)?.isCurrent == true &&
+      context.read<AuthProvider>().hasAccess &&
+      !RecordingService.isActive && !DownloadService.hasActiveOperations;
+
+  Future<void> _checkRefresh() async {
+    if (_refreshRunning || !_canRefresh()) return;
+    _refreshRunning = true;
+    try {
+      final content = context.read<ContentProvider>();
+      if (!content.isLoaded) return;
+      final key = content.sourceKey;
+      final profiles = await PlaylistProfileStore().load();
+      for (final profile in profiles) {
+        if (!profile.isActive || profile.sourceKey != key) continue;
+        bool needsRepair() => [
+          content.channels.map((item) => item.categoryKey),
+          content.vodItems.map((item) => item.categoryKey),
+          content.series.map((item) => item.categoryKey),
+        ].any(PlaylistRefreshSchedule.needsLegacyRepair);
+        if (await PlaylistRefreshSchedule.hours(key) == 0) return;
+        if (!await PlaylistRefreshSchedule.automaticAttemptAllowed(key)) return;
+        final repair = !await PlaylistRefreshSchedule.repairAttempted(key) && needsRepair();
+        if (!repair && !await PlaylistRefreshSchedule.due(key)) return;
+        bool allowed() => _canRefresh() && content.sourceKey == key;
+        if (!allowed()) return;
+        final refreshed = await PlaylistSwitchService().refresh(profile, content,
+            mayPublish: allowed, repair: repair);
+        if (repair && refreshed && !needsRepair()) {
+          await PlaylistRefreshSchedule.markRepairAttempted(key);
+        }
+        return;
+      }
+    } catch (error) {
+      debugPrint('Scheduled playlist refresh failed: ${error.runtimeType}');
+    } finally {
+      _refreshRunning = false;
+    }
+  }
+
   String _label(
     BuildContext context,
     String de,
@@ -145,6 +219,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Icons.fiber_manual_record_rounded,
         _recordingsLabel(context),
         () => _open(const RecordingsScreen()),
+      ),
+      _HomeEntry(
+        Icons.people_alt_outlined,
+        l10n.t('nav_profiles'),
+        () => context.read<FamilySessionProvider>().clearSession(),
       ),
     ];
 
