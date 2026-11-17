@@ -282,6 +282,7 @@ class _LegalDisclaimerScreenState
     return Scaffold(
       appBar: AppBar(
         title: Text(t[0]),
+        titleSpacing: isTv ? 56 : null,
         automaticallyImplyLeading: !widget.requireAcceptance,
       ),
       body: SafeArea(
@@ -290,7 +291,7 @@ class _LegalDisclaimerScreenState
             constraints: BoxConstraints(maxWidth: isTv ? 1050 : 720),
             child: Padding(
               padding: EdgeInsets.symmetric(
-                horizontal: isTv ? 28 : 16,
+                horizontal: isTv ? 56 : 16,
                 vertical: isTv ? 12 : 8,
               ),
               child: Column(

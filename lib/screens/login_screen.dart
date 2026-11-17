@@ -5,8 +5,7 @@ import '../providers/auth_provider.dart';
 import '../providers/locale_provider.dart';
 import '../core/theme/app_theme.dart';
 import '../core/platform/device_layout.dart';
-import '../core/localization/app_localizations.dart';
-import '../widgets/tv_text_keyboard.dart';
+import '../widgets/voice_input_field.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -18,6 +17,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _passwordFocus = FocusNode();
   final _formScrollController = ScrollController();
 
   bool _createAccount = false;
@@ -289,6 +289,7 @@ class _LoginScreenState extends State<LoginScreen> {
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _passwordFocus.dispose();
     _formScrollController.dispose();
     super.dispose();
   }
@@ -438,84 +439,36 @@ class _LoginScreenState extends State<LoginScreen> {
 
                       SizedBox(height: isTv ? 12 : 28),
 
-                      TextField(
+                      VoiceInputField(
                         autofocus: isTv,
                         controller: _email,
-                        scrollPadding: const EdgeInsets.only(bottom: 140),
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        textCapitalization: TextCapitalization.none,
+                        appLanguageCode: languageCode,
+                        credentialMode: true,
                         keyboardType: TextInputType.emailAddress,
                         textDirection: TextDirection.ltr,
-                        autofillHints: const [
-                          AutofillHints.email,
-                        ],
-                        style: TextStyle(
-                          color: foregroundColor,
-                        ),
-                        decoration: _decoration(
-                          _t(languageCode, 'email'),
-                          Icons.email_outlined,
-                          surfaceColor,
-                          foregroundColor,
-                        ).copyWith(suffixIcon: isTv ? IconButton(
-                          tooltip: AppLocalizations.of(context).t('tv_keyboard_title'),
-                          icon: const Icon(Icons.keyboard_alt_outlined),
-                          onPressed: () => TvTextKeyboard.show(context,
-                            controller: _email, languageCode: languageCode),
-                        ) : null),
+                        onSubmitted: (_) => _passwordFocus.requestFocus(),
+                        style: TextStyle(color: foregroundColor),
+                        decoration: _decoration(_t(languageCode, 'email'), Icons.email_outlined,
+                          surfaceColor, foregroundColor),
                       ),
-
                       const SizedBox(height: 14),
-
-                      TextField(
+                      VoiceInputField(
                         controller: _password,
-                        scrollPadding: const EdgeInsets.only(bottom: 140),
-                        autocorrect: false,
-                        enableSuggestions: false,
-                        textCapitalization: TextCapitalization.none,
+                        appLanguageCode: languageCode,
+                        focusNode: _passwordFocus,
+                        credentialMode: true,
+                        secret: true,
                         keyboardType: TextInputType.visiblePassword,
                         obscureText: !_showPassword,
                         textDirection: TextDirection.ltr,
-                        autofillHints: const [
-                          AutofillHints.password,
-                        ],
-                        style: TextStyle(
-                          color: foregroundColor,
-                        ),
-                        decoration: _decoration(
-                          _t(languageCode, 'password'),
-                          Icons.lock_outline,
-                          surfaceColor,
-                          foregroundColor,
-                        ).copyWith(
-                          suffixIcon: Row(mainAxisSize: MainAxisSize.min, children: [
-                            if (isTv) IconButton(
-                              tooltip: AppLocalizations.of(context).t('tv_keyboard_title'),
-                              icon: const Icon(Icons.keyboard_alt_outlined),
-                              onPressed: () => TvTextKeyboard.show(context,
-                                controller: _password, languageCode: languageCode, secret: true),
-                            ),
-                            IconButton(
-                            tooltip: _t(
-                              languageCode,
-                              _showPassword
-                                  ? 'hidePassword'
-                                  : 'showPassword',
-                            ),
-                            onPressed: () {
-                              setState(() {
-                                _showPassword = !_showPassword;
-                              });
-                            },
-                            icon: Icon(
-                              _showPassword
-                                  ? Icons.visibility_off
-                                  : Icons.visibility,
-                              color: hintColor,
-                            ),
-                          ), ]),
-                        ),
+                        textInputAction: TextInputAction.done,
+                        style: TextStyle(color: foregroundColor),
+                        decoration: _decoration(_t(languageCode, 'password'), Icons.lock_outline,
+                          surfaceColor, foregroundColor).copyWith(suffixIcon: IconButton(
+                            tooltip: _t(languageCode, _showPassword ? 'hidePassword' : 'showPassword'),
+                            onPressed: () => setState(() => _showPassword = !_showPassword),
+                            icon: Icon(_showPassword ? Icons.visibility_off : Icons.visibility, color: hintColor),
+                          )),
                       ),
 
                       if (auth.emailConfirmationSuccess) ...[

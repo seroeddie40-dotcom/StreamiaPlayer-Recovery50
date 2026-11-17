@@ -15,6 +15,15 @@ class LanguageSelectionScreen extends StatefulWidget {
 
 class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
   String? _focusedLanguage;
+  late final Map<String, FocusNode> _nodes = {
+    for (final language in _languages) language.$1: FocusNode(debugLabel: language.$1),
+  };
+
+  @override
+  void dispose() {
+    for (final node in _nodes.values) { node.dispose(); }
+    super.dispose();
+  }
 
   static const _languages = [
     ('de', 'Deutsch', '🇩🇪'),
@@ -50,7 +59,7 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
               final tv = DeviceLayout.isTelevision;
               final shortTv = tv && constraints.maxHeight < 440;
               final horizontalPadding =
-                  tv ? 32.0 : (isCompact ? 16.0 : 24.0);
+                  tv ? 56.0 : (isCompact ? 16.0 : 24.0);
 
               final availableWidth =
                   constraints.maxWidth -
@@ -63,7 +72,9 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
               final itemWidth =
                   (availableWidth - itemSpacing * (columns - 1)) / columns;
 
-              return SingleChildScrollView(
+              return FocusTraversalGroup(
+                policy: ReadingOrderTraversalPolicy(),
+                child: SingleChildScrollView(
                 padding: EdgeInsets.symmetric(
                   horizontal: horizontalPadding,
                   vertical: shortTv ? 12 : 20,
@@ -127,6 +138,7 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
                               borderRadius:
                                   BorderRadius.circular(16),
                               child: InkWell(
+                                focusNode: _nodes[languageCode],
                                 autofocus: DeviceLayout.isTelevision && languageCode == selectedLanguage,
                                 onFocusChange: (focused) {
                                   if (!DeviceLayout.isTelevision || !mounted) return;
@@ -166,9 +178,7 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
                                       color: DeviceLayout.isTelevision && _focusedLanguage == languageCode
                                           ? const Color(0xFF00E5FF)
                                           : Colors.white.withOpacity(isSelected ? 1 : 0.4),
-                                      width: DeviceLayout.isTelevision && _focusedLanguage == languageCode
-                                          ? 3
-                                          : (isSelected ? 2 : 1),
+                                      width: DeviceLayout.isTelevision ? 3 : (isSelected ? 2 : 1),
                                     ),
                                   ),
                                   child: Column(
@@ -211,6 +221,7 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
                       SizedBox(height: shortTv ? 8 : 20),
                     ],
                   ),
+                ),
                 ),
               );
             },
