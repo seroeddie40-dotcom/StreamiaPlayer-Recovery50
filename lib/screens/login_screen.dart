@@ -6,6 +6,7 @@ import '../providers/locale_provider.dart';
 import '../core/theme/app_theme.dart';
 import '../core/platform/device_layout.dart';
 import '../widgets/voice_input_field.dart';
+import 'splash_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -383,11 +384,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final brand = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-                      Icon(
-                        Icons.play_circle_filled_rounded,
-                        color: AppTheme.electricBlue,
-                        size: isTv ? 100 : 72,
-                      ),
+                      StreamiaBrandLogo(size: isTv ? 100 : 72),
 
                       const SizedBox(height: 12),
 
@@ -630,17 +627,19 @@ class _LoginScreenState extends State<LoginScreen> {
           child: LayoutBuilder(
             builder: (context, constraints) {
               final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
-              final split = isTv;
+              final split = isTv && !keyboardVisible;
               final scrollForm = SingleChildScrollView(
                 controller: _formScrollController,
-                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                keyboardDismissBehavior: isTv
+                    ? ScrollViewKeyboardDismissBehavior.manual
+                    : ScrollViewKeyboardDismissBehavior.onDrag,
                 padding: EdgeInsets.fromLTRB(28, isTv ? 10 : 20, 28,
                     keyboardVisible ? 28 : 20),
                 child: _showConfirmation ? confirmation : Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    if (!split) brand,
+                    if (!isTv) brand,
                     form,
                   ],
                 ),
@@ -649,21 +648,21 @@ class _LoginScreenState extends State<LoginScreen> {
                 child: Center(
                   child: ConstrainedBox(
                     constraints: BoxConstraints(maxWidth: split ? 1100 : 440),
-                    child: split ? Row(
+                    child: isTv ? Row(
                       textDirection: TextDirection.ltr,
                       children: [
-                          Flexible(
-                            flex: keyboardVisible ? 0 : 4,
-                            child: keyboardVisible ? const SizedBox.shrink() : Center(child: SingleChildScrollView(
+                          if (split) Flexible(
+                            flex: 4,
+                            child: Center(child: SingleChildScrollView(
                               padding: const EdgeInsets.all(20),
                               child: brand,
                             )),
                           ),
-                          VerticalDivider(
-                            width: keyboardVisible ? 0 : 1,
+                          if (split) VerticalDivider(
+                            width: 1,
                             color: secondaryColor.withValues(alpha: 0.25),
                           ),
-                        Expanded(flex: 6, child: Center(child: scrollForm)),
+                        Expanded(key: const ValueKey('tv-login-form'), flex: 6, child: Center(child: scrollForm)),
                       ],
                     ) : scrollForm,
                   ),
