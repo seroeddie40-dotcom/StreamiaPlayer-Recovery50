@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -117,8 +116,6 @@ Future<Widget> _initializeApp() async {
   ).timeout(
     const Duration(seconds: 3),
   );
-
-  MediaKit.ensureInitialized();
 
   final prefs = await SharedPreferences.getInstance().timeout(
     const Duration(seconds: 5),
