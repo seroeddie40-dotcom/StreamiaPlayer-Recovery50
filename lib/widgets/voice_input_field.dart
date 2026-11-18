@@ -451,9 +451,26 @@ class _NativeTvInputDialogState extends State<_NativeTvInputDialog> {
     final technical = field.credentialMode || field.secret ||
         field.keyboardType == TextInputType.url ||
         field.keyboardType == TextInputType.emailAddress;
+    // The dialog is above the login/setup route, so its own insets must
+    // adapt when the native keyboard reduces the available TV viewport.
+    final media = MediaQuery.of(context);
+    final availableHeight = media.size.height - media.viewInsets.vertical
+        - media.padding.vertical;
+    final compact = availableHeight < 340;
     return AlertDialog(
       scrollable: true,
-      title: Text(field.decoration.labelText ?? l10n.t('tv_keyboard_input')),
+      insetPadding: EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: compact ? 4 : 16,
+      ),
+      titlePadding: EdgeInsets.fromLTRB(16, compact ? 8 : 16, 16, 0),
+      contentPadding: EdgeInsets.fromLTRB(16, compact ? 6 : 16, 16, 4),
+      actionsPadding: EdgeInsets.fromLTRB(8, 0, 8, compact ? 4 : 8),
+      title: Text(
+        field.decoration.labelText ?? l10n.t('tv_keyboard_input'),
+        maxLines: compact ? 1 : 2,
+        overflow: TextOverflow.ellipsis,
+      ),
       content: SizedBox(
         width: 480,
         child: TextField(
@@ -471,7 +488,13 @@ class _NativeTvInputDialogState extends State<_NativeTvInputDialog> {
           smartQuotesType: technical ? SmartQuotesType.disabled : null,
           textInputAction: TextInputAction.done,
           onSubmitted: (_) => _confirm(),
-          decoration: const InputDecoration(border: OutlineInputBorder()),
+          decoration: InputDecoration(
+            border: const OutlineInputBorder(),
+            isDense: compact,
+            contentPadding: compact
+                ? const EdgeInsets.symmetric(horizontal: 12, vertical: 8)
+                : null,
+          ),
         ),
       ),
       actions: [
