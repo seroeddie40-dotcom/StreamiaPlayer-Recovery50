@@ -30,6 +30,7 @@ void main() {
     WidgetTester tester,
     TextEditingController controller, {
     bool urlMode = false,
+    String languageCode = 'de',
   }) async {
     final translations = AppLocalizations(const Locale('de'));
 
@@ -56,7 +57,7 @@ void main() {
                 onPressed: () => TvTextKeyboard.show(
                   context,
                   controller: controller,
-                  languageCode: 'de',
+                  languageCode: languageCode,
                   urlMode: urlMode,
                 ),
                 child: const Text('Open'),
@@ -492,4 +493,36 @@ void main() {
       );
     },
   );
+
+  // Keep German UI translations while varying the keyboard language itself.
+  for (final entry in const <String, String>{
+    'de': 'qwertzuiopasdfghjklyxcvbnm',
+    'fr': 'azertyuiopqsdfghjklmwxcvbn',
+    'en': 'qwertyuiopasdfghjklzxcvbnm',
+  }.entries) {
+    testWidgets('Fallback keyboard preserves ${entry.key} letter order',
+        (tester) async {
+      final controller = TextEditingController();
+      addTearDown(controller.dispose);
+      await launch(tester, controller, languageCode: entry.key);
+
+      final letters = entry.value.split('');
+      double previousOrder = -1;
+      for (final letter in letters) {
+        final key = find.widgetWithText(OutlinedButton, letter);
+        expect(key, findsOneWidget, reason: 'Missing key $letter');
+        final order = tester.widget<FocusTraversalOrder>(find.ancestor(
+          of: key,
+          matching: find.byType(FocusTraversalOrder),
+        ).first).order as NumericFocusOrder;
+        expect(order.order, greaterThan(previousOrder),
+            reason: 'Incorrect key order for $letter');
+        previousOrder = order.order;
+      }
+      await tester.tap(find.text('Abbrechen'));
+      await tester.pumpAndSettle();
+      expect(controller.text, isEmpty);
+    });
+  }
+
 }
