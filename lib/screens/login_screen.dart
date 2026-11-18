@@ -467,7 +467,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           surfaceColor, foregroundColor).copyWith(suffixIcon: IconButton(
                             tooltip: _t(languageCode, _showPassword ? 'hidePassword' : 'showPassword'),
                             onPressed: () => setState(() => _showPassword = !_showPassword),
-                            icon: Icon(_showPassword ? Icons.visibility_off : Icons.visibility, color: hintColor),
+                            icon: Icon(_showPassword ? Icons.visibility_off : Icons.visibility, color: secondaryColor),
                           )),
                       ),
 
@@ -558,8 +558,10 @@ class _LoginScreenState extends State<LoginScreen> {
                               },
                         style: FilledButton.styleFrom(
                           backgroundColor: AppTheme.electricBlue,
-                          foregroundColor: Colors.white,
-                          overlayColor: Colors.white24,
+                          foregroundColor: const Color(0xFF071827),
+                          disabledForegroundColor: Colors.white70,
+                          disabledBackgroundColor: const Color(0xFF34445B),
+                          overlayColor: Colors.black12,
                           padding: const EdgeInsets.symmetric(
                             vertical: 16,
                             horizontal: 12,
@@ -571,7 +573,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 width: 20,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white,
+                                  color: Colors.white70,
                                 ),
                               )
                             : Text(
@@ -580,6 +582,11 @@ class _LoginScreenState extends State<LoginScreen> {
                                   _createAccount
                                       ? 'registerButton'
                                       : 'signInButton',
+                                ),
+                                style: TextStyle(
+                                  color: auth.isBusy ? Colors.white70 : const Color(0xFF071827),
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
                                 ),
                                 textAlign: TextAlign.center,
                               ),
