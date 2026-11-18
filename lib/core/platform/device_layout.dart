@@ -1,9 +1,10 @@
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Android platform signals determine the initial layout before runApp.
-/// Screen width alone must not classify tablets as televisions.
+/// Detects the device category using native Android platform signals.
+/// Screen size alone must not classify tablets as televisions.
 class DeviceLayout {
   DeviceLayout._();
 
@@ -21,13 +22,22 @@ class DeviceLayout {
     }
 
     try {
-      isTelevision =
-          await _channel.invokeMethod<bool>('isTelevision') ??
-              false;
+      final result = await _channel
+          .invokeMethod<bool>('isTelevision')
+          .timeout(const Duration(seconds: 2));
+
+      isTelevision = result ?? false;
     } on MissingPluginException {
       isTelevision = false;
     } on PlatformException {
       isTelevision = false;
+    } on TimeoutException {
+      isTelevision = false;
     }
+
+    debugPrint(
+      'Streamia device layout: '
+      '${isTelevision ? "TV" : "Mobile"}',
+    );
   }
 }
