@@ -125,7 +125,7 @@ void main() {
   );
 
   testWidgets(
-    'Lowercase and uppercase work without shift',
+    'Lowercase and uppercase work with shift',
     (tester) async {
       final controller = TextEditingController();
       addTearDown(controller.dispose);
@@ -135,7 +135,13 @@ void main() {
       await tester.tap(find.text('a').first);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('A').first);
+      expect(find.widgetWithText(OutlinedButton, 'A'), findsNothing);
+      await tester.ensureVisible(find.text('abc'));
+      await tester.tap(find.text('abc'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(OutlinedButton, 'a'), findsNothing);
+      await tester.ensureVisible(find.text('A'));
+      await tester.tap(find.text('A'));
       await tester.pumpAndSettle();
 
       await tester.tap(find.text('Übernehmen'));
@@ -191,8 +197,11 @@ void main() {
 
       await launch(tester, controller);
 
-      final lastKey =
-          find.widgetWithText(OutlinedButton, '#');
+      expect(find.widgetWithText(OutlinedButton, '#'), findsNothing);
+      await tester.ensureVisible(find.text('123#!'));
+      await tester.tap(find.text('123#!'));
+      await tester.pumpAndSettle();
+      final lastKey = find.widgetWithText(OutlinedButton, '`');
 
       expect(lastKey, findsOneWidget);
 
@@ -219,6 +228,10 @@ void main() {
       ).position;
 
       expect(scrollPosition.pixels, greaterThan(0));
+      final viewport = tester.getRect(scrollable);
+      final keyRect = tester.getRect(lastKey);
+      expect(keyRect.top, greaterThanOrEqualTo(viewport.top - 1));
+      expect(keyRect.bottom, lessThanOrEqualTo(viewport.bottom + 1));
     },
   );
 
@@ -313,15 +326,15 @@ void main() {
 
       final lower =
           find.widgetWithText(OutlinedButton, 'a');
-      final upper =
-          find.widgetWithText(OutlinedButton, 'A');
+      final shift =
+          find.widgetWithText(OutlinedButton, 'abc');
       final cancel =
           find.widgetWithText(TextButton, 'Abbrechen');
       final confirm =
           find.widgetWithText(FilledButton, 'Übernehmen');
 
       expect(lower, findsOneWidget);
-      expect(upper, findsOneWidget);
+      expect(shift, findsOneWidget);
       expect(cancel, findsOneWidget);
       expect(confirm, findsOneWidget);
 
@@ -337,16 +350,16 @@ void main() {
       }
 
       final lowerOrder = orderOf(lower);
-      final upperOrder = orderOf(upper);
+      final shiftOrder = orderOf(shift);
       final cancelOrder = orderOf(cancel);
       final confirmOrder = orderOf(confirm);
 
       expect(
         lowerOrder.order,
-        lessThan(upperOrder.order),
+        lessThan(shiftOrder.order),
       );
       expect(
-        upperOrder.order,
+        shiftOrder.order,
         lessThan(cancelOrder.order),
       );
       expect(
