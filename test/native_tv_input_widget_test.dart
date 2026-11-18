@@ -52,7 +52,9 @@ void main() {
       supportedLocales: AppLocalizations.supportedLocales,
       localizationsDelegates: [
         _LoadedDelegate(translations),
-        ...AppLocalizations.localizationsDelegates.skip(1),
+        ...AppLocalizations.localizationsDelegates
+            .whereType<LocalizationsDelegate<dynamic>>()
+            .skip(1),
       ],
       home: Scaffold(body: Center(child: VoiceInputField(
         controller: controller,
