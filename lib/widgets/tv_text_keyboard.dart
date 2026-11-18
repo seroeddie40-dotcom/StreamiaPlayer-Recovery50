@@ -19,26 +19,26 @@ class TvTextKeyboard {
     bool urlMode = false,
     VoidCallback? onConfirmed,
   }) async {
-    await showDialog<void>(
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => _TvKeyboardDialog(
         controller: controller,
         languageCode: languageCode,
         secret: secret,
         urlMode: urlMode && !secret,
-        onConfirmed: onConfirmed,
+
       ),
     );
+    if (confirmed == true && context.mounted) onConfirmed?.call();
   }
 }
 
 class _TvKeyboardDialog extends StatefulWidget {
-  const _TvKeyboardDialog({required this.controller, required this.languageCode, required this.secret, required this.urlMode, this.onConfirmed});
+  const _TvKeyboardDialog({required this.controller, required this.languageCode, required this.secret, required this.urlMode});
   final TextEditingController controller;
   final String languageCode;
   final bool secret;
   final bool urlMode;
-  final VoidCallback? onConfirmed;
 
   @override
   State<_TvKeyboardDialog> createState() => _TvKeyboardDialogState();
@@ -104,9 +104,7 @@ class _TvKeyboardDialogState extends State<_TvKeyboardDialog> {
       text: _draft.text,
       selection: TextSelection.collapsed(offset: _draft.text.length),
     );
-    Navigator.of(context).pop();
-    // Run after closing the modal so focus is not trapped in the dialog.
-    widget.onConfirmed?.call();
+    Navigator.of(context).pop(true);
   }
 
   @override
@@ -240,9 +238,9 @@ class _TvKeyboardDialogState extends State<_TvKeyboardDialog> {
                       _key(letters[i].toUpperCase(), letters[i].toUpperCase(), order: (i * 2 + 1).toDouble()),
                   ],
                   for (var i = 0; i < digits.length; i++) _key(digits[i], digits[i], order: 100 + i.toDouble()),
-                  for (var i = 0; i < const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#'].length; i++)
-                    _key(const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#'][i],
-                         const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#'][i], order: 120 + i.toDouble()),
+                  for (var i = 0; i < const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#', '!', r'$', '*', '(', ')', '[', ']', '{', '}', ';', ',', '~', '^', '|', '<', '>', '"', "'", r'\', '`'].length; i++)
+                    _key(const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#', '!', r'$', '*', '(', ')', '[', ']', '{', '}', ';', ',', '~', '^', '|', '<', '>', '"', "'", r'\', '`'][i],
+                         const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#', '!', r'$', '*', '(', ')', '[', ']', '{', '}', ';', ',', '~', '^', '|', '<', '>', '"', "'", r'\', '`'][i], order: 120 + i.toDouble()),
                 ]),
                 const SizedBox(height: 6),
                 Wrap(spacing: 5, runSpacing: 5, alignment: WrapAlignment.center, children: [
