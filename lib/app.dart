@@ -25,7 +25,6 @@ import 'screens/language_selection_screen.dart';
 import 'screens/setup_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/paywall_screen.dart';
-import 'screens/splash_screen.dart';
 import 'screens/legal_disclaimer_screen.dart';
 
 class StreamiaApp extends StatelessWidget {
@@ -572,31 +571,10 @@ class StartupGate extends StatefulWidget {
 }
 
 class _StartupGateState extends State<StartupGate> {
-  bool _splashFinished = false;
   bool _legalDialogOpen = false;
 
   @override
-  void initState() {
-    super.initState();
-
-    Timer(
-      const Duration(milliseconds: 350),
-      () {
-        if (!mounted) return;
-
-        setState(() {
-          _splashFinished = true;
-        });
-      },
-    );
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (!_splashFinished) {
-      return const SplashScreen();
-    }
-
     if (!widget.localeProvider.hasSelectedLanguage) {
       return widget.destination;
     }
@@ -633,7 +611,7 @@ class _StartupGateState extends State<StartupGate> {
         );
       }
 
-      return const SplashScreen();
+      return const Scaffold(body: SizedBox.expand());
     }
 
     return widget.destination;
