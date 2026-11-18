@@ -185,9 +185,14 @@ class _TvKeyboardDialogState extends State<_TvKeyboardDialog> {
     String tr(String key) => l10n.t(key);
     final lang = widget.languageCode.toLowerCase().replaceAll('_', '-').split('-').first;
     final nativeScript = lang == 'ru' || lang == 'ar';
+    final latinAlphabet = switch (lang) {
+      'de' => 'qwertzuiopasdfghjklyxcvbnm',
+      'fr' => 'azertyuiopqsdfghjklmwxcvbn',
+      _ => 'qwertyuiopasdfghjklzxcvbnm',
+    };
     final alphabet = nativeScript && !_latin
         ? TvTextKeyboard._extraLetters[lang]!
-        : 'qwertyuiopasdfghjklzxcvbnm${nativeScript ? '' : TvTextKeyboard._extraLetters[lang] ?? ''}';
+        : '$latinAlphabet${nativeScript ? '' : TvTextKeyboard._extraLetters[lang] ?? ''}';
     final letters = alphabet.split('');
     final symbols = ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#', '!', r'$', '*', '(', ')', '[', ']', '{', '}', ';', ',', '~', '^', '|', '<', '>', '"', "'", r'\', '`'];
     final keys = [...'1234567890'.split(''), ...(_symbols ? symbols : letters.map((letter) {
@@ -333,9 +338,17 @@ class _TvKeyboardKeyState extends State<_TvKeyboardKey> {
           autofocus: widget.autofocus,
           style: OutlinedButton.styleFrom(
             padding: EdgeInsets.zero,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            foregroundColor: Colors.white,
+            backgroundColor: const Color(0xFF25344E),
             minimumSize: Size.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             visualDensity: VisualDensity.compact,
+          ).copyWith(
+            backgroundColor: WidgetStateProperty.resolveWith((states) =>
+                states.contains(WidgetState.focused)
+                    ? const Color(0xFF087EAA)
+                    : const Color(0xFF25344E)),
           ),
           onPressed: widget.onPressed,
           child: Text(widget.label, style: const TextStyle(fontSize: 14)),
