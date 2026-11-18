@@ -30,6 +30,7 @@ class AuthProvider extends ChangeNotifier {
   bool _checkingConfirmation = true;
   Future<void>? _sessionInspection;
   Future<void>? _accessRefresh;
+  String? _checkedUserId;
   bool _disposed = false;
   bool _emailConfirmationSuccess = false;
   String? _error;
@@ -47,7 +48,9 @@ class AuthProvider extends ChangeNotifier {
             event.event == AuthChangeEvent.initialSession) {
           // Single-flight: the constructor and Supabase may report the same
           // restored session. Never start two competing registration RPCs.
-          unawaited(_inspectConfirmationAndAccess());
+          if (!_busy && (event.session?.user.id != _checkedUserId || !_accessChecked || _error != null)) {
+            unawaited(_inspectConfirmationAndAccess());
+          }
         }
         _notify();
       });
@@ -134,6 +137,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   void _clearAccess() {
+    _checkedUserId = null;
     _deviceId = null;
     _deviceStatus = null;
     _activeDevices = const [];
@@ -185,7 +189,7 @@ class AuthProvider extends ChangeNotifier {
     final random = Random.secure();
     final bytes = List<int>.generate(32, (_) => random.nextInt(256));
     _installationId = base64Url.encode(bytes).replaceAll('=', '');
-    await prefs.setString(_installKey, _installationId!);
+    await prefs.setString(_installKey, _installationId!).timeout(const Duration(seconds: 5));
     return _installationId!;
   }
 
@@ -255,7 +259,10 @@ class AuthProvider extends ChangeNotifier {
     final userId = client.auth.currentUser!.id;
     final clock = Stopwatch()..start();
     const budget = Duration(seconds: 15);
-    Future<T> step<T>(Future<T> Function() action) async {
+    String stage = 'initial';
+    Future<T> step<T>(String label, Future<T> Function() action) async {
+      stage = label;
+      debugPrint('Streamia access: $stage started (${clock.elapsedMilliseconds} ms)');
       final remaining = budget - clock.elapsed;
       if (remaining <= Duration.zero) throw TimeoutException('Access verification');
       if (_disposed || client.auth.currentUser?.id != userId) {
@@ -265,6 +272,7 @@ class AuthProvider extends ChangeNotifier {
       if (_disposed || client.auth.currentUser?.id != userId) {
         throw StateError('Session changed');
       }
+      debugPrint('Streamia access: $stage completed (${clock.elapsedMilliseconds} ms)');
       return result;
     }
     _accessChecked = false;
@@ -277,7 +285,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       // Check account access before registering the device. The server is the
       // authority for trial eligibility, expiration, and administrative grants.
-      final initialAccess = _firstRow(await step(() async => await client.rpc('get_my_access_status')));
+      final initialAccess = _firstRow(await step('account_status', () async => await client.rpc('get_my_access_status')));
       if (initialAccess == null) {
         throw StateError('Die Kontoberechtigung konnte nicht ermittelt werden.');
       }
@@ -286,21 +294,24 @@ class AuthProvider extends ChangeNotifier {
         // must never grant access locally or prevent an expired user from
         // reaching the normal payment screen.
         try {
-          await step(() async => await client.rpc('start_streamia_trial'));
+          await step('trial', () async => await client.rpc('start_streamia_trial'));
         } on PostgrestException {
           // The server may reject repeat trials, expired trials, or other
           // ineligible accounts. Re-read authoritative access below.
         }
       }
 
-      final installationId = await step(_getInstallationId);
-      final deviceName = await step(_readDeviceName);
+      final installationId = await step('device_identity', _getInstallationId);
+      final deviceName = await step('device_name', () => _readDeviceName().timeout(
+        const Duration(seconds: 1),
+        onTimeout: () => kIsWeb ? 'Web-Gerät' : defaultTargetPlatform.name,
+      ));
       final platform = kIsWeb ? 'web' : switch (defaultTargetPlatform) {
         TargetPlatform.android => 'android',
         TargetPlatform.iOS => 'ios',
         _ => 'unknown',
       };
-      final registered = await step(() async => await client.rpc('register_my_device', params: {
+      final registered = await step('device_registration', () async => await client.rpc('register_my_device', params: {
         'p_installation_id': installationId,
         'p_device_name': deviceName,
         'p_platform': platform,
@@ -309,14 +320,16 @@ class AuthProvider extends ChangeNotifier {
       if (registrationRow == null) throw Exception('Die Geräteregistrierung hat keine Daten zurückgegeben.');
       _deviceId = registrationRow['device_id']?.toString();
       _deviceStatus = registrationRow['device_status']?.toString().toLowerCase();
-      final accountResult = await step(() async => await client.rpc('get_my_access_status'));
+      final accountResult = await step('final_account_status', () async => await client.rpc('get_my_access_status'));
       final accountRow = _firstRow(accountResult);
       if (accountRow == null) throw Exception('Die Kontoberechtigung konnte nicht ermittelt werden.');
       _access = accountRow;
+      _checkedUserId = userId;
       _accessChecked = true;
       _error = null;
     } catch (e) {
       if (_disposed || client.auth.currentUser?.id != userId) return;
+      debugPrint('Streamia access: $stage failed (${clock.elapsedMilliseconds} ms, ${e.runtimeType})');
       _deviceId = null;
       _deviceStatus = null;
       _access = null;
