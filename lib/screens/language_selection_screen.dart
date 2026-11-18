@@ -35,12 +35,124 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
     ('fr', 'Français', '🇫🇷'),
   ];
 
+  Widget _buildTelevision(String selectedLanguage) {
+    return Scaffold(
+      body: DecoratedBox(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF091425), Color(0xFF15425C)],
+          ),
+        ),
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxHeight < 400;
+              return Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: constraints.maxWidth * 0.04,
+                  vertical: compact ? 8 : 20,
+                ),
+                child: FocusTraversalGroup(
+                  policy: ReadingOrderTraversalPolicy(),
+                  child: Column(
+                    children: [
+                      Text(
+                        'Choose your language',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: compact ? 22 : 30,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Text('Sprache wählen',
+                        style: TextStyle(color: Colors.white70, fontSize: 16)),
+                      SizedBox(height: compact ? 8 : 20),
+                      for (var row = 0; row < 2; row++) ...[
+                        if (row > 0) const SizedBox(height: 12),
+                        Expanded(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              for (var col = 0; col < 4; col++) ...[
+                                if (col > 0) const SizedBox(width: 12),
+                                Expanded(child: _televisionTile(
+                                  _languages[row * 4 + col], selectedLanguage)),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _televisionTile((String, String, String) language, String selected) {
+    final (code, name, flag) = language;
+    final focused = _focusedLanguage == code;
+    return Material(
+      color: focused ? const Color(0xFF215C76) : const Color(0xFF18364D),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        focusNode: _nodes[code],
+        autofocus: code == selected,
+        onFocusChange: (value) {
+          if (!mounted) return;
+          setState(() {
+            if (value) {
+              _focusedLanguage = code;
+            } else if (_focusedLanguage == code) {
+              _focusedLanguage = null;
+            }
+          });
+        },
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => context.read<LocaleProvider>().setLocale(code),
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: focused ? const Color(0xFF39E8FF) : const Color(0xFF416579),
+              width: focused ? 3 : 1,
+            ),
+          ),
+          child: Center(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(flag, style: const TextStyle(fontSize: 40)),
+                  const SizedBox(height: 8),
+                  Text(name, style: const TextStyle(color: Colors.white,
+                    fontSize: 22, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final localeProvider = context.watch<LocaleProvider>();
 
     final selectedLanguage =
         localeProvider.locale.languageCode;
+
+    if (DeviceLayout.isTelevision) {
+      return _buildTelevision(selectedLanguage);
+    }
 
     final screenWidth = MediaQuery.sizeOf(context).width;
     final isCompact = screenWidth < 380;
