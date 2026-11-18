@@ -352,24 +352,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final isTv = DeviceLayout.isTelevision;
     final isArabic = languageCode == 'ar';
 
-    return Directionality(
-      textDirection:
-          isArabic ? TextDirection.rtl : TextDirection.ltr,
-      child: Scaffold(
-        backgroundColor: backgroundColor,
-        resizeToAvoidBottomInset: true,
-        body: SafeArea(
-          child: Center(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: isTv ? 760 : 440),
-              child: SingleChildScrollView(
-                controller: _formScrollController,
-                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-                padding: EdgeInsets.fromLTRB(28, isTv ? 10 : 20, 28,
-                    MediaQuery.viewInsetsOf(context).bottom > 0 ? 28 : 20),
-                child: FocusTraversalGroup(
-                  child: _showConfirmation
-                      ? Column(
+    final confirmation = Column(
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
@@ -396,16 +379,14 @@ class _LoginScreenState extends State<LoginScreen> {
                               child: Text(_t(languageCode, 'back_to_sign_in')),
                             ),
                           ],
-                        )
-                      : Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment:
-                        CrossAxisAlignment.stretch,
-                    children: [
+                        );
+    final brand = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
                       Icon(
                         Icons.play_circle_filled_rounded,
                         color: AppTheme.electricBlue,
-                        size: isTv ? 44 : 72,
+                        size: isTv ? 100 : 72,
                       ),
 
                       const SizedBox(height: 12),
@@ -422,7 +403,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
 
                       const SizedBox(height: 8),
-
+      ],
+    );
+    final form = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
                       Text(
                         _t(
                           languageCode,
@@ -632,11 +618,58 @@ class _LoginScreenState extends State<LoginScreen> {
                           height: 1.5,
                         ),
                       ),
-                    ],
+      ],
+    );
+
+    return Directionality(
+      textDirection: isArabic ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        backgroundColor: backgroundColor,
+        resizeToAvoidBottomInset: true,
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
+              final split = isTv;
+              final scrollForm = SingleChildScrollView(
+                controller: _formScrollController,
+                keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: EdgeInsets.fromLTRB(28, isTv ? 10 : 20, 28,
+                    keyboardVisible ? 28 : 20),
+                child: _showConfirmation ? confirmation : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (!split) brand,
+                    form,
+                  ],
+                ),
+              );
+              return FocusTraversalGroup(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: split ? 1100 : 440),
+                    child: split ? Row(
+                      textDirection: TextDirection.ltr,
+                      children: [
+                          Flexible(
+                            flex: keyboardVisible ? 0 : 4,
+                            child: keyboardVisible ? const SizedBox.shrink() : Center(child: SingleChildScrollView(
+                              padding: const EdgeInsets.all(20),
+                              child: brand,
+                            )),
+                          ),
+                          VerticalDivider(
+                            width: keyboardVisible ? 0 : 1,
+                            color: secondaryColor.withValues(alpha: 0.25),
+                          ),
+                        Expanded(flex: 6, child: Center(child: scrollForm)),
+                      ],
+                    ) : scrollForm,
                   ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ),
       ),
