@@ -311,7 +311,7 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
               color: _listening ? Colors.redAccent : AppTheme.electricBlue),
     );
     final base = widget.decoration;
-    Future<void> openKeyboard() async {
+    Future<void> openFallbackKeyboard() async {
       if (_keyboardOpen) return;
       _keyboardOpen = true;
       try {
@@ -332,11 +332,33 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
     final tvButton = IconButton(
       tooltip: l10n.t('tv_keyboard_title'),
       icon: const Icon(Icons.keyboard_alt_outlined),
-      onPressed: openKeyboard,
+      onPressed: openFallbackKeyboard,
     );
+    Future<void> openKeyboard() async {
+      if (_keyboardOpen || !mounted) return;
+      _keyboardOpen = true;
+      Object? result;
+      try {
+        result = await showDialog<Object>(
+          context: context,
+          builder: (_) => _NativeTvInputDialog(field: widget),
+        );
+      } finally {
+        _keyboardOpen = false;
+      }
+      if (!mounted) return;
+      if (result == _TvInputChoice.fallback) {
+        await openFallbackKeyboard();
+      } else if (result is String) {
+        widget.controller.value = TextEditingValue(
+          text: result,
+          selection: TextSelection.collapsed(offset: result.length),
+        );
+        widget.onSubmitted?.call(result);
+      }
+    }
     if (DeviceLayout.isTelevision) {
-      // A TV field is a navigable control, not an active Android IME client.
-      // This leaves arrows available for traversal until OK opens our dialog.
+      // Keep D-pad traversal separate from editing. OK opens a native IME client.
       return Row(children: [
         Expanded(child: InkWell(
           focusNode: widget.focusNode,
@@ -388,6 +410,84 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
           children: [tvButton, if (base.suffixIcon != null) base.suffixIcon!, suffix],
         ),
       ),
+    );
+  }
+}
+
+
+enum _TvInputChoice { fallback }
+
+class _NativeTvInputDialog extends StatefulWidget {
+  final VoiceInputField field;
+  const _NativeTvInputDialog({required this.field});
+
+  @override
+  State<_NativeTvInputDialog> createState() => _NativeTvInputDialogState();
+}
+
+class _NativeTvInputDialogState extends State<_NativeTvInputDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    final value = widget.field.controller.text;
+    _controller = TextEditingController(text: value);
+    _controller.selection = TextSelection.collapsed(offset: value.length);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _confirm() => Navigator.of(context).pop(_controller.text);
+
+  @override
+  Widget build(BuildContext context) {
+    final field = widget.field;
+    final l10n = AppLocalizations.of(context);
+    final technical = field.credentialMode || field.secret ||
+        field.keyboardType == TextInputType.url ||
+        field.keyboardType == TextInputType.emailAddress;
+    return AlertDialog(
+      scrollable: true,
+      title: Text(field.decoration.labelText ?? l10n.t('tv_keyboard_input')),
+      content: SizedBox(
+        width: 480,
+        child: TextField(
+          controller: _controller,
+          autofocus: true,
+          keyboardType: field.keyboardType,
+          obscureText: field.obscureText,
+          maxLines: field.obscureText ? 1 : field.maxLines,
+          textDirection: field.textDirection,
+          textCapitalization: technical ? TextCapitalization.none : field.textCapitalization,
+          autocorrect: !technical,
+          enableSuggestions: !technical,
+          enableIMEPersonalizedLearning: !technical,
+          smartDashesType: technical ? SmartDashesType.disabled : null,
+          smartQuotesType: technical ? SmartQuotesType.disabled : null,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _confirm(),
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(_TvInputChoice.fallback),
+          child: Text(l10n.t('tv_keyboard_title')),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.t('tv_keyboard_cancel')),
+        ),
+        FilledButton(
+          onPressed: _confirm,
+          child: Text(l10n.t('tv_keyboard_confirm')),
+        ),
+      ],
     );
   }
 }
