@@ -43,7 +43,7 @@ class _LegalDisclaimerScreenState
     super.initState();
     if (widget.requireAcceptance) {
       _readingWatch.start();
-      _readingTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      _readingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
         if (!mounted) return;
         final elapsed = _readingWatch.elapsed;
         if (elapsed >= _minimumReadingTime) {
@@ -268,14 +268,14 @@ class _LegalDisclaimerScreenState
             _minimumReadingTime.inMilliseconds)
         .clamp(0.0, 1.0);
 
-    final textStyle = TextStyle(fontSize: isTv ? 19 : 15, height: 1.55);
+    final textStyle = TextStyle(fontSize: isTv ? 15 : 15, height: isTv ? 1.4 : 1.55);
     final paragraphs = <Widget>[
-      Icon(Icons.gavel_rounded, size: isTv ? 42 : 48,
+      Icon(Icons.gavel_rounded, size: isTv ? 28 : 48,
           color: AppTheme.electricBlue),
-      const SizedBox(height: 18),
+      SizedBox(height: isTv ? 8 : 18),
       for (final paragraph in t.sublist(1, 6)) ...[
         Text(paragraph, style: textStyle),
-        const SizedBox(height: 16),
+        SizedBox(height: isTv ? 10 : 16),
       ],
     ];
 
@@ -312,7 +312,7 @@ class _LegalDisclaimerScreenState
                         ),
                         child: ListView(
                         controller: _scrollController,
-                        padding: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
                         children: paragraphs,
                       ),
                       ),
@@ -344,15 +344,16 @@ class _LegalDisclaimerScreenState
                       contentPadding: EdgeInsets.zero,
                       title: Text(t[6], style: TextStyle(
                         fontWeight: FontWeight.w600,
-                        fontSize: isTv ? 17 : 14,
+                        fontSize: isTv ? 14 : 14,
                       )),
                     ),
                     const SizedBox(height: 8),
                     SizedBox(
                       width: isTv ? 360 : double.infinity,
-                      height: isTv ? 52 : 48,
+                      height: 48,
                       child: FilledButton(
                         focusNode: _continueFocus,
+                        style: FilledButton.styleFrom(foregroundColor: const Color(0xFF071522)),
                         onPressed: !_readingComplete || !_confirmed || _saving
                             ? null : _accept,
                         child: _saving
