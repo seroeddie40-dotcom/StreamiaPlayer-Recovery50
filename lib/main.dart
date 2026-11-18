@@ -89,7 +89,7 @@ class _BootstrapState extends State<_Bootstrap> {
   }
 }
 
-Future<Widget> _initializeApp() async {
+Future<void> _initializeDeviceLayout() async {
   await DeviceLayout.initialize().timeout(
     const Duration(seconds: 3),
   );
@@ -117,12 +117,9 @@ Future<Widget> _initializeApp() async {
     const Duration(seconds: 3),
   );
 
-  final prefs = await SharedPreferences.getInstance().timeout(
-    const Duration(seconds: 5),
-  );
+}
 
-  final prefsService = PrefsService(prefs);
-
+Future<void> _initializeBackend() async {
   if (SupabaseConfig.isConfigured) {
     await Supabase.initialize(
       url: SupabaseConfig.url,
@@ -131,6 +128,19 @@ Future<Widget> _initializeApp() async {
       const Duration(seconds: 20),
     );
   }
+}
+
+Future<Widget> _initializeApp() async {
+  SharedPreferences? prefs;
+  await Future.wait<void>([
+    _initializeDeviceLayout(),
+    SharedPreferences.getInstance()
+        .timeout(const Duration(seconds: 5))
+        .then<void>((value) { prefs = value; }),
+    _initializeBackend(),
+  ]);
+
+  final prefsService = PrefsService(prefs!);
 
   return MultiProvider(
     providers: [
