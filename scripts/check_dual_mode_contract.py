@@ -29,7 +29,8 @@ require('result.success(isTv)' in android, 'Native TV detection result not retur
 require('await DeviceLayout.initialize()' in main, 'TV detection not awaited')
 require('await SystemChrome.setPreferredOrientations(' in main, 'Initial orientation missing')
 require(0 <= main.find('runApp(') < main.find('await DeviceLayout.initialize()') < main.find('await SystemChrome.setPreferredOrientations('), 'Render bootstrap before device detection and orientation')
-require(0 <= main.find('await SystemChrome.setPreferredOrientations(') < main.find('await Supabase.initialize('), 'Initial orientation must precede Supabase network initialization')
+require('await Future.wait<void>([' in main and '_initializeDeviceLayout(),' in main and '_initializeBackend(),' in main, 'Parallel bootstrap must await device and backend initialization')
+require(0 <= main.find('await Future.wait<void>([') < main.find('return MultiProvider('), 'Bootstrap must complete before opening app routes')
 require('DeviceLayout.isTelevision' in main, 'Orientation not device-specific')
 require('DeviceOrientation.landscapeLeft' in main and 'DeviceOrientation.landscapeRight' in main, 'TV landscape orientation missing')
 require('DeviceOrientation.portraitUp' in main, 'Mobile portrait orientation missing')
@@ -46,7 +47,13 @@ require('_applyOrientation(landscape: true)' in app and '_applyOrientation(lands
         'Dashboard orientation enter/exit handling missing')
 
 require('kIsWeb' in layout, 'Web platform guard missing')
-require('MissingPluginException' in layout and 'PlatformException' in layout, 'Native channel failure handling missing')
+require('on Exception catch' in layout and 'on StateError catch' in layout, 'Native channel failure handling missing')
+require('attempt < 3' in layout and '.timeout(' in layout, 'Bounded device detection retries missing')
+require("throw StateError('Streamia device layout detection failed:" in layout, 'Device detection failure must not silently default to mobile')
+require('override fun setRequestedOrientation' in android and 'SCREEN_ORIENTATION_SENSOR_LANDSCAPE' in android, 'Native TV orientation guard missing')
+require('CATEGORY_LEANBACK_LAUNCHER' in android, 'TV launcher detection missing')
+require('noTouch && directionalInput' in android, 'Generic TV box detection missing')
+require('final columns = tv && availableWidth >= 520 ? 4 : 2;' in (ROOT / 'lib/screens/language_selection_screen.dart').read_text(encoding='utf-8'), 'TV language grid missing')
 
 for dart in (ROOT / 'lib').rglob('*.dart'):
     code = dart.read_text(encoding='utf-8')
