@@ -69,12 +69,13 @@ void main() {
 
   test('startup detects TV before choosing the device orientation', () {
     final source = File('lib/main.dart').readAsStringSync();
-    final detection = source.indexOf('await DeviceLayout.initialize();');
+    final detection = source.indexOf('await DeviceLayout.initialize(');
     final orientation = source.indexOf('await SystemChrome.setPreferredOrientations(');
     final appStart = source.indexOf('runApp(');
     expect(detection, greaterThanOrEqualTo(0));
     expect(orientation, greaterThan(detection));
-    expect(appStart, greaterThan(orientation));
+    expect(appStart, greaterThanOrEqualTo(0));
+    expect(detection, greaterThan(appStart));
     expect(source.contains('DeviceLayout.isTelevision'), isTrue);
   });
 }
