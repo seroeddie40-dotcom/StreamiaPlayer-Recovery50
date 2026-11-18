@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../core/platform/device_layout.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
@@ -89,6 +90,8 @@ class VoiceInputField extends StatefulWidget {
 class _VoiceInputFieldState extends State<VoiceInputField> {
   final stt.SpeechToText _speech = stt.SpeechToText();
   bool _ready = false;
+  bool _keyboardOpen = false;
+  bool _tvFocused = false;
   bool _busy = false;
   bool _listening = false;
   String? _localeId;
@@ -279,20 +282,61 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
               color: _listening ? Colors.redAccent : AppTheme.electricBlue),
     );
     final base = widget.decoration;
+    Future<void> openKeyboard() async {
+      if (_keyboardOpen) return;
+      _keyboardOpen = true;
+      try {
+        await TvTextKeyboard.show(
+          context,
+          controller: widget.controller,
+          languageCode: widget.appLanguageCode,
+          urlMode: _urlMode,
+          secret: widget.secret,
+          onConfirmed: widget.onSubmitted == null
+              ? null
+              : () => widget.onSubmitted!(widget.controller.text),
+        );
+      } finally {
+        _keyboardOpen = false;
+      }
+    }
     final tvButton = IconButton(
       tooltip: l10n.t('tv_keyboard_title'),
       icon: const Icon(Icons.keyboard_alt_outlined),
-      onPressed: () => TvTextKeyboard.show(
-        context,
-        controller: widget.controller,
-        languageCode: widget.appLanguageCode,
-        urlMode: _urlMode,
-        secret: widget.secret,
-        onConfirmed: widget.onSubmitted == null
-            ? null
-            : () => widget.onSubmitted!(widget.controller.text),
-      ),
+      onPressed: openKeyboard,
     );
+    if (DeviceLayout.isTelevision) {
+      // A TV field is a navigable control, not an active Android IME client.
+      // This leaves arrows available for traversal until OK opens our dialog.
+      return Row(children: [
+        Expanded(child: InkWell(
+          focusNode: widget.focusNode,
+          autofocus: widget.autofocus,
+          onTap: openKeyboard,
+          onFocusChange: (focused) => setState(() => _tvFocused = focused),
+          child: ListenableBuilder(
+            listenable: widget.controller,
+            builder: (context, _) => InputDecorator(
+              decoration: base.copyWith(suffixIcon: null),
+              isFocused: _tvFocused,
+              isEmpty: widget.controller.text.isEmpty,
+              child: Text(
+                widget.obscureText
+                    ? List.filled(widget.controller.text.runes.length, '•').join()
+                    : widget.controller.text,
+                style: widget.style,
+                textDirection: widget.textDirection,
+                maxLines: widget.maxLines,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
+        )),
+        tvButton,
+        if (base.suffixIcon != null) base.suffixIcon!,
+        suffix,
+      ]);
+    }
     return TextField(
       controller: widget.controller,
       obscureText: widget.obscureText,
