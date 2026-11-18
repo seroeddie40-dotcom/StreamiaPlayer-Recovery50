@@ -252,6 +252,21 @@ class AuthProvider extends ChangeNotifier {
       _notify();
       return;
     }
+    final userId = client.auth.currentUser!.id;
+    final clock = Stopwatch()..start();
+    const budget = Duration(seconds: 15);
+    Future<T> step<T>(Future<T> Function() action) async {
+      final remaining = budget - clock.elapsed;
+      if (remaining <= Duration.zero) throw TimeoutException('Access verification');
+      if (_disposed || client.auth.currentUser?.id != userId) {
+        throw StateError('Session changed');
+      }
+      final result = await action().timeout(remaining);
+      if (_disposed || client.auth.currentUser?.id != userId) {
+        throw StateError('Session changed');
+      }
+      return result;
+    }
     _accessChecked = false;
     _error = null;
     _access = null;
@@ -262,7 +277,7 @@ class AuthProvider extends ChangeNotifier {
     try {
       // Check account access before registering the device. The server is the
       // authority for trial eligibility, expiration, and administrative grants.
-      final initialAccess = _firstRow(await client.rpc('get_my_access_status').timeout(const Duration(seconds: 15)));
+      final initialAccess = _firstRow(await step(() async => await client.rpc('get_my_access_status')));
       if (initialAccess == null) {
         throw StateError('Die Kontoberechtigung konnte nicht ermittelt werden.');
       }
@@ -271,36 +286,39 @@ class AuthProvider extends ChangeNotifier {
         // must never grant access locally or prevent an expired user from
         // reaching the normal payment screen.
         try {
-          await client.rpc('start_streamia_trial').timeout(const Duration(seconds: 15));
+          await step(() async => await client.rpc('start_streamia_trial'));
         } on PostgrestException {
           // The server may reject repeat trials, expired trials, or other
           // ineligible accounts. Re-read authoritative access below.
         }
       }
 
-      final installationId = await _getInstallationId();
-      final deviceName = await _readDeviceName();
+      final installationId = await step(_getInstallationId);
+      final deviceName = await step(_readDeviceName);
       final platform = kIsWeb ? 'web' : switch (defaultTargetPlatform) {
         TargetPlatform.android => 'android',
         TargetPlatform.iOS => 'ios',
         _ => 'unknown',
       };
-      final registered = await client.rpc('register_my_device', params: {
+      final registered = await step(() async => await client.rpc('register_my_device', params: {
         'p_installation_id': installationId,
         'p_device_name': deviceName,
         'p_platform': platform,
-      }).timeout(const Duration(seconds: 15));
+      }));
       final registrationRow = _firstRow(registered);
       if (registrationRow == null) throw Exception('Die Geräteregistrierung hat keine Daten zurückgegeben.');
       _deviceId = registrationRow['device_id']?.toString();
       _deviceStatus = registrationRow['device_status']?.toString().toLowerCase();
-      final accountResult = await client.rpc('get_my_access_status').timeout(const Duration(seconds: 15));
+      final accountResult = await step(() async => await client.rpc('get_my_access_status'));
       final accountRow = _firstRow(accountResult);
       if (accountRow == null) throw Exception('Die Kontoberechtigung konnte nicht ermittelt werden.');
       _access = accountRow;
       _accessChecked = true;
       _error = null;
     } catch (e) {
+      if (_disposed || client.auth.currentUser?.id != userId) return;
+      _deviceId = null;
+      _deviceStatus = null;
       _access = null;
       _accessChecked = true;
       _error = _friendlyError(e);
@@ -326,7 +344,7 @@ class AuthProvider extends ChangeNotifier {
       final response = await client.rpc('replace_my_device_v2', params: {
         'p_old_device_id': oldDeviceId,
         'p_new_installation_id': installationId,
-      });
+      }).timeout(const Duration(seconds: 15));
       final row = _firstRow(response);
       if (row == null || row['device_status']?.toString() != 'active') {
         throw StateError('Der Server hat den Gerätewechsel nicht bestätigt.');
@@ -359,7 +377,7 @@ class AuthProvider extends ChangeNotifier {
     _deviceListError = null;
     _notify();
     try {
-      final result = await client.rpc('list_my_active_devices');
+      final result = await client.rpc('list_my_active_devices').timeout(const Duration(seconds: 15));
       if (result is! List) {
         throw StateError('Ungültige Antwort der Geräteverwaltung.');
       }
