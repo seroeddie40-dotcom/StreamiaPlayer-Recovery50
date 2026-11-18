@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
+import '../services/media_engine.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -737,7 +738,7 @@ class _RecordingPlaybackState
 
     _familySession = context.read<FamilySessionProvider>();
     _familySession.addListener(_onFamilyChanged);
-    _player = Player();
+    _player = MediaEngine.createPlayer();
     _controller = VideoController(_player);
 
     final family = context.read<FamilySessionProvider>();
