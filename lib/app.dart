@@ -421,10 +421,10 @@ class _DeviceActivationGateState extends State<_DeviceActivationGate> {
     if (!mounted || _dialogOpen) return;
     _dialogOpen = true;
     final auth = context.read<AuthProvider>();
-    // Re-read server state before asking the user to replace a device.
-    // An installation may have been approved since the previous check.
-    await auth.refreshDeviceAndAccess();
-    if (!mounted || !auth.devicePending || auth.deviceApproved ||
+    // The root gate has just verified this device. Refreshing here would
+    // clear accessChecked, unmount this gate, and mount it again on pending.
+    // Only an explicit user action should trigger another access check.
+    if (!auth.devicePending || auth.deviceApproved ||
         !auth.hasAccountAccess || auth.error != null) {
       _dialogOpen = false;
       return;
@@ -444,7 +444,8 @@ class _DeviceActivationGateState extends State<_DeviceActivationGate> {
             final devices = current.activeDevices;
             // A refresh may have approved this installation while the dialog
             // was loading. Close the obsolete dialog instead of showing it.
-            if (current.deviceApproved || !current.devicePending) {
+            if (current.accessChecked &&
+                (current.deviceApproved || !current.devicePending)) {
               WidgetsBinding.instance.addPostFrameCallback((_) {
                 if (dialogContext.mounted && Navigator.of(dialogContext).canPop()) {
                   Navigator.of(dialogContext).pop();
