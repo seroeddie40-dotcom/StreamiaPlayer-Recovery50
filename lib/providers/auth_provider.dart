@@ -112,11 +112,10 @@ class AuthProvider extends ChangeNotifier {
       final matchesPending = pendingEmail != null &&
           current?.email?.toLowerCase() == pendingEmail.toLowerCase();
       if (isConfirmed && matchesPending) {
-        // Clear marker before sign-out to prevent reprocessing.
+        // Supabase has established a verified session on this device.
         await prefs.remove(_pendingEmailKey).timeout(const Duration(seconds: 5));
-        await client.auth.signOut().timeout(const Duration(seconds: 15));
-        _clearAccess();
-        _emailConfirmationSuccess = true;
+        _emailConfirmationSuccess = false;
+        await refreshDeviceAndAccess();
       } else if (current != null && !_emailConfirmationSuccess) {
         await refreshDeviceAndAccess();
       }
