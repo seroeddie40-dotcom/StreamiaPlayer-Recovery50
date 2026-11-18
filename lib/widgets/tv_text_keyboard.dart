@@ -47,6 +47,9 @@ class _TvKeyboardDialog extends StatefulWidget {
 class _TvKeyboardDialogState extends State<_TvKeyboardDialog> {
   late final TextEditingController _draft;
   bool _showSecret = false;
+  bool _uppercase = false;
+  bool _symbols = false;
+  bool _latin = false;
   late final FocusNode _cancelFocus;
   late final FocusNode _confirmFocus;
   FocusNode? _lastKeyFocus;
@@ -181,15 +184,20 @@ class _TvKeyboardDialogState extends State<_TvKeyboardDialog> {
     final l10n = AppLocalizations.of(context);
     String tr(String key) => l10n.t(key);
     final lang = widget.languageCode.toLowerCase().replaceAll('_', '-').split('-').first;
-    final alphabet = lang == 'ru' || lang == 'ar'
+    final nativeScript = lang == 'ru' || lang == 'ar';
+    final alphabet = nativeScript && !_latin
         ? TvTextKeyboard._extraLetters[lang]!
-        : 'abcdefghijklmnopqrstuvwxyz${TvTextKeyboard._extraLetters[lang] ?? ''}';
-    final letters = <String>{...alphabet.split('')}.toList();
-    final digits = '0123456789'.split('');
+        : 'qwertyuiopasdfghjklzxcvbnm${nativeScript ? '' : TvTextKeyboard._extraLetters[lang] ?? ''}';
+    final letters = alphabet.split('');
+    final symbols = ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#', '!', r'$', '*', '(', ')', '[', ']', '{', '}', ';', ',', '~', '^', '|', '<', '>', '"', "'", r'\', '`'];
+    final keys = [...'1234567890'.split(''), ...(_symbols ? symbols : letters.map((letter) {
+      if (!_uppercase) return letter;
+      if (lang == 'tr' && letter == 'i') return 'İ';
+      return letter.toUpperCase();
+    }))];
     final viewport = MediaQuery.sizeOf(context);
-    // A TV keyboard must fit both compact 720p screens and wide 1080p displays.
-    final width = (viewport.width - 32).clamp(260.0, 680.0);
-    final maxHeight = (viewport.height - MediaQuery.viewInsetsOf(context).bottom - 96).clamp(180.0, 520.0);
+    final width = (viewport.width * .82).clamp(240.0, 560.0).toDouble();
+    final maxHeight = (viewport.height * .52).clamp(120.0, 340.0).toDouble();
     return Focus(
       canRequestFocus: false,
       onKeyEvent: _handleDpad,
@@ -201,7 +209,10 @@ class _TvKeyboardDialogState extends State<_TvKeyboardDialog> {
         policy: OrderedTraversalPolicy(),
         child: AlertDialog(
         insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        title: Text(tr('tv_keyboard_title')),
+        title: Text(tr('tv_keyboard_title'), style: const TextStyle(fontSize: 17)),
+        titlePadding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+        contentPadding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+        actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 6),
         content: SizedBox(
           width: width,
           height: maxHeight,
@@ -218,32 +229,28 @@ class _TvKeyboardDialogState extends State<_TvKeyboardDialog> {
                 autocorrect: false,
                 textCapitalization: TextCapitalization.none,
                 decoration: InputDecoration(
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   border: const OutlineInputBorder(),
                   labelText: tr('tv_keyboard_input'),
-                  suffixIcon: widget.secret ? Focus(canRequestFocus: false, child: IconButton(
+                  suffixIcon: widget.secret ? IconButton(
                     tooltip: _showSecret ? tr('tv_keyboard_hide_password') : tr('tv_keyboard_show_password'),
                     onPressed: () => setState(() => _showSecret = !_showSecret),
                     icon: Icon(_showSecret ? Icons.visibility_off : Icons.visibility),
-                  )) : null,
+                  ) : null,
                 ),
               ),
               const SizedBox(height: 6),
               Expanded(child: SingleChildScrollView(child: Column(children: [
-                Wrap(spacing: 4, runSpacing: 4, alignment: WrapAlignment.center, children: [
-                  // Every letter case has its own remote-selectable button.
-                  // No Shift step is required between lowercase and uppercase.
-                  for (var i = 0; i < letters.length; i++) ...[
-                    _key(letters[i], letters[i], order: (i * 2).toDouble(), autofocus: i == 0),
-                    if (letters[i].toUpperCase() != letters[i])
-                      _key(letters[i].toUpperCase(), letters[i].toUpperCase(), order: (i * 2 + 1).toDouble()),
-                  ],
-                  for (var i = 0; i < digits.length; i++) _key(digits[i], digits[i], order: 100 + i.toDouble()),
-                  for (var i = 0; i < const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#', '!', r'$', '*', '(', ')', '[', ']', '{', '}', ';', ',', '~', '^', '|', '<', '>', '"', "'", r'\', '`'].length; i++)
-                    _key(const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#', '!', r'$', '*', '(', ')', '[', ']', '{', '}', ';', ',', '~', '^', '|', '<', '>', '"', "'", r'\', '`'][i],
-                         const ['.', '/', ':', '-', '_', '@', '?', '&', '=', '%', '+', '#', '!', r'$', '*', '(', ')', '[', ']', '{', '}', ';', ',', '~', '^', '|', '<', '>', '"', "'", r'\', '`'][i], order: 120 + i.toDouble()),
+                Wrap(spacing: 3, runSpacing: 3, alignment: WrapAlignment.center, children: [
+                  for (var i = 0; i < keys.length; i++)
+                    _key(keys[i], keys[i], order: i.toDouble(), autofocus: i == 0),
                 ]),
                 const SizedBox(height: 6),
                 Wrap(spacing: 5, runSpacing: 5, alignment: WrapAlignment.center, children: [
+                  FocusTraversalOrder(order: const NumericFocusOrder(190), child: OutlinedButton(onPressed: () => setState(() { _uppercase = !_uppercase; _symbols = false; }), child: Text(_uppercase ? 'ABC' : 'abc'))),
+                  FocusTraversalOrder(order: const NumericFocusOrder(191), child: OutlinedButton(onPressed: () => setState(() => _symbols = !_symbols), child: Text(_symbols ? 'ABC' : '123#!'))),
+                  if (nativeScript) FocusTraversalOrder(order: const NumericFocusOrder(192), child: OutlinedButton(onPressed: () => setState(() => _latin = !_latin), child: Text(_latin ? (lang == 'ru' ? 'АБВ' : 'أبج') : 'ABC'))),
                   FocusTraversalOrder(order: const NumericFocusOrder(200), child: OutlinedButton(onPressed: () => _insert(' '), child: Text(tr('tv_keyboard_space')))),
                   FocusTraversalOrder(order: const NumericFocusOrder(201), child: OutlinedButton(onPressed: _delete, child: Text(tr('tv_keyboard_backspace')))),
                   if (widget.urlMode) ...[
@@ -319,17 +326,19 @@ class _TvKeyboardKeyState extends State<_TvKeyboardKey> {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-        width: 49,
-        height: 49,
+        width: 38,
+        height: 34,
         child: OutlinedButton(
           focusNode: _focusNode,
           autofocus: widget.autofocus,
           style: OutlinedButton.styleFrom(
             padding: EdgeInsets.zero,
+            minimumSize: Size.zero,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             visualDensity: VisualDensity.compact,
           ),
           onPressed: widget.onPressed,
-          child: Text(widget.label, style: const TextStyle(fontSize: 15)),
+          child: Text(widget.label, style: const TextStyle(fontSize: 14)),
         ),
       );
 }
