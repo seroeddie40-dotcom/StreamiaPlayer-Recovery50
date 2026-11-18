@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/locale_provider.dart';
-import '../core/theme/app_theme.dart';
 import '../core/platform/device_layout.dart';
 
 class LanguageSelectionScreen extends StatefulWidget {
@@ -51,7 +50,9 @@ class _LanguageSelectionScreenState extends State<LanguageSelectionScreen> {
         width: double.infinity,
         height: double.infinity,
         decoration: BoxDecoration(
-          gradient: AppTheme.accentGradient,
+          gradient: const LinearGradient(
+            colors: [Color(0xFF101A2B), Color(0xFF12344A)],
+          ),
         ),
         child: SafeArea(
           child: LayoutBuilder(
