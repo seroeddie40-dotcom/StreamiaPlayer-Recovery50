@@ -39,20 +39,45 @@ class MainActivity : FlutterActivity() {
         private const val FOLDER_KEY = "folder_uri"
     }
 
-    private fun isTelevisionDevice(): Boolean {
+    // Resolve once per Activity, before Flutter can request an orientation.
+    private val televisionDevice: Boolean by lazy {
         val modeManager = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
-        return modeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
-            (resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION ||
-            packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
-            packageManager.hasSystemFeature("android.software.leanback_only") ||
-            packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
+        val features = packageManager
+        val televisionMode = modeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION ||
+            (resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) == Configuration.UI_MODE_TYPE_TELEVISION
+        val televisionFeature = features.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+            features.hasSystemFeature("android.software.leanback_only") ||
+            features.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
+        val televisionLauncher = intent?.hasCategory(Intent.CATEGORY_LEANBACK_LAUNCHER) == true
+        // Some generic TV boxes omit Leanback and UI mode declarations.
+        // Require both lack of touchscreen and a hardware directional controller.
+        val noTouch = !features.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN) &&
+            resources.configuration.touchscreen == Configuration.TOUCHSCREEN_NOTOUCH
+        val directionalInput = android.view.InputDevice.getDeviceIds().any { id ->
+            val device = android.view.InputDevice.getDevice(id)
+            device != null && !device.isVirtual &&
+                (device.sources and android.view.InputDevice.SOURCE_DPAD) == android.view.InputDevice.SOURCE_DPAD
+        }
+        val result = televisionMode || televisionFeature || televisionLauncher ||
+            (noTouch && directionalInput)
+        android.util.Log.i("StreamiaLayout", "TV=$result mode=$televisionMode feature=$televisionFeature launcher=$televisionLauncher noTouch=$noTouch dpad=$directionalInput")
+        result
     }
+
+    private fun isTelevisionDevice(): Boolean = televisionDevice
 
     override fun onCreate(savedInstanceState: Bundle?) {
         if (isTelevisionDevice()) {
             requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         }
         super.onCreate(savedInstanceState)
+    }
+
+    override fun setRequestedOrientation(requestedOrientation: Int) {
+        super.setRequestedOrientation(
+            if (isTelevisionDevice()) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            else requestedOrientation
+        )
     }
 
     private val storagePreferences by lazy {
