@@ -97,7 +97,7 @@ class StreamiaApp extends StatelessWidget {
       return const LoginScreen();
     }
 
-    if (!auth.accessChecked || auth.isBusy) {
+    if (!auth.accessChecked || (auth.isBusy && auth.error == null)) {
       return _startupLoading(locale.locale.languageCode);
     }
 
@@ -138,20 +138,87 @@ class StreamiaApp extends StatelessWidget {
 }
 
 
-Widget _startupLoading(String language) {
-  const messages = {
-    'de': 'Konto und Gerätezugang werden geprüft…',
-    'tr': 'Hesap ve cihaz erişimi kontrol ediliyor…',
-    'en': 'Checking account and device access…',
-    'ru': 'Проверка аккаунта и доступа устройства…',
-    'pl': 'Sprawdzanie konta i dostępu urządzenia…',
-    'es': 'Comprobando la cuenta y el acceso del dispositivo…',
-    'fr': 'Vérification du compte et de l’accès de l’appareil…',
-    'ar': 'جارٍ التحقق من الحساب والوصول إلى الجهاز…',
-  };
-  return Scaffold(body: Center(child: Column(mainAxisSize: MainAxisSize.min,
-    children: [const CircularProgressIndicator(), const SizedBox(height: 20),
-      Text(messages[language] ?? messages['en']!, textAlign: TextAlign.center)])));
+Widget _startupLoading(String language) => _StartupLoading(language: language);
+
+class _StartupLoading extends StatefulWidget {
+  final String language;
+  const _StartupLoading({required this.language});
+
+  @override
+  State<_StartupLoading> createState() => _StartupLoadingState();
+}
+
+class _StartupLoadingState extends State<_StartupLoading> {
+  Timer? _timer;
+  bool _timedOut = false;
+  bool _retrying = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimer();
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    _timer = Timer(const Duration(seconds: 30), () {
+      if (mounted) setState(() => _timedOut = true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const messages = {
+      'de': ['Konto und Gerätezugang werden geprüft…', 'Die Prüfung dauert zu lange. Bitte prüfe deine Internetverbindung.', 'Erneut prüfen', 'Abmelden'],
+      'tr': ['Hesap ve cihaz erişimi kontrol ediliyor…', 'Kontrol çok uzun sürdü. İnternet bağlantınızı kontrol edin.', 'Tekrar kontrol et', 'Çıkış yap'],
+      'en': ['Checking account and device access…', 'Verification is taking too long. Check your internet connection.', 'Check again', 'Log out'],
+      'ru': ['Проверка аккаунта и доступа устройства…', 'Проверка занимает слишком много времени. Проверьте интернет.', 'Повторить', 'Выйти'],
+      'pl': ['Sprawdzanie konta i dostępu urządzenia…', 'Weryfikacja trwa zbyt długo. Sprawdź połączenie internetowe.', 'Sprawdź ponownie', 'Wyloguj'],
+      'es': ['Comprobando la cuenta y el acceso del dispositivo…', 'La comprobación tarda demasiado. Comprueba tu conexión.', 'Reintentar', 'Cerrar sesión'],
+      'fr': ['Vérification du compte et de l’accès de l’appareil…', 'La vérification prend trop de temps. Vérifiez votre connexion.', 'Réessayer', 'Se déconnecter'],
+      'ar': ['جارٍ التحقق من الحساب والوصول إلى الجهاز…', 'استغرق التحقق وقتًا طويلاً. تحقق من اتصال الإنترنت.', 'إعادة المحاولة', 'تسجيل الخروج'],
+    };
+    final labels = messages[widget.language] ?? messages['en']!;
+    final auth = context.watch<AuthProvider>();
+    return Scaffold(
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(32),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            if (_timedOut) const Icon(Icons.error_outline, size: 44)
+            else const CircularProgressIndicator(),
+            const SizedBox(height: 20),
+            Text(labels[_timedOut ? 1 : 0], textAlign: TextAlign.center),
+            if (_timedOut) ...[
+              const SizedBox(height: 20),
+              FilledButton(
+                autofocus: true,
+                onPressed: _retrying ? null : () async {
+                  setState(() { _timedOut = false; _retrying = true; });
+                  _startTimer();
+                  try {
+                    await auth.refreshDeviceAndAccess().timeout(const Duration(seconds: 15));
+                  } catch (_) {
+                    if (mounted) setState(() => _timedOut = true);
+                  } finally {
+                    if (mounted) setState(() => _retrying = false);
+                  }
+                },
+                child: Text(labels[2]),
+              ),
+              TextButton(onPressed: auth.isBusy ? null : auth.logout, child: Text(labels[3])),
+            ],
+          ]),
+        ),
+      ),
+    );
+  }
 }
 
 /// Keep onboarding in portrait on phones while restoring the original
