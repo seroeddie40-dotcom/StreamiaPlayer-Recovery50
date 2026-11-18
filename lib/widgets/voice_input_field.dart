@@ -98,6 +98,7 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
   String _prefix = '';
   String _suffix = '';
   Timer? _searchTimer;
+  Timer? _dictationTimer;
   int _session = 0;
   bool _acceptResults = false;
   bool _stoppingSearch = false;
@@ -107,6 +108,7 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
   Future<void> _finishSearch(int session) async {
     if (!mounted || session != _session) return;
     _searchTimer?.cancel();
+    _dictationTimer?.cancel();
     _acceptResults = false;
     _session++;
     _stoppingSearch = true;
@@ -115,7 +117,7 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
       _busy = true;
     });
     try {
-      await _speech.stop();
+      await _speech.stop().timeout(const Duration(seconds: 2));
     } catch (_) {
       // Results are already invalidated even if the platform stops late.
     } finally {
@@ -134,8 +136,8 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
     if (_busy) return;
     if (_searchMode && _searchTimer?.isActive == true) return;
     if (_listening || _speech.isListening) {
-      await _speech.stop();
-      if (mounted) setState(() => _listening = false);
+      _dictationTimer?.cancel();
+      await _finishSearch(_session);
       return;
     }
     setState(() => _busy = true);
@@ -143,22 +145,29 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
       if (!_ready) {
         final available = await _speech.initialize(
           onStatus: (status) {
-            if (mounted && !_searchMode) {
-              setState(() => _listening = status == 'listening');
+            if (!mounted || _searchMode || !_acceptResults) return;
+            if (status == 'listening') {
+              setState(() => _listening = true);
+            } else if (status == 'done' || status == 'notListening') {
+              setState(() => _listening = false);
             }
           },
           onError: (_) {
             if (!mounted) return;
-            if (!_searchMode) setState(() => _listening = false);
+            _dictationTimer?.cancel();
+            _searchTimer?.cancel();
+            _acceptResults = false;
+            _session++;
+            setState(() { _listening = false; _busy = false; });
             _message(AppLocalizations.of(context).t('speech_unavailable'));
           },
-        );
+        ).timeout(const Duration(seconds: 5));
         if (!mounted) return;
         if (!available) {
           _message(AppLocalizations.of(context).t('speech_unavailable'));
           return;
         }
-        final locales = await _speech.locales();
+        final locales = await _speech.locales().timeout(const Duration(seconds: 5));
         if (!mounted) return;
         final matches = locales.where((l) =>
             _languageOf(l.localeId) == widget.appLanguageCode.toLowerCase()).toList();
@@ -189,6 +198,14 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
           unawaited(_finishSearch(session));
         });
       }
+      if (!replaceSearch) {
+        _dictationTimer?.cancel();
+        _dictationTimer = Timer(const Duration(seconds: 5), () {
+          if (mounted && session == _session) {
+            unawaited(_finishSearch(session));
+          }
+        });
+      }
       await _speech.listen(
         localeId: _localeId,
         listenFor: Duration(seconds: replaceSearch ? 5 : 30),
@@ -201,6 +218,14 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
         onResult: (result) {
           if (!mounted || !_acceptResults || session != _session ||
               result.recognizedWords.isEmpty) return;
+          if (!replaceSearch) {
+            _dictationTimer?.cancel();
+            _dictationTimer = Timer(const Duration(seconds: 30), () {
+              if (mounted && session == _session) {
+                unawaited(_finishSearch(session));
+              }
+            });
+          }
           final spoken = result.recognizedWords;
           final credential = widget.credentialMode || _urlMode;
           if (credential && !result.finalResult) return;
@@ -220,7 +245,8 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
             // Never insert a partial navigation command into credentials.
             if (result.finalResult) {
               _acceptResults = false;
-              unawaited(_speech.stop());
+              _dictationTimer?.cancel();
+              unawaited(_finishSearch(session));
               widget.onSubmitted!(widget.controller.text);
             }
             return;
@@ -242,12 +268,14 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
             selection: TextSelection.collapsed(offset: _urlMode ? value.length : before.length),
           );
         },
-      );
-      if (mounted && !replaceSearch) {
+      ).timeout(const Duration(seconds: 5));
+      if (mounted && !replaceSearch && session == _session) {
         setState(() => _listening = _speech.isListening);
       }
     } catch (_) {
-      if (_searchMode && _acceptResults) await _finishSearch(_session);
+      _dictationTimer?.cancel();
+      if (_acceptResults) await _finishSearch(_session);
+      else if (mounted) setState(() => _listening = false);
       if (mounted) _message(AppLocalizations.of(context).t('speech_unavailable'));
     } finally {
       if (mounted && !_stoppingSearch) {
@@ -263,9 +291,10 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
   @override
   void dispose() {
     _searchTimer?.cancel();
+    _dictationTimer?.cancel();
     _acceptResults = false;
     _session++;
-    _speech.stop();
+    unawaited(_speech.stop().timeout(const Duration(seconds: 2)).then<void>((_) {}, onError: (Object _) {}));
     super.dispose();
   }
 
@@ -317,7 +346,7 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
           child: ListenableBuilder(
             listenable: widget.controller,
             builder: (context, _) => InputDecorator(
-              decoration: base.copyWith(suffixIcon: null),
+              decoration: base.copyWith(suffixIcon: const SizedBox.shrink()),
               isFocused: _tvFocused,
               isEmpty: widget.controller.text.isEmpty,
               child: Text(
@@ -332,7 +361,6 @@ class _VoiceInputFieldState extends State<VoiceInputField> {
             ),
           ),
         )),
-        tvButton,
         if (base.suffixIcon != null) base.suffixIcon!,
         suffix,
       ]);
