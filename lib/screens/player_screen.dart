@@ -5,6 +5,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
+import '../services/media_engine.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
 import '../core/localization/app_localizations.dart';
@@ -207,7 +208,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _player = Player();
+    _player = MediaEngine.createPlayer();
     _videoController = VideoController(_player);
     _familySession = context.read<FamilySessionProvider>();
     _progressService = WatchProgressService(family: _familySession);
