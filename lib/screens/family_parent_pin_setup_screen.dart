@@ -39,6 +39,14 @@ class _FamilyParentPinSetupScreenState
   String? _errorMessage;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _pinFocus.requestFocus();
+    });
+  }
+
+  @override
   void dispose() {
     _pinController.dispose();
     _confirmController.dispose();
@@ -154,6 +162,7 @@ class _FamilyParentPinSetupScreenState
     return TextField(
       controller: controller,
       focusNode: focusNode,
+      autofocus: identical(focusNode, _pinFocus),
       obscureText: !_showPin,
       keyboardType: TextInputType.number,
       textInputAction: textInputAction,
@@ -167,7 +176,8 @@ class _FamilyParentPinSetupScreenState
         border: const OutlineInputBorder(),
         prefixIcon: const Icon(Icons.lock_outline),
       ),
-      onSubmitted: (_) => onSubmitted(),
+      onEditingComplete: onSubmitted,
+
     );
   }
 
@@ -179,10 +189,12 @@ class _FamilyParentPinSetupScreenState
       appBar: AppBar(
         title: Text(_t('family_setup_pin_setup')),
       ),
+      resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
             return SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
               padding: const EdgeInsets.all(20),
               child: Center(
                 child: ConstrainedBox(
@@ -226,6 +238,12 @@ class _FamilyParentPinSetupScreenState
                         textInputAction:
                             TextInputAction.next,
                         onSubmitted: () {
+                          if (!RegExp(r'^[0-9]{6,10}$').hasMatch(_pinController.text)) {
+                            setState(() => _errorMessage = _t('family_setup_pin_length'));
+                            _pinFocus.requestFocus();
+                            return;
+                          }
+                          setState(() => _errorMessage = null);
                           _confirmFocus.requestFocus();
                         },
                       ),
@@ -239,6 +257,12 @@ class _FamilyParentPinSetupScreenState
                         textInputAction:
                             TextInputAction.done,
                         onSubmitted: () {
+                          if (_pinController.text != _confirmController.text) {
+                            setState(() => _errorMessage = _t('family_setup_pin_mismatch'));
+                            _confirmFocus.requestFocus();
+                            return;
+                          }
+                          setState(() => _errorMessage = null);
                           _saveFocus.requestFocus();
                         },
                       ),
