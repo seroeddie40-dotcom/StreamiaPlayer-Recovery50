@@ -110,6 +110,14 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   final TextEditingController _xtreamNameController = TextEditingController(text: 'Xtream Playlist');
   final TextEditingController _m3uController = TextEditingController();
   final TextEditingController _epgController = TextEditingController();
+
+  String? get _configuredEpgUrl {
+    final value = _epgController.text.trim();
+    final uri = Uri.tryParse(value);
+    if (uri == null || !uri.hasAuthority || uri.host.isEmpty ||
+        (uri.scheme != 'http' && uri.scheme != 'https')) return null;
+    return value;
+  }
   final TextEditingController _xtreamServerController = TextEditingController();
   final TextEditingController _xtreamUserController = TextEditingController();
   final TextEditingController _xtreamPassController = TextEditingController();
@@ -123,10 +131,54 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   String? _importError;
   String? _selectedM3uPath;
   String? _selectedM3uName;
+  String? _receivedM3uPath;
+
+  Future<void> _deleteReceivedFile(String path) async {
+    try { await File(path).parent.delete(recursive: true); } catch (_) {}
+  }
+
+  static const _setupTranslations = <String, Map<String, String>>{
+    "The selected file could not be opened.": <String, String>{'ru': "Не удалось открыть выбранный файл.", 'pl': "Nie można otworzyć wybranego pliku.", 'es': "No se pudo abrir el archivo seleccionado.", 'fr': "Impossible d’ouvrir le fichier sélectionné.", 'ar': "تعذر فتح الملف المحدد."},
+    "File is too large (maximum 12 MB).": <String, String>{'ru': "Файл слишком большой (максимум 12 МБ).", 'pl': "Plik jest za duży (maksymalnie 12 MB).", 'es': "El archivo es demasiado grande (máximo 12 MB).", 'fr': "Le fichier est trop volumineux (12 Mo maximum).", 'ar': "الملف كبير جدًا (الحد الأقصى 12 ميغابايت)."},
+    "Compressed EPG files cannot be inserted as text here. Please use an XML URL.": <String, String>{'ru': "Сжатые файлы EPG нельзя вставить как текст. Используйте URL XML.", 'pl': "Skompresowanych plików EPG nie można wstawić jako tekstu. Użyj adresu XML.", 'es': "No se pueden insertar archivos EPG comprimidos como texto. Usa una URL XML.", 'fr': "Les fichiers EPG compressés ne peuvent pas être insérés comme texte. Utilisez une URL XML.", 'ar': "لا يمكن إدراج ملفات EPG المضغوطة كنص. استخدم رابط XML."},
+    "File selection failed. Please try another file.": <String, String>{'ru': "Не удалось выбрать файл. Попробуйте другой.", 'pl': "Nie udało się wybrać pliku. Spróbuj innego.", 'es': "Error al seleccionar el archivo. Prueba con otro.", 'fr': "Échec de la sélection. Essayez un autre fichier.", 'ar': "تعذر اختيار الملف. جرّب ملفًا آخر."},
+    "No active access. Please check your account first.": <String, String>{'ru': "Нет активного доступа. Проверьте свой аккаунт.", 'pl': "Brak aktywnego dostępu. Sprawdź konto.", 'es': "No hay acceso activo. Comprueba tu cuenta.", 'fr': "Aucun accès actif. Vérifiez votre compte.", 'ar': "لا يوجد وصول نشط. تحقق من حسابك أولاً."},
+    "Multiple playlists exist. Please resolve them in playlist management.": <String, String>{'ru': "Есть несколько плейлистов. Упорядочьте их в управлении плейлистами.", 'pl': "Istnieje kilka playlist. Uporządkuj je w zarządzaniu playlistami.", 'es': "Hay varias listas. Resuélvelo en la gestión de listas.", 'fr': "Plusieurs listes existent. Gérez-les dans le gestionnaire de listes.", 'ar': "توجد عدة قوائم تشغيل. عالج ذلك في إدارة القوائم."},
+    "Replace playlist?": <String, String>{'ru': "Заменить плейлист?", 'pl': "Zastąpić playlistę?", 'es': "¿Reemplazar lista?", 'fr': "Remplacer la liste ?", 'ar': "استبدال قائمة التشغيل؟"},
+    "Only one playlist is allowed during the trial. The old playlist will be replaced after a successful import. Trial time and devices stay unchanged.": <String, String>{'ru': "В пробный период разрешён один плейлист. Старый будет заменён после успешного импорта. Срок и устройства не изменятся.", 'pl': "W okresie próbnym dozwolona jest jedna playlista. Stara zostanie zastąpiona po udanym imporcie. Okres próbny i urządzenia pozostaną bez zmian.", 'es': "Durante la prueba solo se permite una lista. La anterior se sustituirá tras importar correctamente. El periodo de prueba y los dispositivos no cambian.", 'fr': "Une seule liste est autorisée pendant l’essai. L’ancienne sera remplacée après un import réussi. La durée de l’essai et les appareils restent inchangés.", 'ar': "يُسمح بقائمة واحدة خلال الفترة التجريبية. ستُستبدل القائمة القديمة بعد نجاح الاستيراد. لن تتغير مدة التجربة أو الأجهزة."},
+    "Cancel": <String, String>{'ru': "Отмена", 'pl': "Anuluj", 'es': "Cancelar", 'fr': "Annuler", 'ar': "إلغاء"},
+    "Replace": <String, String>{'ru': "Заменить", 'pl': "Zastąp", 'es': "Reemplazar", 'fr': "Remplacer", 'ar': "استبدال"},
+    "Enter an M3U link or select a file.": <String, String>{'ru': "Введите ссылку M3U или выберите файл.", 'pl': "Wpisz link M3U lub wybierz plik.", 'es': "Introduce un enlace M3U o selecciona un archivo.", 'fr': "Saisissez un lien M3U ou choisissez un fichier.", 'ar': "أدخل رابط M3U أو اختر ملفًا."},
+    "Reading local M3U file…": <String, String>{'ru': "Чтение локального файла M3U…", 'pl': "Odczyt lokalnego pliku M3U…", 'es': "Leyendo archivo M3U local…", 'fr': "Lecture du fichier M3U local…", 'ar': "جارٍ قراءة ملف M3U المحلي…"},
+    "Could not read or save the M3U file.": <String, String>{'ru': "Не удалось прочитать или сохранить файл M3U.", 'pl': "Nie można odczytać lub zapisać pliku M3U.", 'es': "No se pudo leer o guardar el archivo M3U.", 'fr': "Impossible de lire ou d’enregistrer le fichier M3U.", 'ar': "تعذرت قراءة ملف M3U أو حفظه."},
+    "Processing playlist…": <String, String>{'ru': "Обработка плейлиста…", 'pl': "Przetwarzanie playlisty…", 'es': "Procesando lista…", 'fr': "Traitement de la liste…", 'ar': "جارٍ معالجة قائمة التشغيل…"},
+    "Could not load or save the playlist.": <String, String>{'ru': "Не удалось загрузить или сохранить плейлист.", 'pl': "Nie można wczytać lub zapisać playlisty.", 'es': "No se pudo cargar o guardar la lista.", 'fr': "Impossible de charger ou d’enregistrer la liste.", 'ar': "تعذر تحميل قائمة التشغيل أو حفظها."},
+    "Loading live TV…": <String, String>{'ru': "Загрузка ТВ…", 'pl': "Wczytywanie telewizji…", 'es': "Cargando TV en directo…", 'fr': "Chargement de la TV en direct…", 'ar': "جارٍ تحميل البث المباشر…"},
+    "Loading movies…": <String, String>{'ru': "Загрузка фильмов…", 'pl': "Wczytywanie filmów…", 'es': "Cargando películas…", 'fr': "Chargement des films…", 'ar': "جارٍ تحميل الأفلام…"},
+    "Loading series…": <String, String>{'ru': "Загрузка сериалов…", 'pl': "Wczytywanie seriali…", 'es': "Cargando series…", 'fr': "Chargement des séries…", 'ar': "جارٍ تحميل المسلسلات…"},
+    "Timeout: Server did not respond. Check address, network and credentials.": <String, String>{'ru': "Время ожидания истекло. Проверьте адрес, сеть и данные входа.", 'pl': "Przekroczono czas oczekiwania. Sprawdź adres, sieć i dane logowania.", 'es': "Tiempo agotado. Comprueba la dirección, la red y las credenciales.", 'fr': "Délai dépassé. Vérifiez l’adresse, le réseau et les identifiants.", 'ar': "انتهت مهلة الاتصال. تحقق من العنوان والشبكة وبيانات الدخول."},
+    "Invalid server response.": <String, String>{'ru': "Недопустимый ответ сервера.", 'pl': "Nieprawidłowa odpowiedź serwera.", 'es': "Respuesta del servidor no válida.", 'fr': "Réponse du serveur non valide.", 'ar': "استجابة الخادم غير صالحة."},
+    "Xtream connection failed. Check credentials and network.": <String, String>{'ru': "Не удалось подключиться к Xtream. Проверьте данные входа и сеть.", 'pl': "Połączenie Xtream nie powiodło się. Sprawdź dane logowania i sieć.", 'es': "Error de conexión Xtream. Comprueba las credenciales y la red.", 'fr': "Échec de la connexion Xtream. Vérifiez les identifiants et le réseau.", 'ar': "فشل اتصال Xtream. تحقق من بيانات الدخول والشبكة."},
+    "Your credentials are stored securely.": <String, String>{'ru': "Ваши данные входа защищены при хранении.", 'pl': "Twoje dane logowania są bezpiecznie przechowywane.", 'es': "Tus credenciales se guardan de forma segura.", 'fr': "Vos identifiants sont stockés de façon sécurisée.", 'ar': "تُحفظ بيانات الدخول بأمان."},
+    "Loading playlist…": <String, String>{'ru': "Загрузка плейлиста…", 'pl': "Wczytywanie playlisty…", 'es': "Cargando lista…", 'fr': "Chargement de la liste…", 'ar': "جارٍ تحميل قائمة التشغيل…"},
+    "Please wait. The bar indicates activity, not an estimated percentage.": <String, String>{'ru': "Подождите. Индикатор показывает активность, а не процент выполнения.", 'pl': "Poczekaj. Pasek pokazuje aktywność, a nie szacowany procent.", 'es': "Espera. La barra indica actividad, no un porcentaje estimado.", 'fr': "Patientez. La barre indique une activité, pas un pourcentage estimé.", 'ar': "يرجى الانتظار. يشير الشريط إلى النشاط وليس نسبة تقديرية."},
+    "QR connection unavailable. Use manual setup.": <String, String>{'ru': "QR-подключение недоступно. Используйте ручную настройку.", 'pl': "Połączenie QR niedostępne. Użyj konfiguracji ręcznej.", 'es': "Conexión QR no disponible. Usa la configuración manual.", 'fr': "Connexion QR indisponible. Utilisez la configuration manuelle.", 'ar': "اتصال QR غير متاح. استخدم الإعداد اليدوي."},
+    "Device ID": <String, String>{'ru': "ID устройства", 'pl': "Identyfikator urządzenia", 'es': "ID del dispositivo", 'fr': "Identifiant de l’appareil", 'ar': "معرّف الجهاز"},
+    "Refresh QR code": <String, String>{'ru': "Обновить QR-код", 'pl': "Odśwież kod QR", 'es': "Renovar código QR", 'fr': "Renouveler le code QR", 'ar': "تجديد رمز QR"},
+    "Add M3U playlist": <String, String>{'ru': "Добавить плейлист M3U", 'pl': "Dodaj playlistę M3U", 'es': "Añadir lista M3U", 'fr': "Ajouter une liste M3U", 'ar': "إضافة قائمة M3U"},
+    "Enter a playlist link or select a file from your device.": <String, String>{'ru': "Введите ссылку на плейлист или выберите файл на устройстве.", 'pl': "Wpisz link do playlisty lub wybierz plik z urządzenia.", 'es': "Introduce un enlace a la lista o selecciona un archivo de tu dispositivo.", 'fr': "Saisissez un lien ou choisissez un fichier sur votre appareil.", 'ar': "أدخل رابط قائمة التشغيل أو اختر ملفًا من جهازك."},
+    "My playlist": <String, String>{'ru': "Мой плейлист", 'pl': "Moja playlista", 'es': "Mi lista", 'fr': "Ma liste", 'ar': "قائمة التشغيل الخاصة بي"},
+    "Optional – program guide": <String, String>{'ru': "Необязательно — телепрограмма", 'pl': "Opcjonalnie – przewodnik TV", 'es': "Opcional – guía de programación", 'fr': "Facultatif – guide des programmes", 'ar': "اختياري – دليل البرامج"},
+    "Connect Xtream Codes": <String, String>{'ru': "Подключить Xtream Codes", 'pl': "Połącz Xtream Codes", 'es': "Conectar Xtream Codes", 'fr': "Connecter Xtream Codes", 'ar': "ربط Xtream Codes"},
+    "Enter the login details provided by your service.": <String, String>{'ru': "Введите данные входа от вашего поставщика.", 'pl': "Wprowadź dane logowania od dostawcy.", 'es': "Introduce los datos de acceso de tu proveedor.", 'fr': "Saisissez les identifiants de votre fournisseur.", 'ar': "أدخل بيانات الدخول التي وفرها مزود الخدمة."},
+    "My Xtream playlist": <String, String>{'ru': "Мой плейлист Xtream", 'pl': "Moja playlista Xtream", 'es': "Mi lista Xtream", 'fr': "Ma liste Xtream", 'ar': "قائمة Xtream الخاصة بي"},
+    "Username": <String, String>{'ru': "Имя пользователя", 'pl': "Nazwa użytkownika", 'es': "Usuario", 'fr': "Nom d’utilisateur", 'ar': "اسم المستخدم"},
+    "Password": <String, String>{'ru': "Пароль", 'pl': "Hasło", 'es': "Contraseña", 'fr': "Mot de passe", 'ar': "كلمة المرور"},
+  };
 
   String _tr(String de, String tr, String en) {
     final code = context.read<LocaleProvider>().locale.languageCode;
-    return code == 'tr' ? tr : code == 'de' ? de : en;
+    return code == 'tr' ? tr : code == 'de' ? de : (_setupTranslations[en]?[code] ?? en);
   }
 
   void _showError(String message) {
@@ -169,23 +221,47 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     final langCode = context.read<LocaleProvider>().locale.languageCode;
     try {
       serverIp = await TvServer.start((type, d1, d2, d3) {
-        if (!mounted) return;
+        if (!mounted || _isLoading) {
+          if (type == 'm3u_file') unawaited(_deleteReceivedFile(d1));
+          return;
+        }
         _qrExpiry?.cancel();
         setState(() => _qrLink = null);
-        if (type == 'm3u') {
+        if (type == 'm3u' || type == 'm3u_file') {
+          final previous = _receivedM3uPath;
+          if (previous != null) unawaited(_deleteReceivedFile(previous));
           setState(() {
-            _m3uController.text = d1;
-            if (d2.isNotEmpty) _epgController.text = d2;
+            _selectedM3uPath = null;
+            _selectedM3uName = null;
+            _receivedM3uPath = null;
+            _m3uController.clear();
+            _epgController.text = d2;
+            if (type == 'm3u_file') {
+              _receivedM3uPath = d1;
+              _selectedM3uPath = d1;
+              _selectedM3uName = 'playlist.m3u';
+            } else {
+              _m3uController.text = d1;
+            }
           });
           _tabController.animateTo(1);
-          _processPlaylist(d1);
-        } else {
+          if (DeviceLayout.isTelevision) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _tvTabs[1].requestFocus();
+            });
+          }
+        } else if (type == 'xtream') {
           setState(() {
             _xtreamServerController.text = d1;
             _xtreamUserController.text = d2;
             _xtreamPassController.text = d3;
           });
           _tabController.animateTo(2);
+          if (DeviceLayout.isTelevision) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) _tvTabs[2].requestFocus();
+            });
+          }
         }
       }, langCode);
     } catch (_) {
@@ -388,7 +464,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       newlyCopiedPath = localPath;
       await _persistImportedPlaylist(
         source: PlaylistSourceConfig(
-          sourceKey: sourceKey, type: 'm3u', localFilePath: localPath,
+          sourceKey: sourceKey, type: 'm3u', epgUrl: _configuredEpgUrl, localFilePath: localPath,
         ),
         name: _m3uNameController.text,
         type: 'm3u',
@@ -413,6 +489,10 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     } finally {
       if (!committed && newlyCopiedPath != null) {
         try { await File(newlyCopiedPath).delete(); } catch (_) {}
+      }
+      if (path == _receivedM3uPath && (committed || !mounted)) {
+        _receivedM3uPath = null;
+        await _deleteReceivedFile(path);
       }
       await staged.waitForCatalogWrites();
       staged.dispose();
@@ -445,7 +525,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       if (input.trim().startsWith('http://') ||
           input.trim().startsWith('https://')) {
         source = PlaylistSourceConfig(
-          sourceKey: sourceKey, type: 'm3u', m3uUrl: input.trim(),
+          sourceKey: sourceKey, type: 'm3u', epgUrl: _configuredEpgUrl, m3uUrl: input.trim(),
         );
       } else {
         final directory = await getApplicationDocumentsDirectory();
@@ -456,7 +536,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         await File(localPath).writeAsString(input, flush: true);
         newlyWrittenPath = localPath;
         source = PlaylistSourceConfig(
-          sourceKey: sourceKey, type: 'm3u', localFilePath: localPath,
+          sourceKey: sourceKey, type: 'm3u', epgUrl: _configuredEpgUrl, localFilePath: localPath,
         );
       }
       await _persistImportedPlaylist(
@@ -579,6 +659,8 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     }
     _qrExpiry?.cancel();
     TvServer.stop();
+    final received = _receivedM3uPath;
+    if (received != null && !_isLoading) unawaited(_deleteReceivedFile(received));
     _tabController.removeListener(_tvTabChanged);
     _tabController.dispose();
     for (final node in [..._tvTabs, ..._tvFirst]) { node.dispose(); }
