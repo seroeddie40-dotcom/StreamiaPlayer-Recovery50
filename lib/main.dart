@@ -54,6 +54,7 @@ class _BootstrapState extends State<_Bootstrap> {
       _failedStage = null;
       _slow = false;
     });
+    _slowTimer?.cancel();
     _slowTimer = Timer(const Duration(seconds: 5), () {
       if (mounted && _starting) setState(() => _slow = true);
     });
@@ -95,7 +96,7 @@ class _BootstrapState extends State<_Bootstrap> {
             scaffoldBackgroundColor: Colors.black,
           )),
           shortcuts: DeviceLayout.isTelevision ? TvRemoteNavigation.shortcuts : null,
-          home: _failedStage != null || _slow
+          home: _failedStage != null
               ? Scaffold(
                   body: SafeArea(
                     child: Center(
@@ -129,7 +130,22 @@ class _BootstrapState extends State<_Bootstrap> {
                     ),
                   ),
                 )
-              : const SplashScreen(),
+               : Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    const SplashScreen(),
+                    if (_slow)
+                      const SafeArea(
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Padding(
+                            padding: EdgeInsets.all(24),
+                            child: CircularProgressIndicator(),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
         );
   }
 }
