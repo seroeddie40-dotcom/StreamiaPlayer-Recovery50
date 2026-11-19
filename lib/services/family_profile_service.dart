@@ -40,6 +40,28 @@ class FamilyProfileService {
         .toList(growable: false);
   }
 
+  /// Requests the server-authorized, unprotected default profile.
+  /// Errors must propagate: a failed request is not an authorization grant.
+  Future<FamilyProfile> ensureDefaultProfile() async {
+    final accountId = _accountUserId;
+    final result = await _client.rpc('ensure_default_family_profile');
+    if (result is! String || result.isEmpty ||
+        _accountUserId != accountId) {
+      throw StateError('Invalid default profile response');
+    }
+    final profiles = await loadProfiles();
+    if (_accountUserId != accountId || profiles.any((p) => p.isChild)) {
+      throw StateError('Protected family account');
+    }
+    for (final profile in profiles) {
+      if (profile.id == result && profile.accountUserId == accountId &&
+          profile.isAdult && profile.isDefault) {
+        return profile;
+      }
+    }
+    throw StateError('Default profile could not be verified');
+  }
+
   /// Ermittelt das Standardprofil des angemeldeten Kontos.
   /// Gibt null zurück, wenn noch keine Profile existieren.
   Future<FamilyProfile?> loadDefaultProfile() async {
