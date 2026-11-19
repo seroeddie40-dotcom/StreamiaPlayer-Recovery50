@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <item android:drawable="#020916" />
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#020916" />
+        </shape>
+    </item>
 
     <item>
         <bitmap
