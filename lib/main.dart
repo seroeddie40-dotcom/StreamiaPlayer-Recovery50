@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import 'core/platform/tv_remote_navigation.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -29,7 +33,10 @@ class _Bootstrap extends StatefulWidget {
 
 class _BootstrapState extends State<_Bootstrap> {
   Widget? _app;
-  bool _failed = false;
+  String? _failedStage;
+  bool _slow = false;
+  bool _starting = false;
+  Timer? _slowTimer;
 
   @override
   void initState() {
@@ -41,6 +48,15 @@ class _BootstrapState extends State<_Bootstrap> {
   }
 
   Future<void> _start() async {
+    if (_starting || !mounted) return;
+    setState(() {
+      _starting = true;
+      _failedStage = null;
+      _slow = false;
+    });
+    _slowTimer = Timer(const Duration(seconds: 5), () {
+      if (mounted && _starting) setState(() => _slow = true);
+    });
     try {
       final app = await _initializeApp();
 
@@ -50,15 +66,24 @@ class _BootstrapState extends State<_Bootstrap> {
         _app = app;
       });
     } catch (error, stackTrace) {
-      debugPrint('Streamia startup failed: $error');
+      debugPrint('Streamia startup failed (${error.runtimeType})');
       debugPrintStack(stackTrace: stackTrace);
 
       if (!mounted) return;
 
       setState(() {
-        _failed = true;
+        _failedStage = error is _StartupFailure ? error.stage : 'APP';
       });
+    } finally {
+      _slowTimer?.cancel();
+      _starting = false;
     }
+  }
+
+  @override
+  void dispose() {
+    _slowTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -66,19 +91,39 @@ class _BootstrapState extends State<_Bootstrap> {
     return _app ??
         MaterialApp(
           debugShowCheckedModeBanner: false,
-          theme: ThemeData.dark().copyWith(
+          theme: TvRemoteNavigation.theme(ThemeData.dark().copyWith(
             scaffoldBackgroundColor: Colors.black,
-          ),
-          home: _failed
-              ? const Scaffold(
+          )),
+          shortcuts: DeviceLayout.isTelevision ? TvRemoteNavigation.shortcuts : null,
+          home: _failedStage != null || _slow
+              ? Scaffold(
                   body: SafeArea(
                     child: Center(
                       child: Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Text(
-                          'Streamia Player\n'
-                          'Initialization failed. Please restart the app.',
-                          textAlign: TextAlign.center,
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const StreamiaBrandLogo(size: 96),
+                            const SizedBox(height: 20),
+                            const Text('Streamia Player'),
+                            const SizedBox(height: 12),
+                            if (_failedStage != null) ...[
+                              Text('Initialization failed ($_failedStage).',
+                                  textAlign: TextAlign.center),
+                              const SizedBox(height: 16),
+                              FilledButton(
+                                autofocus: true,
+                                onPressed: _start,
+                                child: const Text('Retry'),
+                              ),
+                            ] else ...[
+                              const CircularProgressIndicator(),
+                              const SizedBox(height: 16),
+                              const Text('Still starting… Please wait.',
+                                  textAlign: TextAlign.center),
+                            ],
+                          ],
                         ),
                       ),
                     ),
@@ -89,10 +134,29 @@ class _BootstrapState extends State<_Bootstrap> {
   }
 }
 
-Future<void> _initializeDeviceLayout() async {
-  await DeviceLayout.initialize().timeout(
-    const Duration(seconds: 3),
-  );
+class _StartupFailure implements Exception {
+  final String stage;
+  const _StartupFailure(this.stage);
+  @override
+  String toString() => 'Startup failed: $stage';
+}
+
+Future<T> _stage<T>(String name, Future<T> Function() operation) async {
+  final watch = Stopwatch()..start();
+  try {
+    final result = await operation();
+    debugPrint('Streamia startup $name OK ${watch.elapsedMilliseconds}ms');
+    return result;
+  } catch (error) {
+    debugPrint('Streamia startup $name FAILED ${watch.elapsedMilliseconds}ms (${error.runtimeType})');
+    throw _StartupFailure(name);
+  }
+}
+
+Future<void> _initializeDeviceLayout() => _stage('DEVICE', _configureDeviceLayout);
+
+Future<void> _configureDeviceLayout() async {
+  await DeviceLayout.initialize();
 
   if (DeviceLayout.isTelevision) {
     FocusManager.instance.highlightStrategy =
@@ -104,39 +168,58 @@ Future<void> _initializeDeviceLayout() async {
         32 * 1024 * 1024;
   }
 
-  await SystemChrome.setPreferredOrientations(
-    DeviceLayout.isTelevision
-        ? [
-            DeviceOrientation.landscapeLeft,
-            DeviceOrientation.landscapeRight,
-          ]
-        : [
-            DeviceOrientation.portraitUp,
-          ],
-  ).timeout(
-    const Duration(seconds: 3),
-  );
+  // Android TV already enforces landscape in MainActivity.
+  if (DeviceLayout.isTelevision) return;
+
+  // Orientation is a presentation preference, not an access prerequisite.
+  try {
+    await SystemChrome.setPreferredOrientations(
+      [DeviceOrientation.portraitUp],
+    ).timeout(const Duration(seconds: 2));
+  } catch (error) {
+    debugPrint('Streamia orientation request failed (${error.runtimeType})');
+  }
 
 }
 
-Future<void> _initializeBackend() async {
+Future<void>? _backendInitialization;
+
+Future<void> _initializeBackend() => _stage('BACKEND', _configureBackend);
+
+Future<void> _configureBackend() async {
   if (SupabaseConfig.isConfigured) {
-    await Supabase.initialize(
+    // Keep a timed-out initialization in flight rather than initializing twice.
+    final pending = _backendInitialization ??= Supabase.initialize(
       url: SupabaseConfig.url,
       publishableKey: SupabaseConfig.publishableKey,
-    ).timeout(
-      const Duration(seconds: 20),
-    );
+    ).then<void>((_) {}, onError: (Object error, StackTrace stack) {
+      _backendInitialization = null;
+      Error.throwWithStackTrace(error, stack);
+    });
+    await pending.timeout(const Duration(seconds: 20));
   }
+}
+
+Future<SharedPreferences>? _storageInitialization;
+
+Future<SharedPreferences> _loadPreferences() {
+  return _storageInitialization ??= SharedPreferences.getInstance().then(
+    (value) => value,
+    onError: (Object error, StackTrace stack) {
+      _storageInitialization = null;
+      Error.throwWithStackTrace(error, stack);
+    },
+  );
 }
 
 Future<Widget> _initializeApp() async {
   SharedPreferences? prefs;
   await Future.wait<void>([
     _initializeDeviceLayout(),
-    SharedPreferences.getInstance()
-        .timeout(const Duration(seconds: 5))
-        .then<void>((value) { prefs = value; }),
+    _stage('STORAGE', () async {
+      prefs = await _loadPreferences()
+          .timeout(const Duration(seconds: 10));
+    }),
     _initializeBackend(),
   ]);
 
