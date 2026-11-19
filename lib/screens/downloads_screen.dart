@@ -1,194 +1,755 @@
-import '../widgets/tv_catalog_focus.dart';
-import 'dart:io';
+import '../widgets/profile_clock.dart';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../core/focus_navigation.dart';
-import '../providers/family_session_provider.dart';
-import '../models/family_profile.dart';
+import '../core/platform/device_layout.dart';
+import '../core/localization/app_localizations.dart';
+import '../core/theme/app_theme.dart';
+import '../providers/auth_provider.dart';
+import '../providers/content_provider.dart';
+import '../services/playlist_profile_store.dart';
+import '../services/playlist_refresh_schedule.dart';
+import '../services/playlist_switch_service.dart';
+import '../services/recording_service.dart';
 import '../services/download_service.dart';
-import 'player_screen.dart';
+import '../providers/family_session_provider.dart';
+import '../providers/theme_provider.dart';
+import 'live_tv_screen.dart';
+import 'family_profile_management_screen.dart';
+import 'family_parent_pin_setup_screen.dart';
+import '../services/family_pin_service.dart';
+import 'downloads_screen.dart';
+import 'master_search_screen.dart';
+import 'paywall_screen.dart';
+import 'recordings_screen.dart';
+import 'series_screen.dart';
+import 'settings_screen.dart';
+import 'vod_screen.dart';
 
-class DownloadsScreen extends StatefulWidget {
-  const DownloadsScreen({super.key, this.managedChild});
-  final FamilyProfile? managedChild;
+class DashboardScreen extends StatefulWidget {
+  const DashboardScreen({super.key});
 
   @override
-  State<DownloadsScreen> createState() => _DownloadsScreenState();
+  State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
-class _DownloadsScreenState extends State<DownloadsScreen> {
-  late final Future<void> _ready;
+class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingObserver {
+  Timer? _refreshTimer;
+  bool _refreshRunning = false;
 
   @override
   void initState() {
     super.initState();
-    _ready = DownloadService.initialize();
+    WidgetsBinding.instance.addObserver(this);
+    _refreshTimer = Timer.periodic(const Duration(minutes: 1), (_) => _checkRefresh());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkRefresh());
   }
 
-  String _t(String key) {
-    final lang = Localizations.localeOf(context).languageCode;
-    const words = <String, Map<String, String>>{
-      'de': {'downloads':'Downloads','movies':'Filme','series':'Serien','empty':'Keine Downloads','cancel':'Abbrechen','delete':'Löschen','retry':'Erneut herunterladen','open':'Offline abspielen','loading':'Downloadliste wird geladen','error':'Downloadliste konnte nicht geladen werden','missing':'Datei fehlt','interrupted':'Unterbrochen','failed':'Fehlgeschlagen','cancelled':'Abgebrochen','queued':'Wartend','downloading':'Wird heruntergeladen','completed':'Heruntergeladen','season':'Staffel','episode':'Folge','deleteQuestion':'Download wirklich löschen?'},
-      'tr': {'downloads':'İndirilenler','movies':'Filmler','series':'Diziler','empty':'İndirme yok','cancel':'İptal et','delete':'Sil','retry':'Yeniden indir','open':'Çevrimdışı oynat','loading':'İndirmeler yükleniyor','error':'İndirme listesi yüklenemedi','missing':'Dosya bulunamadı','interrupted':'Kesintiye uğradı','failed':'Başarısız','cancelled':'İptal edildi','queued':'Bekliyor','downloading':'İndiriliyor','completed':'İndirildi','season':'Sezon','episode':'Bölüm','deleteQuestion':'İndirme silinsin mi?'},
-      'en': {'downloads':'Downloads','movies':'Movies','series':'Series','empty':'No downloads','cancel':'Cancel','delete':'Delete','retry':'Download again','open':'Play offline','loading':'Loading downloads','error':'Could not load downloads','missing':'File missing','interrupted':'Interrupted','failed':'Failed','cancelled':'Cancelled','queued':'Queued','downloading':'Downloading','completed':'Downloaded','season':'Season','episode':'Episode','deleteQuestion':'Delete this download?'},
-      'ru': {'downloads':'Загрузки','movies':'Фильмы','series':'Сериалы','empty':'Нет загрузок','cancel':'Отмена','delete':'Удалить','retry':'Скачать снова','open':'Смотреть офлайн','loading':'Загрузка списка','error':'Не удалось загрузить список','missing':'Файл отсутствует','interrupted':'Прервано','failed':'Ошибка','cancelled':'Отменено','queued':'В очереди','downloading':'Загрузка','completed':'Загружено','season':'Сезон','episode':'Серия','deleteQuestion':'Удалить загрузку?'},
-      'pl': {'downloads':'Pobrane','movies':'Filmy','series':'Seriale','empty':'Brak pobranych','cancel':'Anuluj','delete':'Usuń','retry':'Pobierz ponownie','open':'Odtwórz offline','loading':'Ładowanie pobranych','error':'Nie można wczytać listy','missing':'Brak pliku','interrupted':'Przerwano','failed':'Błąd','cancelled':'Anulowano','queued':'W kolejce','downloading':'Pobieranie','completed':'Pobrano','season':'Sezon','episode':'Odcinek','deleteQuestion':'Usunąć pobrany plik?'},
-      'es': {'downloads':'Descargas','movies':'Películas','series':'Series','empty':'Sin descargas','cancel':'Cancelar','delete':'Eliminar','retry':'Descargar de nuevo','open':'Ver sin conexión','loading':'Cargando descargas','error':'No se pudo cargar la lista','missing':'Archivo no encontrado','interrupted':'Interrumpido','failed':'Error','cancelled':'Cancelado','queued':'En espera','downloading':'Descargando','completed':'Descargado','season':'Temporada','episode':'Episodio','deleteQuestion':'¿Eliminar esta descarga?'},
-      'fr': {'downloads':'Téléchargements','movies':'Films','series':'Séries','empty':'Aucun téléchargement','cancel':'Annuler','delete':'Supprimer','retry':'Télécharger à nouveau','open':'Lire hors ligne','loading':'Chargement','error':'Impossible de charger les téléchargements','missing':'Fichier introuvable','interrupted':'Interrompu','failed':'Échec','cancelled':'Annulé','queued':'En attente','downloading':'Téléchargement','completed':'Téléchargé','season':'Saison','episode':'Épisode','deleteQuestion':'Supprimer ce téléchargement ?'},
-      'ar': {'downloads':'التنزيلات','movies':'أفلام','series':'مسلسلات','empty':'لا توجد تنزيلات','cancel':'إلغاء','delete':'حذف','retry':'إعادة التنزيل','open':'تشغيل دون اتصال','loading':'جارٍ تحميل التنزيلات','error':'تعذر تحميل قائمة التنزيلات','missing':'الملف غير موجود','interrupted':'انقطع','failed':'فشل','cancelled':'أُلغي','queued':'قيد الانتظار','downloading':'جارٍ التنزيل','completed':'تم التنزيل','season':'الموسم','episode':'الحلقة','deleteQuestion':'هل تريد حذف التنزيل؟'},
-    };
-    return (words[lang] ?? words['en']!)[key] ?? key;
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _checkRefresh());
+    }
   }
 
-  String _legacyNotice() {
-    const notices = {
-      'de': 'Ältere Downloads ohne Profilzuordnung bleiben gespeichert, werden jedoch nicht angezeigt.',
-      'tr': 'Profil ataması olmayan eski indirmeler saklanır ancak gösterilmez.',
-      'en': 'Older downloads without a profile assignment are retained but not displayed.',
-      'fr': 'Les anciens téléchargements sans profil sont conservés mais non affichés.',
-      'es': 'Las descargas antiguas sin perfil se conservan, pero no se muestran.',
-      'pl': 'Starsze pobrania bez przypisanego profilu są zachowane, ale niewidoczne.',
-      'ru': 'Старые загрузки без профиля сохранены, но не отображаются.',
-      'ar': 'يتم الاحتفاظ بالتنزيلات القديمة غير المرتبطة بملف شخصي دون عرضها.',
-    };
-    return notices[Localizations.localeOf(context).languageCode] ?? notices['en']!;
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
-  bool _owns(DownloadEntry entry) {
+  bool _canRefresh() => mounted &&
+      WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed &&
+      ModalRoute.of(context)?.isCurrent == true &&
+      context.read<AuthProvider>().hasAccess &&
+      !RecordingService.isActive && !DownloadService.hasActiveOperations;
+
+  Future<void> _checkRefresh() async {
+    if (_refreshRunning || !_canRefresh()) return;
+    _refreshRunning = true;
+    try {
+      final content = context.read<ContentProvider>();
+      if (!content.isLoaded) return;
+      final key = content.sourceKey;
+      final profiles = await PlaylistProfileStore().load();
+      for (final profile in profiles) {
+        if (!profile.isActive || profile.sourceKey != key) continue;
+        bool needsRepair() => [
+          content.channels.map((item) => item.categoryKey),
+          content.vodItems.map((item) => item.categoryKey),
+          content.series.map((item) => item.categoryKey),
+        ].any(PlaylistRefreshSchedule.needsLegacyRepair);
+        if (await PlaylistRefreshSchedule.hours(key) == 0) return;
+        if (!await PlaylistRefreshSchedule.automaticAttemptAllowed(key)) return;
+        final repair = !await PlaylistRefreshSchedule.repairAttempted(key) && needsRepair();
+        if (!repair && !await PlaylistRefreshSchedule.due(key)) return;
+        bool allowed() => _canRefresh() && content.sourceKey == key;
+        if (!allowed()) return;
+        final refreshed = await PlaylistSwitchService().refresh(profile, content,
+            mayPublish: allowed, repair: repair);
+        if (repair && refreshed && !needsRepair()) {
+          await PlaylistRefreshSchedule.markRepairAttempted(key);
+        }
+        return;
+      }
+    } catch (error) {
+      debugPrint('Scheduled playlist refresh failed: ${error.runtimeType}');
+    } finally {
+      _refreshRunning = false;
+    }
+  }
+
+  String _label(
+    BuildContext context,
+    String de,
+    String tr,
+    String en,
+  ) {
+    final language = Localizations.localeOf(context).languageCode;
+    if (language == 'de') return de;
+    if (language == 'tr') return tr;
+    return en;
+  }
+
+  String _recordingsLabel(BuildContext context) {
+    switch (Localizations.localeOf(context).languageCode) {
+      case 'de': return 'Aufnahmen';
+      case 'tr': return 'Kayıtlar';
+      case 'ru': return 'Записи';
+      case 'pl': return 'Nagrania';
+      case 'es': return 'Grabaciones';
+      case 'fr': return 'Enregistrements';
+      case 'ar': return 'التسجيلات';
+      default: return 'Recordings';
+    }
+  }
+
+  String _downloadsLabel(BuildContext context) {
+    switch (Localizations.localeOf(context).languageCode) {
+      case 'de': return 'Downloads';
+      case 'tr': return 'İndirilenler';
+      case 'ru': return 'Загрузки';
+      case 'pl': return 'Pobrane';
+      case 'es': return 'Descargas';
+      case 'fr': return 'Téléchargements';
+      case 'ar': return 'التنزيلات';
+      default: return 'Downloads';
+    }
+  }
+
+  // All trial dates are issued by Supabase, never by the device.
+  DateTime? _trialExpiry(AuthProvider auth) {
+    final raw = auth.access?['trial_ends_at']?.toString();
+    if (raw == null || raw.isEmpty) return null;
+    return DateTime.tryParse(raw)?.toUtc();
+  }
+
+  String _trialText(BuildContext context, int days) {
+    final code = Localizations.localeOf(context).languageCode;
+    final remaining = days < 1 ? 1 : days;
+    switch (code) {
+      case 'de': return 'Noch $remaining ${remaining == 1 ? 'Tag' : 'Tage'} Testphase';
+      case 'tr': return 'Deneme süresinde $remaining gün kaldı';
+      case 'ru': return 'Пробный период: осталось $remaining дн.';
+      case 'pl': return 'Pozostało $remaining dni okresu próbnego';
+      case 'es': return 'Quedan $remaining días de prueba';
+      case 'fr': return 'Essai : encore $remaining jours';
+      case 'ar': return 'متبقٍ $remaining يوم من الفترة التجريبية';
+      default: return '$remaining ${remaining == 1 ? 'day' : 'days'} left in trial';
+    }
+  }
+
+  Future<void> _openProfiles() async {
     final family = context.read<FamilySessionProvider>();
-    final active = family.activeProfile;
-    final child = widget.managedChild;
-    if (child != null && (family.parentAccessToken == null || active?.accountUserId != child.accountUserId || !child.isChild)) return false;
-    final profile = child ?? active;
-    return family.isReady && profile != null &&
-        entry.belongsTo(profile.accountUserId, profile.id);
-  }
-
-  Future<void> _play(DownloadEntry entry) async {
-    if (widget.managedChild != null || !_owns(entry) || !entry.hasSafeFilename || entry.state != DownloadState.completed) return;
-    final root = await getApplicationDocumentsDirectory();
-    final file = File('${root.path}/downloads/${entry.filename}');
-    if (!mounted || !_owns(entry)) return;
-    if (!await file.exists()) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_t('missing'))));
+    if (!family.isAdult) {
+      family.clearSession();
       return;
     }
-    if (!mounted || !_owns(entry)) return;
-    pushWithFocusRestore(context, MaterialPageRoute<void>(builder: (_) =>
-      PlayerScreen(streamUrl: file.uri.toString(), title: entry.title,
-        isLive: false, offlineDownloadId: entry.id)));
-  }
-
-  Future<void> _confirmDelete(DownloadEntry entry) async {
-    if (!_owns(entry)) return;
-    final confirmed = await showDialog<bool>(
+    final l10n = AppLocalizations.of(context);
+    final protectedSession = family.parentAccessToken != null;
+    final choice = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(_t('deleteQuestion')),
-        content: Text(entry.title),
-        actions: [
-          TextButton(
-            autofocus: true,
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(_t('cancel')),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(_t('delete')),
-          ),
+      builder: (dialogContext) => SimpleDialog(
+        title: Text(l10n.t('nav_profiles')),
+        children: [
+          if (protectedSession)
+            SimpleDialogOption(onPressed: () => Navigator.pop(dialogContext, 'switch'), child: Text(l10n.t('family_switch_profile'))),
+          SimpleDialogOption(onPressed: () => Navigator.pop(dialogContext, 'manage'), child: Text(l10n.t('family_manage'))),
+          if (protectedSession)
+            SimpleDialogOption(onPressed: () => Navigator.pop(dialogContext, 'rules'), child: Text(l10n.t('family_manage_rules'))),
         ],
       ),
     );
-    if (confirmed != true || !mounted || !_owns(entry)) return;
+    if (!mounted || choice == null || !family.isAdult) return;
+    if (choice == 'switch') {
+      family.clearSession();
+      return;
+    }
+    if (family.parentAccessToken != null) {
+      _open(FamilyProfileManagementScreen(rulesOnly: choice == 'rules', useActiveSession: true));
+      return;
+    }
+    // A PIN-free session must never authorize protected management.
+    final pinService = FamilyPinService();
     try {
-      await DownloadService.remove(entry.id);
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_t('failed'))),
-        );
+      final status = await pinService.getParentPinStatus();
+      if (!mounted || !family.isAdult) return;
+      if (status == FamilyParentPinStatus.configured) {
+        family.clearSession();
+        return;
       }
+      if (status != FamilyParentPinStatus.notConfigured) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.t('family_server_verify_failed'))),
+        );
+        return;
+      }
+      await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => const FamilyParentPinSetupScreen(),
+      ));
+      // Recheck even when the setup route was dismissed: the PIN may have
+      // been saved remotely before the route returned.
+      final updated = await pinService.getParentPinStatus();
+      if (!mounted) return;
+      if (updated != FamilyParentPinStatus.notConfigured) {
+        family.clearSession();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      family.clearSession();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.t('family_server_verify_failed'))),
+      );
     }
   }
 
-  Widget _item(DownloadEntry entry) {
-    final active = entry.state == DownloadState.downloading || entry.state == DownloadState.queued;
-    final status = _t(entry.state.name);
-    final subtitle = entry.kind == 'episode'
-        ? '${_t('season')} ${entry.season ?? '-'} · ${_t('episode')} ${entry.episode ?? '-'} · $status'
-        : status;
-    return TvCatalogFocus(child: ListTile(
-      leading: Icon(entry.kind == 'episode' ? Icons.tv : Icons.movie_outlined),
-      title: Text(entry.title),
-      subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-        Text(subtitle),
-        if (active) ...[
-          LinearProgressIndicator(value: entry.progress.isFinite && entry.progress > 0
-              ? entry.progress.clamp(0.0, 1.0).toDouble() : null),
-          if (entry.progress.isFinite && entry.progress > 0)
-            Text('${(entry.progress.clamp(0.0, 1.0) * 100).floor()}%'),
-        ],
-      ]),
-      trailing: Wrap(spacing: 0, children: [
-        if (widget.managedChild == null && entry.state == DownloadState.completed)
-          IconButton(tooltip: _t('open'), icon: const Icon(Icons.play_arrow), onPressed: () => _play(entry)),
-        if (active)
-          IconButton(tooltip: _t('cancel'), icon: const Icon(Icons.cancel_outlined), onPressed: () {
-            if (_owns(entry)) DownloadService.cancel(entry.id);
-          }),
-        IconButton(tooltip: _t('delete'), icon: const Icon(Icons.delete_outline), onPressed: () => _confirmDelete(entry)),
-      ]),
-    ));
-  }
-
-  Widget _content(List<DownloadEntry> items) {
-    if (items.isEmpty) return Center(child: Text(_t('empty')));
-    final movies = items.where((e) => e.kind != 'episode').toList();
-    final episodes = items.where((e) => e.kind == 'episode').toList();
-    final grouped = <String, List<DownloadEntry>>{};
-    for (final episode in episodes) {
-      grouped.putIfAbsent(episode.seriesTitle ?? episode.title, () => []).add(episode);
-    }
-    return ListView(children: [
-      ExpansionTile(initiallyExpanded: true, leading: const Icon(Icons.movie), title: Text('${_t('movies')} (${movies.length})'),
-        children: movies.map(_item).toList()),
-      ExpansionTile(initiallyExpanded: true, leading: const Icon(Icons.video_library), title: Text('${_t('series')} (${episodes.length})'),
-        children: grouped.entries.map((group) => ExpansionTile(
-          leading: const Icon(Icons.folder_outlined), title: Text(group.key),
-          children: group.value.map(_item).toList(),
-        )).toList()),
-    ]);
+  void _open(Widget screen) {
+    pushWithFocusRestore(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => screen,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final family = context.watch<FamilySessionProvider>();
-    if (!family.isReady || family.activeProfile == null || (widget.managedChild != null && (family.parentAccessToken == null || family.activeProfile?.accountUserId != widget.managedChild!.accountUserId || !widget.managedChild!.isChild))) {
-      return Scaffold(
-        appBar: AppBar(title: Text(widget.managedChild == null ? _t('downloads') : '${_t('downloads')} · ${widget.managedChild!.displayName}')),
-        body: Center(
-          child: Text(_t('loading')),
-        ),
-      );
-    }
+    final l10n = AppLocalizations.of(context);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final auth = context.watch<AuthProvider>();
+    final trialExpiry = _trialExpiry(auth);
+    final now = DateTime.now().toUtc();
+    final trialActive = auth.hasAccountAccess &&
+        auth.access?['access_status'] == 'trial' &&
+        auth.access?['entitlement_source'] == 'trial' &&
+        trialExpiry != null && trialExpiry.isAfter(now);
+    final trialDaysLeft = trialActive
+        ? (trialExpiry.difference(now).inSeconds / 86400).ceil()
+        : 0;
+    // No promotional trial claim for a paid or admin-enabled account.
+    final showTrialCard = auth.isLoggedIn && auth.accessChecked &&
+        (trialActive || !auth.hasAccountAccess);
+
+
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final isTv = DeviceLayout.isTelevision;
+    final compact = screenWidth < 600;
+
+    // Pro is available during the trial as well.
+    final showPro = auth.isLoggedIn;
+
+    final entries = <_HomeEntry>[
+      _HomeEntry(
+        Icons.live_tv_rounded,
+        l10n.t('nav_live'),
+        () => _open(const LiveTvScreen()),
+      ),
+      _HomeEntry(
+        Icons.movie_creation_outlined,
+        l10n.t('nav_vod'),
+        () => _open(const VodScreen()),
+      ),
+      _HomeEntry(
+        Icons.video_library_outlined,
+        l10n.t('nav_series'),
+        () => _open(const SeriesScreen()),
+      ),
+      _HomeEntry(
+        Icons.download_for_offline_outlined,
+        _downloadsLabel(context),
+        () => _open(const DownloadsScreen()),
+      ),
+      _HomeEntry(
+        Icons.fiber_manual_record_rounded,
+        _recordingsLabel(context),
+        () => _open(const RecordingsScreen()),
+      ),
+      _HomeEntry(
+        Icons.people_alt_outlined,
+        l10n.t('nav_profiles'),
+        _openProfiles,
+      ),
+    ];
+
     return Scaffold(
-    appBar: AppBar(title: Text(widget.managedChild == null ? _t('downloads') : '${_t('downloads')} · ${widget.managedChild!.displayName}')),
-    body: FutureBuilder<void>(future: _ready, builder: (context, snapshot) {
-      if (snapshot.hasError) return Center(child: Text(_t('error')));
-      if (snapshot.connectionState != ConnectionState.done) return Center(child: Text(_t('loading')));
-      return ValueListenableBuilder<List<DownloadEntry>>(
-        valueListenable: DownloadService.entries,
-        builder: (context, items, _) => Column(children: [
-          if (widget.managedChild == null && family.parentAccessToken != null &&
-              items.any((entry) => entry.isUnassigned))
-            Padding(padding: const EdgeInsets.all(12), child: Text(_legacyNotice())),
-          Expanded(child: _content(items.where(_owns).toList())),
-        ]),
-      );
-    }),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                compact ? 12 : (isTv ? 28 : 36),
+                isTv ? 8 : 12,
+                compact ? 12 : (isTv ? 28 : 36),
+                isTv ? 4 : 8,
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: compact ? 40 : 52,
+                    height: compact ? 40 : 52,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: AppTheme.accentGradient,
+                    ),
+                    alignment: Alignment.center,
+                    child: const Text(
+                      'S',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 27,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+
+                  Expanded(
+                    child: Text(
+                      l10n.t('app_name'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: compact ? 17 : 24,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ),
+                  const Flexible(child: ProfileClock(dashboard: true)),
+                  if (showPro) ...[
+                    _ProButton(
+                      label: l10n.t('nav_pro'),
+                      onTap: () => _open(const PaywallScreen()),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                  IconButton(
+                    tooltip: _label(
+                      context,
+                      'Suche',
+                      'Ara',
+                      'Search',
+                    ),
+                    onPressed: () =>
+                        _open(const MasterSearchScreen()),
+                    icon: const Icon(Icons.search_rounded),
+                  ),
+                  IconButton(
+                    tooltip: _label(
+                      context,
+                      'Design wechseln',
+                      'Temayı değiştir',
+                      'Change theme',
+                    ),
+                    onPressed: () =>
+                        context.read<ThemeProvider>().toggleTheme(),
+                    icon: Icon(
+                      isDark
+                          ? Icons.light_mode_outlined
+                          : Icons.dark_mode_outlined,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: _label(
+                      context,
+                      'Einstellungen',
+                      'Ayarlar',
+                      'Settings',
+                    ),
+                    onPressed: () =>
+                        _open(const SettingsScreen()),
+                    icon: const Icon(Icons.settings_outlined),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = constraints.maxWidth;
+                  final horizontal = isTv ? 28.0 : (width < 600 ? 16.0 : 36.0);
+
+                  final int columns;
+                  if (isTv) {
+                    columns = width < 850 ? 2 : 3;
+                  } else if (width < 380) {
+                    columns = 1;
+                  } else if (width < 650) {
+                    columns = 2;
+                  } else {
+                    columns = 3;
+                  }
+
+                  final double aspectRatio;
+                  if (isTv) {
+                    // Short TV viewports need shallow tiles to keep both rows reachable.
+                    final usableWidth = width - horizontal * 2 - (columns - 1) * 14;
+                    final tileWidth = usableWidth / columns;
+                    final availableHeight = constraints.maxHeight - (showTrialCard ? 110 : 48);
+                    final tileHeight = (availableHeight / 2 - 14).clamp(92.0, 190.0);
+                    aspectRatio = tileWidth / tileHeight;
+                  } else if (columns == 1) {
+                    aspectRatio = 3.2;
+                  } else if (columns == 2) {
+                    aspectRatio = 1.45;
+                  } else {
+                    aspectRatio = width >= 1100 ? 2.05 : 1.6;
+                  }
+
+                  return FocusTraversalGroup(
+                    child: CustomScrollView(
+                      slivers: [
+                        SliverPadding(
+                          padding: EdgeInsets.fromLTRB(
+                            horizontal,
+                            18,
+                            horizontal,
+                            12,
+                          ),
+                          sliver: SliverToBoxAdapter(
+                            child: Column(
+                              crossAxisAlignment:
+                                  CrossAxisAlignment.start,
+                              children: [
+                                if (showTrialCard)
+                                  _TrialInfoCard(
+                                    title: trialActive
+                                        ? _trialText(context, trialDaysLeft)
+                                        : _label(
+                                            context,
+                                            'Streamia Pro entdecken',
+                                            'Streamia Pro paketlerini keşfet',
+                                            'Explore Streamia Pro',
+                                          ),
+                                    subtitle: trialActive
+                                        ? _label(
+                                            context,
+                                            '1 Gerät · Testphase aktiv',
+                                            '1 cihaz · Deneme aktif',
+                                            '1 device · Trial active',
+                                          )
+                                        : _label(
+                                            context,
+                                            'Tarife für 1, 3 oder 5 Geräte ansehen',
+                                            '1, 3 veya 5 cihazlık paketler',
+                                            'View plans for 1, 3 or 5 devices',
+                                          ),
+                                    actionLabel: _label(
+                                      context,
+                                      'Pro-Tarife',
+                                      'Pro paketleri',
+                                      'Pro plans',
+                                    ),
+                                    onTap: () =>
+                                        _open(const PaywallScreen()),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        SliverPadding(
+                          padding: EdgeInsets.fromLTRB(
+                            horizontal,
+                            8,
+                            horizontal,
+                            28,
+                          ),
+                          sliver: SliverGrid(
+                            delegate: SliverChildBuilderDelegate(
+                              (context, index) => _PremiumTile(
+                                entry: entries[index],
+                                autofocus: isTv && index == 0,
+                              ),
+                              childCount: entries.length,
+                            ),
+                            gridDelegate:
+
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: columns,
+                              mainAxisSpacing: 14,
+                              crossAxisSpacing: 14,
+                              childAspectRatio: aspectRatio,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeEntry {
+  final IconData icon;
+  final String title;
+  final VoidCallback onTap;
+
+  const _HomeEntry(
+    this.icon,
+    this.title,
+    this.onTap,
   );
+}
+
+class _TrialInfoCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final String actionLabel;
+  final VoidCallback onTap;
+
+  const _TrialInfoCard({
+    required this.title,
+    required this.subtitle,
+    required this.actionLabel,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        focusColor: AppTheme.electricBlue.withOpacity(0.25),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: dark
+                ? AppTheme.darkSurface
+                : const Color(0xFFE6EDF2),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: AppTheme.electricBlue.withOpacity(0.28),
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 13,
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(9),
+                decoration: BoxDecoration(
+                  color: AppTheme.electricBlue.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.card_giftcard_rounded,
+                  color: AppTheme.electricBlue,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withOpacity(0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Tooltip(
+                message: actionLabel,
+                child: Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: AppTheme.electricBlue,
+                  size: 16,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProButton extends StatelessWidget {
+  final String label;
+  final VoidCallback onTap;
+
+  const _ProButton({
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        focusColor: AppTheme.electricBlue.withOpacity(0.25),
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: AppTheme.accentGradient,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
+          child: Text(
+            label,
+            maxLines: 1,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 13,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PremiumTile extends StatefulWidget {
+  final _HomeEntry entry;
+  final bool autofocus;
+
+  const _PremiumTile({
+    required this.entry,
+    this.autofocus = false,
+  });
+
+  @override
+  State<_PremiumTile> createState() => _PremiumTileState();
+}
+
+class _PremiumTileState extends State<_PremiumTile> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isTv = DeviceLayout.isTelevision;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        autofocus: widget.autofocus,
+        onFocusChange: (focused) {
+          if (mounted) setState(() => _focused = focused);
+          if (focused && isTv) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) Scrollable.ensureVisible(context, duration: const Duration(milliseconds: 180), alignment: 0.35);
+            });
+          }
+        },
+        onTap: widget.entry.onTap,
+        focusColor: AppTheme.electricBlue.withOpacity(0.28),
+        borderRadius: BorderRadius.circular(20),
+        child: Ink(
+          decoration: BoxDecoration(
+            color: AppTheme.darkSurface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isTv && _focused ? AppTheme.electricBlue : AppTheme.electricBlue.withOpacity(0.45),
+              width: isTv && _focused ? 3 : 1,
+            ),
+            boxShadow: isTv && _focused ? [BoxShadow(color: AppTheme.electricBlue.withOpacity(0.30), blurRadius: 16, spreadRadius: 1)] : null,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.electricBlue.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(
+                    widget.entry.icon,
+                    size: isTv ? 30 : 24,
+                    color: AppTheme.electricBlue,
+                  ),
+                ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.entry.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: isTv ? 20 : 16,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      color: Colors.white,
+                      size: 14,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
