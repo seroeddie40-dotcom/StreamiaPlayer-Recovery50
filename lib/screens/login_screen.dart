@@ -384,7 +384,7 @@ class _LoginScreenState extends State<LoginScreen> {
     final brand = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-                      StreamiaBrandLogo(size: isTv ? 100 : 72),
+                      StreamiaBrandLogo(size: isTv ? 144 : 80),
 
                       const SizedBox(height: 12),
 
