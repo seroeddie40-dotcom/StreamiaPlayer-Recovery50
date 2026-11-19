@@ -19,6 +19,8 @@ import '../providers/family_session_provider.dart';
 import '../providers/theme_provider.dart';
 import 'live_tv_screen.dart';
 import 'family_profile_management_screen.dart';
+import 'family_parent_pin_setup_screen.dart';
+import '../services/family_pin_service.dart';
 import 'downloads_screen.dart';
 import 'master_search_screen.dart';
 import 'paywall_screen.dart';
@@ -168,22 +170,60 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       return;
     }
     final l10n = AppLocalizations.of(context);
+    final protectedSession = family.parentAccessToken != null;
     final choice = await showDialog<String>(
       context: context,
       builder: (dialogContext) => SimpleDialog(
         title: Text(l10n.t('nav_profiles')),
         children: [
-          SimpleDialogOption(onPressed: () => Navigator.pop(dialogContext, 'switch'), child: Text(l10n.t('family_switch_profile'))),
+          if (protectedSession)
+            SimpleDialogOption(onPressed: () => Navigator.pop(dialogContext, 'switch'), child: Text(l10n.t('family_switch_profile'))),
           SimpleDialogOption(onPressed: () => Navigator.pop(dialogContext, 'manage'), child: Text(l10n.t('family_manage'))),
-          SimpleDialogOption(onPressed: () => Navigator.pop(dialogContext, 'rules'), child: Text(l10n.t('family_manage_rules'))),
+          if (protectedSession)
+            SimpleDialogOption(onPressed: () => Navigator.pop(dialogContext, 'rules'), child: Text(l10n.t('family_manage_rules'))),
         ],
       ),
     );
     if (!mounted || choice == null || !family.isAdult) return;
     if (choice == 'switch') {
       family.clearSession();
-    } else {
+      return;
+    }
+    if (family.parentAccessToken != null) {
       _open(FamilyProfileManagementScreen(rulesOnly: choice == 'rules', useActiveSession: true));
+      return;
+    }
+    // A PIN-free session must never authorize protected management.
+    final pinService = FamilyPinService();
+    try {
+      final status = await pinService.getParentPinStatus();
+      if (!mounted || !family.isAdult) return;
+      if (status == FamilyParentPinStatus.configured) {
+        family.clearSession();
+        return;
+      }
+      if (status != FamilyParentPinStatus.notConfigured) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(l10n.t('family_server_verify_failed'))),
+        );
+        return;
+      }
+      await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => const FamilyParentPinSetupScreen(),
+      ));
+      // Recheck even when the setup route was dismissed: the PIN may have
+      // been saved remotely before the route returned.
+      final updated = await pinService.getParentPinStatus();
+      if (!mounted) return;
+      if (updated != FamilyParentPinStatus.notConfigured) {
+        family.clearSession();
+      }
+    } catch (_) {
+      if (!mounted) return;
+      family.clearSession();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.t('family_server_verify_failed'))),
+      );
     }
   }
 
