@@ -35,6 +35,7 @@ class AuthProvider extends ChangeNotifier {
   bool _disposed = false;
   bool _emailConfirmationSuccess = false;
   String? _error;
+  String? _accessDiagnostic;
   bool _registrationSubmitted = false;
   bool _registrationNeedsConfirmation = false;
 
@@ -74,6 +75,7 @@ class AuthProvider extends ChangeNotifier {
       List.unmodifiable(_activeDevices);
   bool get accessChecked => _accessChecked;
   String? get error => _error;
+  String? get accessDiagnostic => _accessDiagnostic;
   String? get deviceId => _deviceId;
   String? get deviceStatus => _deviceStatus;
   Map<String, dynamic>? get access => _access;
@@ -124,6 +126,7 @@ class AuthProvider extends ChangeNotifier {
         await refreshDeviceAndAccess();
       }
     } catch (e) {
+      _accessDiagnostic = e is TimeoutException ? 'SESSION-TIMEOUT' : 'SESSION-ERROR';
       _error = _friendlyError(e);
       _accessChecked = true;
     } finally {
@@ -146,6 +149,7 @@ class AuthProvider extends ChangeNotifier {
     _loadingDevices = false;
     _access = null;
     _accessChecked = false;
+    _accessDiagnostic = null;
     _error = null;
   }
 
@@ -155,25 +159,26 @@ class AuthProvider extends ChangeNotifier {
   // and may change after a factory reset, signing-key change or user switch.
   Future<String> _getInstallationId() async {
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-      try {
-        final id = (await _deviceChannel.invokeMethod<String>('getAndroidId').timeout(const Duration(seconds: 3)))
-            ?.trim().toLowerCase();
-        if (id != null && RegExp(r'^[0-9a-f]{16}$').hasMatch(id) &&
-            id != '9774d56d682e549c' && id != '0000000000000000') {
-          final stableId = 'android-v1-$id';
-          _installationId = stableId;
-          return stableId;
+      final attempts = DeviceLayout.isTelevision ? 2 : 1;
+      for (var attempt = 0; attempt < attempts; attempt++) {
+        try {
+          final id = (await _deviceChannel.invokeMethod<String>('getAndroidId')
+                  .timeout(const Duration(seconds: 3)))
+              ?.trim().toLowerCase();
+          if (id != null && RegExp(r'^[0-9a-f]{16}$').hasMatch(id) &&
+              id != '9774d56d682e549c' && id != '0000000000000000') {
+            final stableId = 'android-v1-$id';
+            _installationId = stableId;
+            return stableId;
+          }
+          throw StateError('Invalid Android device identity');
+        } on TimeoutException {
+          if (attempt + 1 == attempts) rethrow;
+        } on PlatformException {
+          if (attempt + 1 == attempts) rethrow;
         }
-      } on PlatformException catch (error) {
-        debugPrint('Android device identity unavailable: ${error.code}');
-      } on TimeoutException {
-        // Do not generate a different installation ID on a slow device.
-        rethrow;
-      } on MissingPluginException {
-        debugPrint('Android device identity channel unavailable');
+        await Future<void>.delayed(const Duration(milliseconds: 150));
       }
-      // Fail closed on Android: a temporary platform failure must never
-      // register this physical device under another random identifier.
       throw StateError('Android device identity unavailable');
     }
 
@@ -261,7 +266,7 @@ class AuthProvider extends ChangeNotifier {
     }
     final userId = client.auth.currentUser!.id;
     final clock = Stopwatch()..start();
-    const budget = Duration(seconds: 15);
+    final budget = Duration(seconds: DeviceLayout.isTelevision ? 25 : 15);
     String stage = 'initial';
     Future<T> step<T>(String label, Future<T> Function() action) async {
       stage = label;
@@ -279,6 +284,7 @@ class AuthProvider extends ChangeNotifier {
       return result;
     }
     _accessChecked = false;
+    _accessDiagnostic = null;
     _error = null;
     _access = null;
     _deviceStatus = null;
@@ -332,7 +338,20 @@ class AuthProvider extends ChangeNotifier {
       _error = null;
     } catch (e) {
       if (_disposed || client.auth.currentUser?.id != userId) return;
-      debugPrint('Streamia access: $stage failed (${clock.elapsedMilliseconds} ms, ${e.runtimeType})');
+      final kind = switch (e) {
+        TimeoutException() => 'TIMEOUT',
+        MissingPluginException() => 'PLUGIN',
+        PlatformException() => 'PLATFORM',
+        PostgrestException() => 'RPC',
+        AuthException() => 'AUTH',
+        StateError() => 'STATE',
+        _ => 'OTHER',
+      };
+      final rpcCode = e is PostgrestException ? e.code : null;
+      final safeCode = rpcCode != null && RegExp(r'^[A-Z0-9]{5,8}$').hasMatch(rpcCode)
+          ? '-$rpcCode' : '';
+      _accessDiagnostic = '${stage.toUpperCase()}-$kind$safeCode';
+      debugPrint('Streamia access: $_accessDiagnostic failed (${clock.elapsedMilliseconds} ms)');
       _deviceId = null;
       _deviceStatus = null;
       _access = null;
