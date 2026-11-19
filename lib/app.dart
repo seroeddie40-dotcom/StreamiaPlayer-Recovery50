@@ -379,7 +379,9 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
                     onPressed: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const SetupScreen()),
+                      MaterialPageRoute(
+                        builder: (_) => const SetupScreen(returnToPreviousOnSuccess: true),
+                      ),
                     ),
                     icon: const Icon(Icons.playlist_add),
                     label: Text(_copy(context, 'Playlist bearbeiten',
