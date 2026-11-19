@@ -1,7 +1,9 @@
+
 class PlaylistSourceConfig {
   final String sourceKey;
   final String type;
   final String? m3uUrl;
+  final String? epgUrl;
   final String? localFilePath;
   final String? serverUrl;
   final String? username;
@@ -11,6 +13,7 @@ class PlaylistSourceConfig {
     required this.sourceKey,
     required this.type,
     this.m3uUrl,
+    this.epgUrl,
     this.localFilePath,
     this.serverUrl,
     this.username,
@@ -21,6 +24,7 @@ class PlaylistSourceConfig {
     'sourceKey': sourceKey,
     'type': type,
     'm3uUrl': m3uUrl,
+    'epgUrl': epgUrl,
     'localFilePath': localFilePath,
     'serverUrl': serverUrl,
     'username': username,
@@ -31,6 +35,7 @@ class PlaylistSourceConfig {
     sourceKey: json['sourceKey'] as String,
     type: json['type'] as String,
     m3uUrl: json['m3uUrl'] as String?,
+    epgUrl: json['epgUrl'] as String?,
     localFilePath: json['localFilePath'] as String?,
     serverUrl: json['serverUrl'] as String?,
     username: json['username'] as String?,
