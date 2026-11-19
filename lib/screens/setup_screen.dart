@@ -37,6 +37,75 @@ class SetupScreen extends StatefulWidget {
 
 class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final _tvTabs = List.generate(3, (i) => FocusNode(debugLabel: 'Setup tab $i'));
+  final _tvFirst = List.generate(3, (i) => FocusNode(debugLabel: 'Setup first $i'));
+
+  void _tvTabChanged() {
+    if (mounted && DeviceLayout.isTelevision) setState(() {});
+  }
+
+  void _selectTvTab(int index, {bool enter = false}) {
+    _tabController.index = index;
+    if (enter) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _tabController.index == index && !_isLoading) {
+          _tvFirst[index].requestFocus();
+        }
+      });
+    } else {
+      _tvTabs[index].requestFocus();
+    }
+  }
+
+  PreferredSizeWidget _tvTabBar(AppLocalizations l10n) {
+    final labels = [l10n.t('tab_qr'), l10n.t('tab_m3u'), l10n.t('tab_xtream')];
+    const icons = [Icons.qr_code_2, Icons.playlist_play_rounded, Icons.dns_outlined];
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(60),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        child: Row(children: List.generate(3, (i) => Expanded(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Focus(
+              canRequestFocus: false,
+              onKeyEvent: (_, event) {
+                if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                  _selectTvTab(i, enter: true);
+                  return KeyEventResult.handled;
+                }
+                if (event.logicalKey == LogicalKeyboardKey.arrowLeft ||
+                    event.logicalKey == LogicalKeyboardKey.arrowRight) {
+                  final rtl = Directionality.of(context) == TextDirection.rtl;
+                  final right = event.logicalKey == LogicalKeyboardKey.arrowRight;
+                  final next = i + (right != rtl ? 1 : -1);
+                  if (next >= 0 && next < 3) _tvTabs[next].requestFocus();
+                  return KeyEventResult.handled;
+                }
+                return KeyEventResult.ignored;
+              },
+              child: OutlinedButton.icon(
+                focusNode: _tvTabs[i],
+                autofocus: i == 0,
+                onPressed: _isLoading ? null : () => _selectTvTab(i, enter: true),
+                style: ButtonStyle(
+                  minimumSize: WidgetStateProperty.all(const Size(0, 48)),
+                  side: WidgetStateProperty.resolveWith((states) => BorderSide(
+                    color: states.contains(WidgetState.focused) ? _aqua :
+                        (_tabController.index == i ? _blue : const Color(0xFF405575)),
+                    width: states.contains(WidgetState.focused) ? 3 : 1,
+                  )),
+                ),
+                icon: Icon(icons[i]),
+                label: Text(labels[i], maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+            ),
+          ),
+        ))),
+      ),
+    );
+  }
   
   final TextEditingController _m3uNameController = TextEditingController(text: 'M3U Playlist');
   final TextEditingController _xtreamNameController = TextEditingController(text: 'Xtream Playlist');
@@ -81,6 +150,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       ));
     }
     _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(_tvTabChanged);
     _m3uController.addListener(() {
       if (_selectedM3uPath != null && _m3uController.text.trim().isNotEmpty && mounted) {
         setState(() { _selectedM3uPath = null; _selectedM3uName = null; });
@@ -498,7 +568,9 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       ));
     }
     TvServer.stop();
+    _tabController.removeListener(_tvTabChanged);
     _tabController.dispose();
+    for (final node in [..._tvTabs, ..._tvFirst]) { node.dispose(); }
     _m3uNameController.dispose();
     _xtreamNameController.dispose();
     _m3uController.dispose();
@@ -563,7 +635,10 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       shape: WidgetStateProperty.all(RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
       backgroundColor: WidgetStateProperty.all(primary ? _blue : const Color(0xFF202F45)),
       foregroundColor: WidgetStateProperty.all(Colors.white),
-      side: primary ? null : WidgetStateProperty.all(const BorderSide(color: Color(0xFF405575))),
+      side: WidgetStateProperty.resolveWith((states) =>
+        DeviceLayout.isTelevision && states.contains(WidgetState.focused)
+          ? const BorderSide(color: _aqua, width: 3)
+          : BorderSide(color: primary ? Colors.transparent : const Color(0xFF405575))),
     );
     return ElevatedButton.icon(
       focusNode: focusNode,
@@ -654,7 +729,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
                 style: const TextStyle(fontSize: 12, color: Color(0xFF9EADC4))),
             ])),
           ]),
-          bottom: TabBar(
+          bottom: DeviceLayout.isTelevision ? _tvTabBar(l10n) : TabBar(
             controller: _tabController,
             indicatorColor: _aqua,
             indicatorWeight: 3,
@@ -671,7 +746,13 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         ),
         body: _isLoading ? _loadingView() : FocusTraversalGroup(
           policy: ReadingOrderTraversalPolicy(),
-          child: TabBarView(controller: _tabController, children: [
+          child: DeviceLayout.isTelevision
+            ? KeyedSubtree(key: ValueKey(_tabController.index), child: [
+                () => _buildQrTab(auth, l10n),
+                () => _buildM3uTab(l10n),
+                () => _buildXtreamTab(l10n),
+              ][_tabController.index]())
+            : TabBarView(controller: _tabController, children: [
             _buildQrTab(auth, l10n),
             _buildM3uTab(l10n),
             _buildXtreamTab(l10n),
@@ -702,7 +783,11 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         _infoRow(Icons.devices_outlined, l10n.t('mac_address'), auth.macAddress),
         const SizedBox(height: 22),
         _actionButton(text: l10n.t('qr_btn_manual'), icon: Icons.edit_outlined,
-          onPressed: () => _tabController.animateTo(1)),
+          focusNode: DeviceLayout.isTelevision ? _tvFirst[0] : null,
+          onPressed: () {
+            if (DeviceLayout.isTelevision) { _selectTvTab(1, enter: true); }
+            else { _tabController.animateTo(1); }
+          }),
       ]),
     );
   }
@@ -712,7 +797,9 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Text(title, style: const TextStyle(color: Color(0xFF9EADC4), fontSize: 12)),
       const SizedBox(height: 3),
-      SelectableText(value, style: const TextStyle(color: Colors.white, fontSize: 14)),
+      if (DeviceLayout.isTelevision)
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 14))
+      else SelectableText(value, style: const TextStyle(color: Colors.white, fontSize: 14)),
     ])),
   ]);
 
@@ -726,7 +813,11 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         'Enter a playlist link or select a file from your device.'),
       form: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _fieldTitle(l10n.t('playlist_display_name')),
-        TextField(controller: _m3uNameController, textCapitalization: TextCapitalization.none,
+        if (DeviceLayout.isTelevision)
+          VoiceInputField(controller: _m3uNameController, appLanguageCode: language,
+            focusNode: _tvFirst[1], textCapitalization: TextCapitalization.none,
+            decoration: _decoration(_copy('Meine Playlist', 'Oynatma listem', 'My playlist'), Icons.drive_file_rename_outline))
+        else TextField(controller: _m3uNameController, textCapitalization: TextCapitalization.none,
           decoration: _decoration(_copy('Meine Playlist', 'Oynatma listem', 'My playlist'), Icons.drive_file_rename_outline,
             suffix: DeviceLayout.isTelevision ? IconButton(
               tooltip: l10n.t('tv_keyboard_title'), icon: const Icon(Icons.keyboard_alt_outlined),
@@ -788,7 +879,11 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         'Sağlayıcınızın bağlantı bilgilerini girin.', 'Enter the login details provided by your service.'),
       form: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         _fieldTitle(l10n.t('playlist_display_name')),
-        TextField(controller: _xtreamNameController, textCapitalization: TextCapitalization.none,
+        if (DeviceLayout.isTelevision)
+          VoiceInputField(controller: _xtreamNameController, appLanguageCode: language,
+            focusNode: _tvFirst[2], textCapitalization: TextCapitalization.none,
+            decoration: _decoration(_copy('Meine Xtream-Playlist', 'Xtream listem', 'My Xtream playlist'), Icons.drive_file_rename_outline))
+        else TextField(controller: _xtreamNameController, textCapitalization: TextCapitalization.none,
           decoration: _decoration(_copy('Meine Xtream-Playlist', 'Xtream listem', 'My Xtream playlist'), Icons.drive_file_rename_outline,
             suffix: DeviceLayout.isTelevision ? IconButton(
               tooltip: l10n.t('tv_keyboard_title'), icon: const Icon(Icons.keyboard_alt_outlined),
