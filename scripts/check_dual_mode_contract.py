@@ -32,7 +32,7 @@ require(0 <= main.find('runApp(') < main.find('await DeviceLayout.initialize()')
 require('await Future.wait<void>([' in main and '_initializeDeviceLayout(),' in main and '_initializeBackend(),' in main, 'Parallel bootstrap must await device and backend initialization')
 require(0 <= main.find('await Future.wait<void>([') < main.find('return MultiProvider('), 'Bootstrap must complete before opening app routes')
 require('DeviceLayout.isTelevision' in main, 'Orientation not device-specific')
-require('DeviceOrientation.landscapeLeft' in main and 'DeviceOrientation.landscapeRight' in main, 'TV landscape orientation missing')
+require('if (DeviceLayout.isTelevision) return;' in main, 'TV must keep native landscape without redundant platform request')
 require('DeviceOrientation.portraitUp' in main, 'Mobile portrait orientation missing')
 # Startup orientation remains device-specific in main.dart. A phone-only
 # route transition may subsequently change orientation at the dashboard.
