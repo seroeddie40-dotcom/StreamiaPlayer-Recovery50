@@ -414,7 +414,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> {
       }
     } on MissingPluginException {
       usbWarning = mounted ? _t('usbExtension') : null;
-    } on PlatformException catch (error) {
+    } on PlatformException {
       usbWarning = mounted ? _t('usbReadError') : null;
     } catch (error) {
       usbWarning = mounted ? _t('usbLoadError') : null;
