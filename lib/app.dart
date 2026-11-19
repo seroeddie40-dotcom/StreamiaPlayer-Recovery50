@@ -18,6 +18,7 @@ import 'providers/auth_provider.dart';
 import 'providers/family_session_provider.dart';
 import 'screens/family_profile_selection_screen.dart';
 import 'services/playlist_profile_store.dart';
+import 'services/family_profile_service.dart';
 import 'services/playlist_switch_service.dart';
 
 import 'screens/login_screen.dart';
@@ -242,10 +243,30 @@ class _LandscapeDashboard extends StatefulWidget {
 }
 
 class _LandscapeDashboardState extends State<_LandscapeDashboard> {
+  bool _checkingDefault = true;
+
+  Future<void> _tryDefaultProfile() async {
+    if (!mounted) return;
+    final family = context.read<FamilySessionProvider>();
+    final accountId = context.read<AuthProvider>().user?.id;
+    try {
+      if (accountId == null || family.isReady || family.isLoading) return;
+      final profile = await FamilyProfileService().ensureDefaultProfile()
+          .timeout(const Duration(seconds: 15));
+      if (!mounted || context.read<AuthProvider>().user?.id != accountId ||
+          family.isReady || family.isLoading) return;
+      await family.activateProfile(profile);
+    } catch (_) {
+      // Protected accounts and unsuccessful checks must use profile selection.
+    } finally {
+      if (mounted) setState(() => _checkingDefault = false);
+    }
+  }
   @override
   void initState() {
     super.initState();
     _applyOrientation(landscape: true);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _tryDefaultProfile());
   }
 
   @override
@@ -268,9 +289,12 @@ class _LandscapeDashboardState extends State<_LandscapeDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    // A fresh login or app restart must not reuse an unlocked family session.
-    // No playback route is exposed until a profile is explicitly selected.
+    // Only a verified session may expose the dashboard. Try automatic
+    // activation once per entry, not after an explicit profile switch.
     final family = context.watch<FamilySessionProvider>();
+    if (_checkingDefault) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     if (!family.isReady) {
       return const FamilyProfileSelectionScreen();
     }
