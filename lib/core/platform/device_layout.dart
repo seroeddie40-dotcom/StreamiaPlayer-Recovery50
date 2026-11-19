@@ -19,14 +19,14 @@ class DeviceLayout {
       return;
     }
 
-    // Keep the complete retry sequence within the bootstrap's 3s budget.
+    // Allow slower Android TV platform channels to respond; never guess mobile.
     // A successful native false is authoritative, not a detection failure.
     Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {
       try {
         final result = await _channel
             .invokeMethod<bool>('isTelevision')
-            .timeout(const Duration(milliseconds: 750));
+            .timeout(const Duration(seconds: 3));
 
         if (result == null) {
           throw StateError('Native device layout returned no classification');
