@@ -113,11 +113,46 @@ class TvServer {
     });
 
     try {
-      _server = await shelf_io.serve(router.call, InternetAddress.anyIPv4, 8080);
-      return _server!.address.address;
+      final address = await _findLanAddress();
+      if (address == null) return null;
+      final previous = _server;
+      _server = null;
+      await previous?.close(force: true);
+      _server = await shelf_io.serve(router.call, address, 8080);
+      return address.address;
     } catch (e) {
       return null;
     }
+  }
+
+  static Future<InternetAddress?> _findLanAddress() async {
+    final interfaces = await NetworkInterface.list(
+      type: InternetAddressType.IPv4,
+      includeLoopback: false,
+      includeLinkLocal: false,
+    ).timeout(const Duration(seconds: 4));
+    final candidates = <MapEntry<int, InternetAddress>>[];
+    for (final interface in interfaces) {
+      final name = interface.name.toLowerCase();
+      if (name.startsWith('tun') || name.startsWith('tap') ||
+          name.startsWith('rmnet') || name.startsWith('ccmni') ||
+          name.startsWith('ppp') || name.startsWith('wg') ||
+          name.startsWith('p2p') || name.startsWith('veth')) continue;
+      for (final address in interface.addresses) {
+        final bytes = address.rawAddress;
+        if (address.isLoopback || bytes.length != 4 || bytes[0] == 0 ||
+            bytes[0] >= 224 || (bytes[0] == 169 && bytes[1] == 254)) continue;
+        final lan = name.startsWith('eth') || name.startsWith('en') ||
+            name.startsWith('wlan') || name.startsWith('wifi');
+        final private = bytes[0] == 10 ||
+            (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) ||
+            (bytes[0] == 192 && bytes[1] == 168);
+        if (!lan && !private) continue;
+        candidates.add(MapEntry((lan ? 4 : 0) + (private ? 2 : 0), address));
+      }
+    }
+    candidates.sort((a, b) => b.key.compareTo(a.key));
+    return candidates.isEmpty ? null : candidates.first.value;
   }
 
   static void stop() {
