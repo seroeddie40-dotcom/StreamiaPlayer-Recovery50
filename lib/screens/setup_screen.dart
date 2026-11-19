@@ -20,7 +20,6 @@ import '../services/playlist_management_service.dart';
 import '../models/playlist_source_config.dart';
 import '../models/playlist_profile.dart';
 import '../core/localization/app_localizations.dart';
-import '../core/theme/app_theme.dart';
 import '../core/platform/device_layout.dart';
 import '../core/platform/tv_remote_navigation.dart';
 import '../widgets/voice_input_field.dart';
@@ -128,7 +127,6 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
 
   bool _isLoading = false;
   String? _loadingMessage;
-  String? _importError;
   String? _selectedM3uPath;
   String? _selectedM3uName;
   String? _receivedM3uPath;
@@ -183,7 +181,6 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
 
   void _showError(String message) {
     if (!mounted) return;
-    setState(() => _importError = message);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), duration: const Duration(seconds: 8)),
     );
@@ -322,7 +319,6 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
           _selectedM3uPath = path;
           _selectedM3uName = selected.name;
           _m3uController.clear();
-          _importError = null;
         });
       } else {
         if (selected.name.toLowerCase().endsWith('.gz')) {
@@ -433,7 +429,6 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     if (replaceTrial == null || !mounted) return;
     setState(() {
       _isLoading = true;
-      _importError = null;
       _loadingMessage = _copy('Lokale M3U-Datei wird gelesen…',
         'Yerel M3U dosyası okunuyor…', 'Reading local M3U file…');
     });
@@ -506,7 +501,6 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     if (replaceTrial == null || !mounted) return;
     setState(() {
       _isLoading = true;
-      _importError = null;
       _loadingMessage = _copy('Playlist wird verarbeitet…',
         'Oynatma listesi işleniyor…', 'Processing playlist…');
     });
@@ -590,7 +584,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     final replaceTrial = await _confirmTrialReplacement();
     if (replaceTrial == null || !mounted) return;
 
-    setState(() { _isLoading = true; _importError = null; _loadingMessage = null; });
+    setState(() { _isLoading = true; _loadingMessage = null; });
     XtreamService? service;
     try {
       final sourceIdentity = 'xtream:v2:${server.trim().replaceFirst(RegExp(r'/+$'), '').toLowerCase()}|${user.trim()}';
