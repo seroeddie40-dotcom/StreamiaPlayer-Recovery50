@@ -123,6 +123,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   final FocusNode _xtreamServerFocus = FocusNode(debugLabel: 'Xtream server');
   final FocusNode _xtreamUserFocus = FocusNode(debugLabel: 'Xtream username');
   final FocusNode _xtreamPassFocus = FocusNode(debugLabel: 'Xtream password');
+  final FocusNode _m3uConnectFocus = FocusNode(debugLabel: 'M3U connect');
   final FocusNode _xtreamConnectFocus = FocusNode(debugLabel: 'Xtream connect');
 
   bool _isLoading = false;
@@ -136,6 +137,9 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   }
 
   static const _setupTranslations = <String, Map<String, String>>{
+    "Connect your phone and TV to the same local network.": <String, String>{'ru': "Подключите телефон и ТВ к одной локальной сети.", 'pl': "Połącz telefon i telewizor z tą samą siecią lokalną.", 'es': "Conecta el teléfono y el televisor a la misma red local.", 'fr': "Connectez le téléphone et le téléviseur au même réseau local.", 'ar': "وصّل الهاتف والتلفاز بالشبكة المحلية نفسها."},
+    "Load EPG file from storage": <String, String>{'ru': "Загрузить файл EPG из памяти", 'pl': "Wczytaj plik EPG z pamięci", 'es': "Cargar archivo EPG del almacenamiento", 'fr': "Charger un fichier EPG depuis le stockage", 'ar': "تحميل ملف EPG من وحدة التخزين"},
+    "Load M3U file from storage": <String, String>{'ru': "Загрузить файл M3U из памяти", 'pl': "Wczytaj plik M3U z pamięci", 'es': "Cargar archivo M3U del almacenamiento", 'fr': "Charger un fichier M3U depuis le stockage", 'ar': "تحميل ملف M3U من وحدة التخزين"},
     "The selected file could not be opened.": <String, String>{'ru': "Не удалось открыть выбранный файл.", 'pl': "Nie można otworzyć wybranego pliku.", 'es': "No se pudo abrir el archivo seleccionado.", 'fr': "Impossible d’ouvrir le fichier sélectionné.", 'ar': "تعذر فتح الملف المحدد."},
     "File is too large (maximum 12 MB).": <String, String>{'ru': "Файл слишком большой (максимум 12 МБ).", 'pl': "Plik jest za duży (maksymalnie 12 MB).", 'es': "El archivo es demasiado grande (máximo 12 MB).", 'fr': "Le fichier est trop volumineux (12 Mo maximum).", 'ar': "الملف كبير جدًا (الحد الأقصى 12 ميغابايت)."},
     "Compressed EPG files cannot be inserted as text here. Please use an XML URL.": <String, String>{'ru': "Сжатые файлы EPG нельзя вставить как текст. Используйте URL XML.", 'pl': "Skompresowanych plików EPG nie można wstawić jako tekstu. Użyj adresu XML.", 'es': "No se pueden insertar archivos EPG comprimidos como texto. Usa una URL XML.", 'fr': "Les fichiers EPG compressés ne peuvent pas être insérés comme texte. Utilisez une URL XML.", 'ar': "لا يمكن إدراج ملفات EPG المضغوطة كنص. استخدم رابط XML."},
@@ -244,7 +248,13 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
           _tabController.animateTo(1);
           if (DeviceLayout.isTelevision) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) _tvTabs[1].requestFocus();
+              if (!mounted || _isLoading || _tabController.index != 1) return;
+              final target = _m3uConnectFocus;
+              final targetContext = target.context;
+              if (targetContext == null) return;
+              target.requestFocus();
+              unawaited(Scrollable.ensureVisible(targetContext,
+                alignment: 1, duration: Duration.zero));
             });
           }
         } else if (type == 'xtream') {
@@ -256,7 +266,13 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
           _tabController.animateTo(2);
           if (DeviceLayout.isTelevision) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) _tvTabs[2].requestFocus();
+              if (!mounted || _isLoading || _tabController.index != 2) return;
+              final target = _xtreamConnectFocus;
+              final targetContext = target.context;
+              if (targetContext == null) return;
+              target.requestFocus();
+              unawaited(Scrollable.ensureVisible(targetContext,
+                alignment: 1, duration: Duration.zero));
             });
           }
         }
@@ -668,6 +684,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     _xtreamServerFocus.dispose();
     _xtreamUserFocus.dispose();
     _xtreamPassFocus.dispose();
+    _m3uConnectFocus.dispose();
     _xtreamConnectFocus.dispose();
     super.dispose();
   }
@@ -853,7 +870,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     return _pageContent(
       icon: Icons.qr_code_2,
       title: l10n.t('qr_title'),
-      description: l10n.t('qr_desc'),
+      description: '${l10n.t('qr_desc')}\n${_copy("Verbinde Smartphone und TV mit demselben lokalen Netzwerk.", "Telefonu ve TV’yi aynı yerel ağa bağlayın.", "Connect your phone and TV to the same local network.")}',
       form: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Center(child: _qrLink == null
           ? const Padding(padding: EdgeInsets.all(30), child: Icon(Icons.wifi_off_outlined, color: _aqua, size: 48))
@@ -941,14 +958,14 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         const SizedBox(height: 22),
         LayoutBuilder(builder: (context, constraints) {
           final narrow = constraints.maxWidth < 440;
-          final first = _actionButton(text: l10n.t('btn_m3u_phone'), icon: Icons.folder_open_outlined, primary: false, onPressed: () => _pickFile(true));
-          final second = _actionButton(text: l10n.t('btn_epg_phone'), icon: Icons.event_note_outlined, primary: false, onPressed: () => _pickFile(false));
+          final first = _actionButton(text: _copy("M3U-Datei aus dem Speicher laden", "M3U dosyasını depolamadan yükle", "Load M3U file from storage"), icon: Icons.folder_open_outlined, primary: false, onPressed: () => _pickFile(true));
+          final second = _actionButton(text: _copy("EPG-Datei aus dem Speicher laden", "EPG dosyasını depolamadan yükle", "Load EPG file from storage"), icon: Icons.event_note_outlined, primary: false, onPressed: () => _pickFile(false));
           return narrow
             ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [first, const SizedBox(height: 12), second])
             : Row(children: [Expanded(child: first), const SizedBox(width: 12), Expanded(child: second)]);
         }),
         const SizedBox(height: 24),
-        _actionButton(text: l10n.t('btn_start'), icon: Icons.arrow_forward_rounded, onPressed: _startM3uImport),
+        _actionButton(text: l10n.t('btn_start'), icon: Icons.arrow_forward_rounded, focusNode: _m3uConnectFocus, onPressed: _startM3uImport),
       ]),
     );
   }
