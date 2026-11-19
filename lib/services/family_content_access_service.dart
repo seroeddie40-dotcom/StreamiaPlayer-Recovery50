@@ -21,11 +21,6 @@ class FamilyContentAccessService {
 
   final FamilyProfileService _profiles;
 
-  static const Set<String> _contentTypes = {
-    'live',
-    'vod',
-    'series',
-  };
 
   /// Loads a fresh snapshot of the child's
   /// category permissions from Supabase.
