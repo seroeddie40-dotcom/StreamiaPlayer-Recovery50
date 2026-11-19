@@ -19,7 +19,8 @@ import '../services/family_profile_service.dart';
 
 /// Manages the active family profile for the signed-in account.
 ///
-/// Adult profiles require a server-verified parent PIN session.
+/// Protected adult profiles require a server-verified parent PIN session.
+/// An unprotected default requires a short-lived server confirmation.
 /// Child profiles do not require a PIN.
 ///
 /// Child permissions must be successfully loaded before activation.
@@ -112,6 +113,9 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     bool current() => !_disposed && _foreground && isReady &&
         generation == _generation && activeProfile?.id == profile.id;
     try {
+      if (_unprotectedDefault) {
+        if (!await refreshPermissions() || !current()) return;
+      }
       await ProfileSyncClock.calibrate(_client);
       if (!current()) return;
       await ProfileFavoriteOutbox.flush(_client, profile.accountUserId, profile.id, parentAccessToken, current);
@@ -181,6 +185,10 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     _foreground = state == AppLifecycleState.resumed;
     if (_foreground) {
+      if (_unprotectedDefault && !_adultSessionCurrent) {
+        clearSession();
+        return;
+      }
       _startProfileSync();
     } else {
       _stopProfileSync();
@@ -196,6 +204,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   FamilyContentAccessSnapshot? _snapshot;
   String? _sessionAccountId;
 
+  bool _unprotectedDefault = false;
   String? _adultAccessToken;
   DateTime? _adultValidUntil;
 
@@ -222,7 +231,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     final expiry = _adultValidUntil;
 
-    return _adultAccessToken != null &&
+    return (_unprotectedDefault || _adultAccessToken != null) &&
         expiry != null &&
         expiry.isAfter(DateTime.now());
   }
@@ -274,6 +283,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   void _cancelAdultExpiry() {
     _adultExpiryTimer?.cancel();
     _adultExpiryTimer = null;
+    _unprotectedDefault = false;
     _adultAccessToken = null;
     _adultValidUntil = null;
   }
@@ -348,54 +358,66 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       String? adultToken;
       DateTime? adultExpiry;
+      bool unprotected = false;
 
       if (verifiedProfile.type ==
           FamilyProfileType.adult) {
-        // The adult profile uses the account's parent PIN.
-        if (adultPin == null ||
-            !RegExp(r'^[0-9]{6,10}$')
-                .hasMatch(adultPin)) {
-          _finishFailedActivation(generation);
-          return false;
-        }
+        if (adultPin == null) {
+          final authorized = await _profileService.ensureDefaultProfile();
+          if (generation != _generation ||
+              _client.auth.currentUser?.id != accountId ||
+              authorized.id != verifiedProfile.id) {
+            _finishFailedActivation(generation);
+            return false;
+          }
+          unprotected = true;
+          adultExpiry = DateTime.now().add(const Duration(seconds: 60));
+        } else {
+          // The adult profile uses the account's parent PIN.
+          if (!RegExp(r'^[0-9]{6,10}$')
+                  .hasMatch(adultPin)) {
+            _finishFailedActivation(generation);
+            return false;
+          }
 
-        final verification =
-            await _pinService.verifyPin(
-          scope: FamilyPinScope.parent,
-          pin: adultPin,
-        );
+          final verification =
+              await _pinService.verifyPin(
+            scope: FamilyPinScope.parent,
+            pin: adultPin,
+          );
 
-        if (generation != _generation ||
-            _client.auth.currentUser?.id != accountId) {
-          _finishFailedActivation(generation);
-          return false;
-        }
+          if (generation != _generation ||
+              _client.auth.currentUser?.id != accountId) {
+            _finishFailedActivation(generation);
+            return false;
+          }
 
-        if (!verification.isSuccessful ||
-            verification.accessToken == null ||
-            verification.validUntil == null ||
-            !verification.validUntil!
-                .isAfter(DateTime.now())) {
-          _finishFailedActivation(generation);
-          return false;
-        }
+          if (!verification.isSuccessful ||
+              verification.accessToken == null ||
+              verification.validUntil == null ||
+              !verification.validUntil!
+                  .isAfter(DateTime.now())) {
+            _finishFailedActivation(generation);
+            return false;
+          }
 
-        adultToken = verification.accessToken;
-        adultExpiry = verification.validUntil;
+          adultToken = verification.accessToken;
+          adultExpiry = verification.validUntil;
 
-        // Verify the parent session with Supabase.
-        final sessionValid =
-            await _pinService.checkSession(
-          scope: FamilyPinScope.parent,
-          accessToken: adultToken!,
-        );
+          // Verify the parent session with Supabase.
+          final sessionValid =
+              await _pinService.checkSession(
+            scope: FamilyPinScope.parent,
+            accessToken: adultToken!,
+          );
 
-        if (generation != _generation ||
-            _client.auth.currentUser?.id != accountId ||
-            !sessionValid ||
-            !adultExpiry!.isAfter(DateTime.now())) {
-          _finishFailedActivation(generation);
-          return false;
+          if (generation != _generation ||
+              _client.auth.currentUser?.id != accountId ||
+              !sessionValid ||
+              !adultExpiry!.isAfter(DateTime.now())) {
+            _finishFailedActivation(generation);
+            return false;
+          }
         }
       } else if (verifiedProfile.type !=
           FamilyProfileType.child) {
@@ -429,6 +451,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       _activeProfile = verifiedProfile;
       _snapshot = loaded;
       _sessionAccountId = accountId;
+      _unprotectedDefault = unprotected;
       _adultAccessToken = adultToken;
       _adultValidUntil = adultExpiry;
       _isLoading = false;
@@ -485,7 +508,16 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       final adultToken = _adultAccessToken;
       final adultExpiry = _adultValidUntil;
       if (profile.type == FamilyProfileType.adult) {
-        if (adultToken == null || adultExpiry == null ||
+        if (_unprotectedDefault) {
+          final authorized = await _profileService.ensureDefaultProfile();
+          if (!_refreshStillCurrent(generation, accountId, profile.id)) return false;
+          if (authorized.id != profile.id) {
+            clearSession();
+            return false;
+          }
+          _adultValidUntil = DateTime.now().add(const Duration(seconds: 60));
+          _scheduleAdultExpiry(_adultValidUntil!);
+        } else if (adultToken == null || adultExpiry == null ||
             !adultExpiry.isAfter(DateTime.now()) ||
             !await _pinService.checkSession(
               scope: FamilyPinScope.parent,
