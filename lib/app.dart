@@ -21,6 +21,7 @@ import 'services/playlist_profile_store.dart';
 import 'services/playlist_switch_service.dart';
 
 import 'screens/login_screen.dart';
+import 'screens/splash_screen.dart';
 import 'screens/language_selection_screen.dart';
 import 'screens/setup_screen.dart';
 import 'screens/dashboard_screen.dart';
@@ -187,14 +188,21 @@ class _StartupLoadingState extends State<_StartupLoading> {
     final labels = messages[widget.language] ?? messages['en']!;
     final auth = context.watch<AuthProvider>();
     return Scaffold(
-      body: Center(
-        child: SingleChildScrollView(
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (!_timedOut) const SplashScreen(),
+          if (!_timedOut) const ColoredBox(color: Color(0x55000000)),
+          Align(
+            alignment: _timedOut ? Alignment.center : Alignment.bottomCenter,
+            child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             if (_timedOut) const Icon(Icons.error_outline, size: 44)
             else const CircularProgressIndicator(),
             const SizedBox(height: 20),
-            Text(labels[_timedOut ? 1 : 0], textAlign: TextAlign.center),
+            Text(labels[_timedOut ? 1 : 0], textAlign: TextAlign.center,
+                style: _timedOut ? null : const TextStyle(color: Colors.white)),
             if (_timedOut) ...[
               const SizedBox(height: 20),
               FilledButton(
@@ -203,7 +211,7 @@ class _StartupLoadingState extends State<_StartupLoading> {
                   setState(() { _timedOut = false; _retrying = true; });
                   _startTimer();
                   try {
-                    await auth.refreshDeviceAndAccess().timeout(const Duration(seconds: 15));
+                    await auth.refreshDeviceAndAccess();
                   } catch (_) {
                     if (mounted) setState(() => _timedOut = true);
                   } finally {
@@ -215,7 +223,9 @@ class _StartupLoadingState extends State<_StartupLoading> {
               TextButton(onPressed: auth.isBusy ? null : auth.logout, child: Text(labels[3])),
             ],
           ]),
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -602,8 +612,13 @@ class _AccessStatusScreen extends StatelessWidget {
                   Text(copy('Bitte versuche es erneut.', 'Lütfen tekrar deneyin.',
                       'Please try again.'), textAlign: TextAlign.center),
                 ],
+                if (!blocked && auth.accessDiagnostic != null) ...[
+                  const SizedBox(height: 12),
+                  SelectableText(auth.accessDiagnostic!, textAlign: TextAlign.center),
+                ],
                 const SizedBox(height: 20),
                 FilledButton(
+                  autofocus: true,
                   onPressed: auth.isBusy ? null : auth.refreshDeviceAndAccess,
                   child: Text(copy('Erneut prüfen', 'Tekrar kontrol et', 'Check again')),
                 ),
