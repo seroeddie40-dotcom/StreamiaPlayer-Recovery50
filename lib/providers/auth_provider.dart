@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/supabase_config.dart';
 import '../core/storage/prefs_service.dart';
+import '../core/platform/device_layout.dart';
 
 class AuthProvider extends ChangeNotifier {
   static const MethodChannel _deviceChannel = MethodChannel('com.streamia/device_identity');
@@ -171,10 +172,12 @@ class AuthProvider extends ChangeNotifier {
       } on MissingPluginException {
         debugPrint('Android device identity channel unavailable');
       }
+      // Fail closed on Android: a temporary platform failure must never
+      // register this physical device under another random identifier.
+      throw StateError('Android device identity unavailable');
     }
 
-    // For other platforms or devices without an accessible Android ID,
-    // retain the existing installation-scoped random identifier.
+    // Only non-Android platforms use an installation-scoped identifier.
     if (_installationId != null && _installationId!.isNotEmpty &&
         !_installationId!.startsWith('android-v1-')) {
       return _installationId!;
@@ -307,7 +310,7 @@ class AuthProvider extends ChangeNotifier {
         onTimeout: () => kIsWeb ? 'Web-Gerät' : defaultTargetPlatform.name,
       ));
       final platform = kIsWeb ? 'web' : switch (defaultTargetPlatform) {
-        TargetPlatform.android => 'android',
+        TargetPlatform.android => DeviceLayout.isTelevision ? 'android_tv' : 'android',
         TargetPlatform.iOS => 'ios',
         _ => 'unknown',
       };
