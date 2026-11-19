@@ -227,12 +227,11 @@ class _AdminDevicesScreenState
 
             final platform = device['platform'];
 
-            final isTv = platform == 'android' ||
-                platform == 'android_tv';
+            final isTv = platform == 'android_tv';
 
             return TvCatalogFocus(child: ListTile(
               leading: Icon(
-                isTv ? Icons.tv : Icons.devices,
+                isTv ? Icons.tv : platform == 'android' ? Icons.phone_android : Icons.devices,
               ),
               title: Text(
                 '${device['device_name'] ?? 'Unbenanntes Gerät'}',
