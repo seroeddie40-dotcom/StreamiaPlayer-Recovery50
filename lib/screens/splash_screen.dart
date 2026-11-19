@@ -1,42 +1,14 @@
 import 'package:flutter/material.dart';
-import '../core/theme/app_theme.dart';
 
 class StreamiaBrandLogo extends StatelessWidget {
   final double size;
-
-  const StreamiaBrandLogo({
-    super.key,
-    this.size = 120,
-  });
+  const StreamiaBrandLogo({super.key, this.size = 120});
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: AppTheme.accentGradient,
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.electricBlue.withOpacity(0.45),
-            blurRadius: size * 0.30,
-            spreadRadius: size / 15,
-          ),
-        ],
-      ),
-      child: Center(
-        child: Text(
-          'S',
-          style: TextStyle(
-            fontSize: size * 64 / 120,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Image.asset(
+    'assets/images/streamia_logo.png',
+    width: size, height: size, fit: BoxFit.contain,
+  );
 }
 
 class SplashScreen extends StatelessWidget {
@@ -44,34 +16,14 @@ class SplashScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final landscape = MediaQuery.orientationOf(context) == Orientation.landscape;
     return Scaffold(
-      backgroundColor: AppTheme.darkBg,
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const StreamiaBrandLogo(),
-            const SizedBox(height: 28),
-            const Text(
-              'Streamia Player',
-              style: TextStyle(
-                fontSize: 30,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-                letterSpacing: 2,
-              ),
-            ),
-            const SizedBox(height: 24),
-            const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-              ),
-            ),
-          ],
-        ),
-      ),
+      backgroundColor: const Color(0xFF020B18),
+      body: Center(child: SizedBox.expand(child: Image.asset(
+        landscape ? 'assets/images/streamia_splash_tv.jpg'
+            : 'assets/images/streamia_splash_mobile.jpg',
+        fit: BoxFit.contain,
+      ))),
     );
   }
 }
