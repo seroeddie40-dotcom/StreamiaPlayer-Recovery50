@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:network_info_plus/network_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/locale_provider.dart';
@@ -139,6 +138,8 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   }
   String? _ipAddress;
   String? _qrLink;
+  Timer? _qrExpiry;
+  bool _startingQr = false;
 
   @override
   void initState() {
@@ -160,19 +161,17 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   }
 
   Future<void> _initServer() async {
-    String? ip;
+    if (!mounted || _startingQr || _isLoading) return;
+    _qrExpiry?.cancel();
+    setState(() { _startingQr = true; _qrLink = null; _ipAddress = null; });
     String? serverIp;
-    try {
-      ip = await NetworkInfo().getWifiIP();
-    } catch (_) {
-      // QR/LAN import is optional; setup must remain usable without Wi-Fi info.
-    }
-    if (!mounted) return;
 
     final langCode = context.read<LocaleProvider>().locale.languageCode;
     try {
       serverIp = await TvServer.start((type, d1, d2, d3) {
         if (!mounted) return;
+        _qrExpiry?.cancel();
+        setState(() => _qrLink = null);
         if (type == 'm3u') {
           setState(() {
             _m3uController.text = d1;
@@ -193,11 +192,22 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       // The user can still configure a playlist manually if LAN import fails.
     }
 
-    if (!mounted) return;
+    if (!mounted) { TvServer.stop(); return; }
+    final token = TvServer.pairingToken;
+    final link = serverIp == null || token == null ? null : Uri(
+      scheme: 'http', host: serverIp, port: 8080, path: '/',
+      queryParameters: {'token': token},
+    ).toString();
     setState(() {
-      _ipAddress = serverIp ?? ip ?? '127.0.0.1';
-      _qrLink = serverIp == null ? null : 'http://$_ipAddress:8080';
+      _startingQr = false;
+      _ipAddress = serverIp;
+      _qrLink = link;
     });
+    if (link != null) {
+      _qrExpiry = Timer(const Duration(minutes: 9, seconds: 55), () {
+        if (mounted) setState(() => _qrLink = null);
+      });
+    }
   }
 
   // Keep local playlist contents out of TextEditingController: large M3U files
@@ -567,6 +577,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         ],
       ));
     }
+    _qrExpiry?.cancel();
     TvServer.stop();
     _tabController.removeListener(_tvTabChanged);
     _tabController.dispose();
@@ -771,7 +782,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         Center(child: _qrLink == null
           ? const Padding(padding: EdgeInsets.all(30), child: Icon(Icons.wifi_off_outlined, color: _aqua, size: 48))
           : Container(padding: const EdgeInsets.all(14), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18)),
-              child: QrImageView(data: _qrLink!, version: QrVersions.auto, size: 220, backgroundColor: Colors.white))),
+              child: QrImageView(data: _qrLink!, version: QrVersions.auto, size: DeviceLayout.isTelevision ? 160 : 220, backgroundColor: Colors.white))),
         const SizedBox(height: 18),
         if (_qrLink == null) Text(_copy('QR-Verbindung derzeit nicht verfügbar. Nutze die manuelle Einrichtung.',
           'QR bağlantısı şu anda kullanılamıyor. Manuel kurulumu kullanın.',
@@ -780,8 +791,12 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         const SizedBox(height: 16),
         _infoRow(Icons.wifi_rounded, l10n.t('local_ip'), _ipAddress ?? '—'),
         const Divider(color: Color(0xFF33445C)),
-        _infoRow(Icons.devices_outlined, l10n.t('mac_address'), auth.macAddress),
+        _infoRow(Icons.devices_outlined, _copy('Gerätekennung', 'Cihaz kimliği', 'Device ID'), auth.macAddress),
         const SizedBox(height: 22),
+        _actionButton(text: _copy('QR-Code erneuern', 'QR kodunu yenile', 'Refresh QR code'),
+          icon: Icons.refresh, primary: false,
+          onPressed: _startingQr || _isLoading ? null : () { _initServer(); }),
+        const SizedBox(height: 8),
         _actionButton(text: l10n.t('qr_btn_manual'), icon: Icons.edit_outlined,
           focusNode: DeviceLayout.isTelevision ? _tvFirst[0] : null,
           onPressed: () {
