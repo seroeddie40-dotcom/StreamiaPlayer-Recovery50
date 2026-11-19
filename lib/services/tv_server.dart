@@ -390,7 +390,7 @@ class TvServer {
       if (!_validToken(params['token']) || params['token'] != token) {
         return Response(403, body: t['invalidToken']!, headers: _headers);
       }
-      final type = params['type'];
+      final type = params['type'] ?? '';
       if (type != 'm3u' && type != 'xtream') return Response(400, body: t['invalidType']!);
       
       String d1 = '', d2 = '', d3 = '';
