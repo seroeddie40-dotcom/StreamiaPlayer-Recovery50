@@ -66,7 +66,16 @@ class _ProfileClockState extends State<ProfileClock> with WidgetsBindingObserver
     }
     if (key != null && _seen != family.profileSyncRevision) {
       _seen = family.profileSyncRevision;
-      _reload();
+      // Defer storage and remote preference reads until the dashboard has
+      // produced its first frame. The revision guard in _reload() prevents
+      // an outdated profile from applying its result after a profile switch.
+      final scheduledKey = key;
+      final scheduledRevision = _seen;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _key != scheduledKey ||
+            _seen != scheduledRevision) return;
+        _reload();
+      });
     }
   }
   Map<String, bool> get _value => {'twelve': _twelve, 'date': _date, 'visible': _visible};
