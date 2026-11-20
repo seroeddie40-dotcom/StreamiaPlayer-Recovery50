@@ -178,6 +178,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   final FocusNode _playerSurfaceFocus = FocusNode(debugLabel: 'Player-Oberfläche');
   final FocusNode _subtitleButtonFocus = FocusNode(debugLabel: 'Untertitel');
   final FocusNode _audioButtonFocus = FocusNode(debugLabel: 'Audiosprache');
+  final FocusNode _recordButtonFocus = FocusNode(debugLabel: 'Aufnahme');
+  final FocusNode _navigationButtonFocus = FocusNode(debugLabel: 'Sender und Ordner');
+  final FocusNode _historyButtonFocus = FocusNode(debugLabel: 'Verlauf');
   bool _restoreAttempted = false;
   bool _saveInFlight = false;
   int _currentEpisode = 0;
@@ -644,19 +647,36 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _startHideTimer();
       return KeyEventResult.handled;
     }
-    if ((key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.arrowDown) && !_showControls) {
-      setState(() => _showControls = true);
+    if ((key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.arrowDown) &&
+        _playerSurfaceFocus.hasPrimaryFocus && !_showDrawer && !_showHistory) {
+      if (!_showControls) setState(() => _showControls = true);
+      _focusFirstPlayerAction();
       _startHideTimer();
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
   }
 
+  void _focusFirstPlayerAction() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_showControls || _showDrawer || _showHistory) return;
+      if (widget.isLive) {
+        _navigationButtonFocus.requestFocus();
+      } else {
+        _subtitleButtonFocus.requestFocus();
+      }
+    });
+  }
+
   void _toggleLiveControls() {
     if (!mounted || _showDrawer || _showHistory) return;
     _hideTimer?.cancel();
     setState(() => _showControls = !_showControls);
-    if (!_showControls) _restorePlayerFocus();
+    if (_showControls) {
+      _focusFirstPlayerAction();
+    } else {
+      _restorePlayerFocus();
+    }
   }
 
   void _startHideTimer() {
@@ -690,6 +710,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _playerSurfaceFocus.dispose();
     _subtitleButtonFocus.dispose();
     _audioButtonFocus.dispose();
+    _recordButtonFocus.dispose();
+    _navigationButtonFocus.dispose();
+    _historyButtonFocus.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _saveProgress();
     _posSub?.cancel(); _durSub?.cancel(); _playSub?.cancel(); _errorSub?.cancel(); _bufferingSub?.cancel();
@@ -861,6 +884,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                            child: InkWell(
                              focusColor: AppTheme.electricBlue.withOpacity(0.38),
                              borderRadius: BorderRadius.circular(12),
+                             focusNode: _recordButtonFocus,
                              onTap: (stopping || starting) ? null : _toggleRecording,
                              child: Container(
                                padding: const EdgeInsets.symmetric(
@@ -950,6 +974,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                     InkWell(
                       focusColor: AppTheme.electricBlue.withOpacity(0.38),
                       borderRadius: BorderRadius.circular(12),
+                      focusNode: _navigationButtonFocus,
                       onTap: _openNavigationDrawer,
                       child: _pill(widget.isLive ? AppLocalizations.of(context).t('player_channels_folders') : AppLocalizations.of(context).t('player_episodes'), Icons.list),
                     ),
@@ -961,6 +986,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                   InkWell(
                     focusColor: AppTheme.electricBlue.withOpacity(0.38),
                     borderRadius: BorderRadius.circular(12),
+                    focusNode: _historyButtonFocus,
                     onTap: _toggleHistorySidebar,
                     child: _pill(AppLocalizations.of(context).t('player_history'), Icons.history),
                   ),
