@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import '../services/media_engine.dart';
+import '../services/live_stream_format.dart';
+import '../services/live_stream_format_preferences.dart';
 import '../services/tv_playback_diagnostics.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
@@ -690,7 +692,39 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       if (!mounted || _playerDisposalStarted ||
           generation != _streamLoadGeneration ||
           !_isCurrentStreamAuthorized()) return;
-      await _player.open(Media(url));
+      // Only Xtream Live TV on Android TV may use the preferred HLS/TS
+      // variant. M3U URLs, movies, series and mobile playback stay unchanged.
+      // The original URL is always retained as a fallback. Never log URLs:
+      // Xtream addresses can contain usernames and passwords.
+      final candidates = <String>[url];
+      if (widget.isLive && DeviceLayout.isTelevision) {
+        // Preference storage failure must never prevent channel playback.
+        LiveStreamFormat preference = LiveStreamFormat.automatic;
+        try {
+          preference = await LiveStreamFormatPreferences.load(isTv: true);
+        } catch (_) {
+          // Preserve the original stream when local storage is unavailable.
+        }
+        candidates
+          ..clear()
+          ..addAll(LiveStreamFormatResolver.candidates(url, preference));
+      }
+      if (!mounted || _playerDisposalStarted ||
+          generation != _streamLoadGeneration ||
+          !_isCurrentStreamAuthorized()) return;
+      for (var index = 0; index < candidates.length; index++) {
+        try {
+          await _player.open(Media(candidates[index]));
+          break;
+        } catch (_) {
+          // Only a synchronous/awaited open failure triggers this fallback.
+          // A later native decoder failure needs separate diagnostics.
+          if (index == candidates.length - 1) rethrow;
+          if (!mounted || _playerDisposalStarted ||
+              generation != _streamLoadGeneration ||
+              !_isCurrentStreamAuthorized()) return;
+        }
+      }
       if (!mounted || _playerDisposalStarted ||
           generation != _streamLoadGeneration) return;
       if (!_isCurrentStreamAuthorized()) {
