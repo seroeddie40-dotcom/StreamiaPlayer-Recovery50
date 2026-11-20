@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import '../services/media_engine.dart';
+import '../services/tv_playback_diagnostics.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
 import '../core/localization/app_localizations.dart';
@@ -53,6 +54,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   Map<String, List<Channel>> _channelById = const {};
   Future<void> _openQueue = Future<void>.value();
   bool _playerDisposalStarted = false;
+  late final TvPlaybackDiagnostics _tvDiagnostics;
   late final Player _player;
   late final VideoController _videoController;
   late final FamilySessionProvider _familySession;
@@ -62,7 +64,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     try {
       final rows = await request;
       if (mounted && _historyService.isCurrent && _historyService.source == _contentProvider.sourceKey) {
-        setState(() => _profileHistory = rows);
+        // Updating the history cache must not rebuild the live video surface.
+        // Only repaint when the history sidebar is actually visible.
+        if (_showHistory) {
+          setState(() => _profileHistory = rows);
+        } else {
+          _profileHistory = rows;
+        }
       }
     } catch (_) { /* Playback must not depend on history storage. */ }
   }
@@ -292,6 +300,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _activeChannel = widget.channel;
+    _tvDiagnostics = TvPlaybackDiagnostics(
+      enabled: DeviceLayout.isTelevision && widget.isLive,
+    );
     _player = MediaEngine.createPlayer();
     _videoController = VideoController(_player);
     _familySession = context.read<FamilySessionProvider>();
@@ -328,6 +339,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     });
     _playSub = _player.stream.playing.listen((p) {
       if (!mounted) return;
+      _tvDiagnostics.playing(p);
       final changed = _playing != p || (p && (_streamFailed || _reconnecting));
       void update() {
         final wasPlaying = _playing;
@@ -355,6 +367,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     // slow connections can recover, without hanging indefinitely.
     _bufferingSub = _player.stream.buffering.listen((buffering) {
       if (!mounted) return;
+      _tvDiagnostics.buffering(buffering);
       if (buffering) {
         _stablePlaybackStartedAt = null;
         _bufferingStartedAt ??= DateTime.now();
@@ -367,25 +380,35 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _buffering = buffering;
     });
     // Do not show raw player errors: stream URLs can contain account secrets.
-    _errorSub = _player.stream.error.listen((_) => _handlePlaybackFailure());
+    _errorSub = _player.stream.error.listen((_) {
+      _tvDiagnostics.failure('native-player-error');
+      _handlePlaybackFailure();
+    });
     _loadStream();
     RecordingService.refreshStatus();
     _stallMonitor = Timer.periodic(const Duration(seconds: 5), (_) => _checkPlaybackStall());
-    _progressTimer = Timer.periodic(const Duration(seconds: 15), (_) => _saveProgress());
-    // Retry queued offline progress while the player remains open.
-    _queueSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
-      if (!_appInForeground || _playbackRevoked) return;
-      unawaited(_progressService.flushPending());
-      // History is refreshed on demand when its sidebar opens.
-    });
+    // Live TV has no seekable watch progress. Avoid waking the Dart UI
+    // isolate every 15 seconds for a guaranteed no-op during playback.
+    if (!widget.isLive) {
+      _progressTimer = Timer.periodic(
+        const Duration(seconds: 15), (_) => _saveProgress());
+    }
+    // Live TV has no seekable watch progress. Avoid periodic Supabase/disk
+    // synchronization while the TV decoder is handling a continuous stream.
+    // Pending VOD progress is still flushed during VOD playback; Live TV
+    // history is recorded independently by ProfileHistoryService.
+    if (!widget.isLive) {
+      _queueSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+        if (!_appInForeground || _playbackRevoked) return;
+        unawaited(_progressService.flushPending());
+      });
+    }
     _startHideTimer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Live TV starts with folders on the left and channels beside them.
-      // This is only the initial view; Back/close still hides the drawer.
+      // Keep the TV video unobstructed on initial playback. The user opens
+      // channel navigation explicitly via the remote; never open a drawer
+      // automatically while the decoder is starting.
       if (!mounted || _playbackRevoked || !_isCurrentStreamAuthorized()) return;
-      if (widget.isLive && _activeChannel != null) {
-        _openNavigationDrawer();
-      }
       final library = context.read<ContentProvider>();
       if (_activeChannel != null) _updateHistory(_historyService.record('live', _activeChannel!.id));
       if (widget.contentId != null && !widget.isLive && widget.episodes == null) {
@@ -415,6 +438,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (_buffering) {
       final since = _bufferingStartedAt;
       if (since == null || DateTime.now().difference(since) < _bufferingTimeout) return;
+      _tvDiagnostics.failure('buffering-timeout');
       _handlePlaybackFailure();
       return;
     }
@@ -641,6 +665,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     }
     _reconnectTimer?.cancel();
     final generation = ++_streamLoadGeneration;
+    _tvDiagnostics.streamOpened(reconnect: reconnect);
     if (!reconnect) _automaticReconnects = 0;
     _stablePlaybackStartedAt = null;
     // Keep the position before Media.open resets player position streams.
@@ -770,13 +795,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     // Overlay widgets own their remote actions; never toggle playback behind them.
     if (_showDrawer || _showHistory) return KeyEventResult.ignored;
     final key = event.logicalKey;
-    // On Live TV, Right opens the history sidebar from the player surface.
-    // For films and episodes, hidden controls reserve Left/Right for seeking.
-    if (key == LogicalKeyboardKey.arrowRight && widget.isLive &&
-        _playerSurfaceFocus.hasPrimaryFocus) {
-      _toggleHistorySidebar();
-      return KeyEventResult.handled;
-    }
+    // Left/Right on the Live TV surface must not unexpectedly open history.
+    // Navigation overlays are opened only through their explicit controls.
     if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.arrowLeft) {
       // Focused controls retain their normal D-pad traversal. Only seek when
       // the controls are hidden and the content has a seekable timeline.
@@ -1160,6 +1180,16 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                       onTap: _openNavigationDrawer,
                       child: _pill(widget.isLive ? AppLocalizations.of(context).t('player_channels_folders') : AppLocalizations.of(context).t('player_episodes'), Icons.list),
                     ),
+                  if (widget.isLive && DeviceLayout.isTelevision)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 12),
+                      child: InkWell(
+                        focusColor: AppTheme.electricBlue.withOpacity(0.38),
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: _showTvPlaybackDiagnostics,
+                        child: _pill('Diagnose', Icons.monitor_heart_outlined),
+                      ),
+                    ),
                   if (widget.isLive) ...[
                     IconButton(focusColor: AppTheme.electricBlue.withOpacity(0.38), onPressed: _zapPrevious, tooltip: AppLocalizations.of(context).t('player_previous_channel'), icon: const Icon(Icons.skip_previous, color: Colors.white)),
                     IconButton(focusColor: AppTheme.electricBlue.withOpacity(0.38), onPressed: _zapNext, tooltip: AppLocalizations.of(context).t('player_next_channel'), icon: const Icon(Icons.skip_next, color: Colors.white)),
@@ -1177,6 +1207,48 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // TV-only diagnostic view: no ADB, external device or background polling.
+  // The recorder deliberately excludes stream URLs and account credentials.
+  Future<void> _showTvPlaybackDiagnostics() async {
+    if (!mounted || !DeviceLayout.isTelevision || !widget.isLive) return;
+    final report = _tvDiagnostics.report;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF14232C),
+        title: const Text('TV-Wiedergabediagnose',
+            style: TextStyle(color: Colors.white)),
+        content: SizedBox(
+          width: 620,
+          height: 340,
+          child: SingleChildScrollView(
+            child: SelectableText(report,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                )),
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            autofocus: true,
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: report));
+              if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+            },
+            icon: const Icon(Icons.copy),
+            label: const Text('Kopieren'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Schließen'),
+          ),
+        ],
       ),
     );
   }
