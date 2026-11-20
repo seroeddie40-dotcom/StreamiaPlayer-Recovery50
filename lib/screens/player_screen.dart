@@ -52,6 +52,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   List<Channel>? _indexedChannelList;
   Map<String, List<Channel>> _channelById = const {};
   Future<void> _openQueue = Future<void>.value();
+  bool _playerDisposalStarted = false;
   late final Player _player;
   late final VideoController _videoController;
   late final FamilySessionProvider _familySession;
@@ -189,6 +190,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   static const Duration _bufferingTimeout = Duration(seconds: 60);
   bool _buffering = false;
   DateTime? _bufferingStartedAt;
+  DateTime? _stablePlaybackStartedAt;
+  static const Duration _stablePlaybackReset = Duration(seconds: 90);
 
   bool _appInForeground = true;
   Duration? _reconnectResumePosition;
@@ -239,6 +242,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _position = Duration.zero;
       _duration = Duration.zero;
       _buffering = false;
+      _bufferingStartedAt = null;
+      _stablePlaybackStartedAt = null;
+      _playing = false;
       _streamFailed = false;
       _reconnecting = false;
       _automaticReconnects = 0;
@@ -260,7 +266,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (widget.episodes != null && widget.episodes!.isNotEmpty) {
       return widget.episodes![_currentEpisode].streamUrl;
     }
-    return widget.streamUrl ?? _activeChannel?.streamUrl;
+    return widget.isLive
+        ? (_activeChannel?.streamUrl ?? widget.streamUrl)
+        : (widget.streamUrl ?? _activeChannel?.streamUrl);
   }
 
   String? get _progressContentId {
@@ -319,27 +327,42 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       }
     });
     _playSub = _player.stream.playing.listen((p) {
-      if (mounted) setState(() {
+      if (!mounted) return;
+      final changed = _playing != p || (p && (_streamFailed || _reconnecting));
+      void update() {
+        final wasPlaying = _playing;
         _playing = p;
         if (p) {
           _streamFailed = false;
           _reconnecting = false;
-          _lastPlaybackProgressAt = DateTime.now();
+          // Repeated playing=true events must not reset the VOD stall clock.
+          // Only an actual transition into playing starts a new grace period.
+          if (!wasPlaying) _lastPlaybackProgressAt = DateTime.now();
+          // Buffering is not stable playback, even if the player says playing.
+          if (!_buffering) _stablePlaybackStartedAt ??= DateTime.now();
         } else {
           _lastPlaybackProgressAt = null;
+          _stablePlaybackStartedAt = null;
         }
-      });
+      }
+      if (changed) {
+        setState(update);
+      } else {
+        update();
+      }
     });
     // Buffering is not a playback failure. Allow a bounded grace period so
     // slow connections can recover, without hanging indefinitely.
     _bufferingSub = _player.stream.buffering.listen((buffering) {
       if (!mounted) return;
       if (buffering) {
+        _stablePlaybackStartedAt = null;
         _bufferingStartedAt ??= DateTime.now();
       } else {
         _bufferingStartedAt = null;
         _lastPlaybackProgressAt = DateTime.now();
         _lastObservedPlaybackPosition = _position;
+        if (_playing) _stablePlaybackStartedAt ??= DateTime.now();
       }
       _buffering = buffering;
     });
@@ -387,11 +410,23 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   // Detect streams that silently stop advancing without emitting a player error.
   // Never reconnect deliberately paused playback or content near its end.
   void _checkPlaybackStall() {
-    if (!mounted || !_appInForeground || !_playing || _streamFailed || _reconnecting) return;
+    if (!mounted || !_appInForeground || _streamFailed || _reconnecting) return;
+    // A buffering player may report playing=false; check buffering first.
     if (_buffering) {
       final since = _bufferingStartedAt;
       if (since == null || DateTime.now().difference(since) < _bufferingTimeout) return;
       _handlePlaybackFailure();
+      return;
+    }
+    if (!_playing) return;
+    // Live stream positions may remain static even while video is decoding.
+    // Only explicit player errors and sustained buffering trigger Live TV retries.
+    if (widget.isLive) {
+      final stableSince = _stablePlaybackStartedAt;
+      if (stableSince != null &&
+          DateTime.now().difference(stableSince) >= _stablePlaybackReset) {
+        _automaticReconnects = 0;
+      }
       return;
     }
     final last = _lastPlaybackProgressAt;
@@ -402,7 +437,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   void _handlePlaybackFailure() {
-    if (!mounted || _streamFailed) return;
+    // Native error events can arrive after permission revocation or while
+    // a route is being disposed. Never schedule a retry in either state.
+    if (!mounted || _playerDisposalStarted || _playbackRevoked ||
+        !_isCurrentStreamAuthorized() || _streamFailed) return;
     // Do not schedule retries while the operating system suspends playback.
     if (!_appInForeground) return;
     setState(() { _streamFailed = true; _reconnecting = false; _showControls = true; });
@@ -428,7 +466,21 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _reconnectTimer?.cancel();
     _stallMonitor?.cancel();
     _hideTimer?.cancel();
-    unawaited(_player.stop());
+    // Serialize revocation with queued Media.open calls. A stop racing with
+    // an in-flight open could otherwise finish first and leave media playing.
+    final previousOpen = _openQueue;
+    final revocation = Completer<void>();
+    _openQueue = revocation.future;
+    unawaited(() async {
+      try {
+        await previousOpen.catchError((Object _) {});
+        await _player.stop();
+      } catch (_) {
+        // Revocation must remain terminal even if the native player fails.
+      } finally {
+        revocation.complete();
+      }
+    }());
     if (mounted) {
       setState(() {
         _playing = false;
@@ -555,11 +607,24 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   Future<void> _loadStream({bool reconnect = false}) async {
+    if (_playerDisposalStarted || !mounted) return;
     final permitted = !_playbackRevoked && _isCurrentStreamAuthorized();
 
     if (!permitted) {
       ++_streamLoadGeneration;
-      await _player.stop();
+      // Do not race a pending native Media.open with a permission stop.
+      // Reserve the queue immediately, before the first await.
+      final previousOpen = _openQueue;
+      final stopping = Completer<void>();
+      _openQueue = stopping.future;
+      try {
+        await previousOpen.catchError((Object _) {});
+        if (!_playerDisposalStarted) await _player.stop();
+      } catch (_) {
+        // An inaccessible stream must never be reopened on stop failure.
+      } finally {
+        stopping.complete();
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text(
@@ -577,6 +642,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _reconnectTimer?.cancel();
     final generation = ++_streamLoadGeneration;
     if (!reconnect) _automaticReconnects = 0;
+    _stablePlaybackStartedAt = null;
     // Keep the position before Media.open resets player position streams.
     final resumeAt = reconnect && !widget.isLive
         ? (_reconnectResumePosition ?? _position)
@@ -586,29 +652,35 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _lastObservedPlaybackPosition = Duration.zero;
     _buffering = false;
     _bufferingStartedAt = null;
+    _playing = false;
     if (mounted) setState(() { _reconnecting = reconnect; _streamFailed = false; });
+    // Keep the queue reserved through post-open seeks and progress restore.
+    // Otherwise dispose() or a newer channel open may race those operations.
+    final previousOpen = _openQueue;
+    final opening = Completer<void>();
+    _openQueue = opening.future;
+    var revokeAfterOpen = false;
     try {
-      final previousOpen = _openQueue;
-      final opening = Completer<void>();
-      _openQueue = opening.future;
-      try {
-        await previousOpen.catchError((Object _) {});
-        if (!mounted || generation != _streamLoadGeneration ||
-            !_isCurrentStreamAuthorized()) return;
-        await _player.open(Media(url));
-        if (!mounted || generation != _streamLoadGeneration) return;
-        if (!_isCurrentStreamAuthorized()) {
-          _onFamilySessionChanged();
-          return;
-        }
-      } finally {
-        opening.complete();
+      await previousOpen.catchError((Object _) {});
+      if (!mounted || _playerDisposalStarted ||
+          generation != _streamLoadGeneration ||
+          !_isCurrentStreamAuthorized()) return;
+      await _player.open(Media(url));
+      if (!mounted || _playerDisposalStarted ||
+          generation != _streamLoadGeneration) return;
+      if (!_isCurrentStreamAuthorized()) {
+        // Do not enqueue a revocation stop until this open has released its
+        // queue slot. Otherwise the stop can wait on the operation that is
+        // itself waiting for the stop (or race the native open).
+        revokeAfterOpen = true;
+        return;
       }
       // Reconnect always takes precedence over stored progress. A first open
       // may fail before the initial progress lookup; in that case the retry
       // must still resume at the position captured before Media.open.
       if (reconnect && !widget.isLive) {
-        if (resumeAt > Duration.zero && generation == _streamLoadGeneration) {
+        if (resumeAt > Duration.zero && mounted && !_playerDisposalStarted &&
+            generation == _streamLoadGeneration && _isCurrentStreamAuthorized()) {
           await _player.seek(resumeAt);
         }
       } else if (!_restoreAttempted && !widget.isLive &&
@@ -628,6 +700,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
             saved = null;
           }
           if (saved != null && saved > 0 && mounted &&
+              !_playerDisposalStarted && _isCurrentStreamAuthorized() &&
               generation == _streamLoadGeneration) {
             await _player.seek(Duration(seconds: saved));
           }
@@ -638,7 +711,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         setState(() => _reconnecting = false);
       }
     } catch (_) {
-      if (mounted && generation == _streamLoadGeneration) _handlePlaybackFailure();
+      if (mounted && !_playerDisposalStarted &&
+          generation == _streamLoadGeneration) _handlePlaybackFailure();
+    } finally {
+      opening.complete();
+      if (revokeAfterOpen && mounted && !_playerDisposalStarted) {
+        _onFamilySessionChanged();
+      }
     }
   }
 
@@ -773,6 +852,24 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     });
   }
 
+  Future<void> _disposePlayerAfterOpens(Future<void> pendingOpens) async {
+    // Never dispose the native player concurrently with an outstanding open.
+    // A timeout would resume disposal while that open still owns the player.
+    // If the backend never completes, retain the player rather than race it;
+    // the native backend needs a separate cancellable-open mechanism to
+    // guarantee bounded cleanup in that failure case.
+    try {
+      await pendingOpens;
+    } catch (_) {
+      // An unsuccessful open still releases the queue; cleanup may proceed.
+    }
+    try {
+      await _player.dispose();
+    } catch (_) {
+      // A failed native backend must not crash navigation.
+    }
+  }
+
   @override
   void dispose() {
     _familySession.removeListener(_onFamilySessionChanged);
@@ -784,6 +881,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _reconnectTimer?.cancel();
     _stallMonitor?.cancel();
     _streamLoadGeneration++;
+    _playerDisposalStarted = true;
+    final pendingOpens = _openQueue;
+    unawaited(_disposePlayerAfterOpens(pendingOpens));
     _channelListScroll.dispose();
     _categoryListScroll.dispose();
     _drawerCloseFocus.dispose();
@@ -799,7 +899,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     WidgetsBinding.instance.removeObserver(this);
     _saveProgress();
     _posSub?.cancel(); _durSub?.cancel(); _playSub?.cancel(); _errorSub?.cancel(); _bufferingSub?.cancel();
-    _player.dispose();
     super.dispose();
   }
 
