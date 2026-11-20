@@ -1,5 +1,7 @@
 import '../widgets/tv_catalog_focus.dart';
 import '../widgets/profile_clock.dart';
+import '../services/live_stream_format.dart';
+import '../services/live_stream_format_preferences.dart';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -76,6 +78,63 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
+  Future<void> _chooseLiveStreamFormat(BuildContext context) async {
+    final isTv = DeviceLayout.isTelevision;
+    final current = await LiveStreamFormatPreferences.load(isTv: isTv);
+    if (!context.mounted) return;
+    final selected = await showDialog<LiveStreamFormat>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: Text(_label(context,
+          'Live-TV-Stream-Format', 'Canlı TV yayın biçimi',
+          'Live TV stream format', 'Формат потока Live TV',
+          'صيغة بث التلفزيون المباشر', 'Format strumienia TV',
+          'Formato de transmisión TV', 'Format du flux TV')),
+        children: [
+          for (final option in LiveStreamFormat.values)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(dialogContext).pop(option),
+              child: Row(children: [
+                Expanded(child: Text(_formatName(context, option))),
+                if (current == option) const Icon(Icons.check),
+              ]),
+            ),
+        ],
+      ),
+    );
+    if (selected == null) return;
+    final saved = await LiveStreamFormatPreferences.save(selected, isTv: isTv);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(saved
+          ? _label(context,
+              'Stream-Format gespeichert. Player-Anbindung folgt.',
+              'Yayın biçimi kaydedildi. Oynatıcı bağlantısı henüz bekliyor.',
+              'Stream format saved. Player integration pending.',
+              'Формат сохранён. Подключение к плееру ожидается.',
+              'تم حفظ الصيغة. ربط المشغل قيد الانتظار.',
+              'Zapisano format. Integracja z odtwarzaczem oczekuje.',
+              'Formato guardado. Falta integrarlo con el reproductor.',
+              'Format enregistré. Intégration au lecteur à venir.')
+          : _label(context,
+              'Speichern fehlgeschlagen', 'Kaydedilemedi', 'Could not save',
+              'Не удалось сохранить', 'تعذر الحفظ', 'Nie zapisano',
+              'No se pudo guardar', 'Échec de l’enregistrement')),
+    ));
+  }
+
+  String _formatName(BuildContext context, LiveStreamFormat format) {
+    switch (format) {
+      case LiveStreamFormat.automatic:
+        return _label(context, 'Automatisch', 'Otomatik', 'Automatic',
+            'Автоматически', 'تلقائي', 'Automatycznie', 'Automático', 'Automatique');
+      case LiveStreamFormat.hls:
+        return 'HLS (.m3u8)';
+      case LiveStreamFormat.mpegTs:
+        return 'MPEG-TS (.ts)';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -143,6 +202,24 @@ class SettingsScreen extends StatelessWidget {
                     onTap: () => theme.toggleTheme(),
                   )),
 
+                  const Divider(),
+                  TvCatalogFocus(child: ListTile(
+                    focusColor: focusColor,
+                    leading: const Icon(Icons.settings_input_component),
+                    title: Text(_label(context,
+                      'Live-TV-Stream-Format', 'Canlı TV yayın biçimi',
+                      'Live TV stream format', 'Формат потока Live TV',
+                      'صيغة بث التلفزيون المباشر', 'Format strumienia TV',
+                      'Formato de transmisión TV', 'Format du flux TV')),
+                    subtitle: FutureBuilder<LiveStreamFormat>(
+                      future: LiveStreamFormatPreferences.load(
+                          isTv: DeviceLayout.isTelevision),
+                      builder: (context, snapshot) => Text(_formatName(
+                        context, snapshot.data ?? LiveStreamFormat.automatic)),
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => _chooseLiveStreamFormat(context),
+                  )),
                   const Divider(),
                   const ProfileClock(settings: true),
                   const Divider(),
