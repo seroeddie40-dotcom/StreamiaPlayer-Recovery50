@@ -1,3 +1,4 @@
+
 import 'package:media_kit/media_kit.dart';
 
 class MediaEngine {
@@ -17,6 +18,11 @@ class MediaEngine {
 
   static Player createPlayer() {
     ensureInitialized();
-    return Player();
+
+    return Player(
+      configuration: const PlayerConfiguration(
+        bufferSize: 16 * 1024 * 1024,
+      ),
+    );
   }
 }
