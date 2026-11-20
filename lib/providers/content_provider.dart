@@ -210,22 +210,54 @@ class ContentProvider extends ChangeNotifier {
   }
 
   void _resolveCurrentSourceHistory() {
+    // Build lookup tables once per library resolution instead of scanning the
+    // entire catalog for each history entry. Keep the first matching ID to
+    // preserve the previous firstWhere-style behavior for duplicate IDs.
+    final channelsById = <String, Channel>{};
+    final vodById = <String, VodItem>{};
+    final seriesById = <String, Series>{};
+    for (final channel in _channels) {
+      channelsById.putIfAbsent(channel.id, () => channel);
+    }
+    for (final item in _vodItems) {
+      vodById.putIfAbsent(item.id, () => item);
+    }
+    for (final item in _series) {
+      seriesById.putIfAbsent(item.id, () => item);
+    }
+
     for (var i = 0; i < _recentHistory.length; i++) {
       final entry = _recentHistory[i];
       if (entry.sourceKey != _sourceKey) continue;
       if (entry.type == RecentPlaybackType.live) {
-        final match = _findOrNull(_channels, (item) => item.id == entry.id);
-        if (match != null) _recentHistory[i] = RecentPlaybackEntry(type: entry.type, id: entry.id,
-          title: match.name, imageUrl: match.logoUrl, channel: match, viewedAt: entry.viewedAt, sourceKey: entry.sourceKey);
+        final match = channelsById[entry.id];
+        if (match != null) {
+          _recentHistory[i] = RecentPlaybackEntry(
+            type: entry.type, id: entry.id, title: match.name,
+            imageUrl: match.logoUrl, channel: match,
+            viewedAt: entry.viewedAt, sourceKey: entry.sourceKey,
+          );
+        }
       } else if (entry.type == RecentPlaybackType.vod) {
-        final match = _findOrNull(_vodItems, (item) => item.id == entry.id);
-        if (match != null) _recentHistory[i] = RecentPlaybackEntry(type: entry.type, id: entry.id,
-          title: match.title, imageUrl: match.posterUrl ?? match.backdropUrl, vod: match, viewedAt: entry.viewedAt, sourceKey: entry.sourceKey);
+        final match = vodById[entry.id];
+        if (match != null) {
+          _recentHistory[i] = RecentPlaybackEntry(
+            type: entry.type, id: entry.id, title: match.title,
+            imageUrl: match.posterUrl ?? match.backdropUrl, vod: match,
+            viewedAt: entry.viewedAt, sourceKey: entry.sourceKey,
+          );
+        }
       } else {
-        final seriesId = entry.id.contains('::') ? entry.id.split('::').first : entry.id;
-        final match = _findOrNull(_series, (item) => item.id == seriesId);
-        if (match != null) _recentHistory[i] = RecentPlaybackEntry(type: entry.type, id: entry.id,
-          title: entry.title, imageUrl: entry.imageUrl ?? match.posterUrl ?? match.backdropUrl, series: match, viewedAt: entry.viewedAt, sourceKey: entry.sourceKey);
+        final separator = entry.id.indexOf('::');
+        final seriesId = separator < 0 ? entry.id : entry.id.substring(0, separator);
+        final match = seriesById[seriesId];
+        if (match != null) {
+          _recentHistory[i] = RecentPlaybackEntry(
+            type: entry.type, id: entry.id, title: entry.title,
+            imageUrl: entry.imageUrl ?? match.posterUrl ?? match.backdropUrl,
+            series: match, viewedAt: entry.viewedAt, sourceKey: entry.sourceKey,
+          );
+        }
       }
     }
   }
