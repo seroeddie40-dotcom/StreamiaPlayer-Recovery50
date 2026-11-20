@@ -132,11 +132,9 @@ class StreamiaApp extends StatelessWidget {
       );
     }
 
-    if (!content.isLoaded) {
-      return const _LibraryStartupGate();
-    }
-
-    return const _LandscapeDashboard();
+    // The gate owns the completion of the startup transaction. Do not bypass
+    // it merely because an asynchronous catalog publish notified listeners.
+    return const _LibraryStartupGate();
   }
 }
 
@@ -316,10 +314,14 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
   bool _loading = true;
   bool _hasProfiles = false;
   bool _loadFailed = false;
+  bool _startupReady = false;
   String _loadStage = 'profiles';
   int? _xtreamCompleted;
+  int _progressPercent = 0;
+  int _completedPhases = 0;
   (int, int, int)? _m3uCounts;
   int _loadAttempt = 0;
+  Stopwatch? _loadWatch;
   // Dart Future.timeout does not cancel the underlying database/network work.
   // Keep the original operation until it really finishes so Retry cannot
   // start another restore or activation against the same catalog.
@@ -377,7 +379,12 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
       },
       onXtreamProgress: (completed, _) {
         if (mounted && attempt == _loadAttempt) {
-          setState(() => _xtreamCompleted = completed);
+          setState(() {
+            _xtreamCompleted = completed;
+            _completedPhases = completed;
+            // Reserve 100% for the successfully published catalog.
+            _progressPercent = completed == 3 ? 95 : 20 + (completed * 25);
+          });
         }
       },
     );
@@ -393,35 +400,45 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadLibrary());
+    if (context.read<ContentProvider>().isLoaded) {
+      _startupReady = true;
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _loadLibrary());
+    }
   }
 
   Future<void> _loadLibrary() async {
-    if (!mounted) return;
+    if (!mounted || _loading && _loadAttempt > 0) return;
     final attempt = ++_loadAttempt;
-    setState(() { _loading = true; _loadFailed = false; _loadStage = 'profiles'; _xtreamCompleted = null; _m3uCounts = null; });
+    final watch = Stopwatch()..start();
+    _loadWatch = watch;
+    debugPrint('[Streamia/Library] attempt=$attempt started');
+    setState(() { _loading = true; _loadFailed = false; _loadStage = 'profiles'; _xtreamCompleted = null; _m3uCounts = null; _progressPercent = 0; _completedPhases = 0; });
     final content = context.read<ContentProvider>();
     try {
-      final profiles = await _loadProfilesOnce().timeout(const Duration(seconds: 15));
+      final profiles = await _loadProfilesOnce();
+      debugPrint('[Streamia/Library] profiles ready after ${watch.elapsedMilliseconds}ms; count=${profiles.length}');
       if (!mounted || attempt != _loadAttempt) return;
       if (profiles.isEmpty) {
         setState(() { _hasProfiles = false; _loading = false; });
         return;
       }
       _hasProfiles = true;
-      setState(() => _loadStage = 'local');
+      setState(() { _loadStage = 'local'; _progressPercent = 10; });
       final active = profiles.where((p) => p.isActive).firstOrNull ?? profiles.first;
       // A timed-out activation may still be running. Rejoin it instead of
       // beginning a new restore, which would invalidate its generation.
       if (_pendingSourceKey == active.sourceKey && _pendingActivation != null) {
-        setState(() => _loadStage = 'network');
-        final activated = await _pendingActivation!
-            .timeout(const Duration(seconds: 120));
+        setState(() { _loadStage = 'network'; _progressPercent = 20; });
+        final activated = await _pendingActivation!;
         if (!activated && !content.isLoaded) {
           throw StateError('Playlist activation did not complete');
         }
-        if (mounted && attempt == _loadAttempt && !content.isLoaded) {
-          setState(() => _loading = false);
+        if (!mounted || attempt != _loadAttempt) return;
+        if (content.isLoaded) {
+          setState(() { _progressPercent = 100; _completedPhases = 3; _startupReady = true; _loading = false; });
+        } else {
+          throw StateError('Playlist activation did not publish a library');
         }
         return;
       }
@@ -429,27 +446,50 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
       // depend on the playlist server being reachable.
       final restored = await _restoreOnce(
         content, active.sourceKey, active.displayName,
-      ).timeout(const Duration(seconds: 30));
+      );
+      debugPrint('[Streamia/Library] local restore finished after ${watch.elapsedMilliseconds}ms; restored=$restored');
       if (!restored && !content.isLoaded) {
         // No cached catalog: use the already saved secure source credentials.
         if (!mounted || attempt != _loadAttempt) return;
-        setState(() => _loadStage = 'network');
+        setState(() { _loadStage = 'network'; _progressPercent = 20; });
         final activated = await _activateOnce(
           content, active, attempt,
-        ).timeout(const Duration(seconds: 120));
+        );
+        debugPrint('[Streamia/Library] network activation finished after ${watch.elapsedMilliseconds}ms; activated=$activated');
         if (!activated && !content.isLoaded) {
           throw StateError('Playlist activation did not complete');
         }
       }
       if (!mounted || attempt != _loadAttempt) return;
+      if (content.isLoaded) {
+        setState(() { _progressPercent = 100; _completedPhases = 3; _startupReady = true; _loading = false; });
+      }
       if (!content.isLoaded) {
         setState(() { _loading = false; });
       }
     } catch (error) {
-      debugPrint('Streamia startup library load failed: ${error.runtimeType}');
+      debugPrint('[Streamia/Library] attempt=$attempt failed after ${watch.elapsedMilliseconds}ms (${error.runtimeType})');
       if (mounted && attempt == _loadAttempt) {
-        // Do not invalidate a potentially finishing restore on a timeout.
-        setState(() { _loading = false; _loadFailed = !content.isLoaded; });
+        // A restore may have published the catalog just before a later
+        // asynchronous step failed. Never display Retry for a ready library,
+        // or leave the gate stranded with neither a retry nor a route.
+        setState(() {
+          _loading = false;
+          if (content.isLoaded) {
+            _progressPercent = 100;
+            _completedPhases = 3;
+            _startupReady = true;
+            _loadFailed = false;
+          } else {
+            _loadFailed = true;
+          }
+        });
+      }
+    } finally {
+      watch.stop();
+      if (identical(_loadWatch, watch)) {
+        debugPrint('[Streamia/Library] attempt=$attempt ended after ${watch.elapsedMilliseconds}ms; loaded=${content.isLoaded}');
+        _loadWatch = null;
       }
     }
   }
@@ -461,7 +501,8 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
 
   @override
   Widget build(BuildContext context) {
-    if (context.watch<ContentProvider>().isLoaded) {
+    final libraryLoaded = context.watch<ContentProvider>().isLoaded;
+    if (_startupReady && libraryLoaded) {
       return const _LandscapeDashboard();
     }
     if (!_loading && !_hasProfiles && !_loadFailed) {
@@ -481,13 +522,12 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
                   Text('Streamia Player', style: Theme.of(context).textTheme.headlineSmall),
                   const SizedBox(height: 22),
                   LinearProgressIndicator(
-                    value: _xtreamCompleted == null ? null : _xtreamCompleted! / 3,
+                    value: _progressPercent / 100,
                     minHeight: 9,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   const SizedBox(height: 12),
-                  if (_xtreamCompleted != null)
-                    Text('${(_xtreamCompleted! * 100 / 3).round()} %'),
+                  Text('$_progressPercent %'),
                   if (_m3uCounts case final counts?) ...[
                     const SizedBox(height: 10),
                     Text(_copy(context,
@@ -504,8 +544,8 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
                       (2, _copy(context, 'Serien', 'Diziler', 'Series')),
                     ])
                       Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(_xtreamCompleted != null && _xtreamCompleted! > phase.$1
-                            ? Icons.check_circle_outline : Icons.circle_outlined,
+                        Icon(_completedPhases > phase.$1
+                            ? Icons.check_circle : Icons.circle_outlined,
                             color: const Color(0xFF20D9EC), size: 18),
                         const SizedBox(width: 6),
                         Text(phase.$2),

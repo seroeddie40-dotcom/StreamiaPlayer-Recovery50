@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -21,6 +22,32 @@ import 'config/supabase_config.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Separate time-to-first-Flutter-frame from later backend initialization.
+  // This marker contains no user or playlist information.
+  final firstFrameWatch = Stopwatch()..start();
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    debugPrint('[Streamia/Startup] first Flutter frame after '
+        '${firstFrameWatch.elapsedMilliseconds}ms');
+    firstFrameWatch.stop();
+  });
+  // Diagnostics for the TV dashboard exit. Only error types and stack frames
+  // are logged; never print credentials or playlist URLs.
+  final previousFlutterErrorHandler = FlutterError.onError;
+  FlutterError.onError = (details) {
+    debugPrint('[Streamia/FlutterError] ${details.exception.runtimeType}');
+    if (details.stack != null) {
+      debugPrintStack(stackTrace: details.stack, maxFrames: 12);
+    }
+    previousFlutterErrorHandler?.call(details);
+  };
+  final dispatcher = PlatformDispatcher.instance;
+  final previousPlatformErrorHandler = dispatcher.onError;
+  dispatcher.onError = (error, stack) {
+    debugPrint('[Streamia/PlatformError] ${error.runtimeType}');
+    debugPrintStack(stackTrace: stack, maxFrames: 12);
+    // Preserve the framework's existing error handling and crash semantics.
+    return previousPlatformErrorHandler?.call(error, stack) ?? false;
+  };
   runApp(const _Bootstrap());
 }
 
@@ -34,9 +61,7 @@ class _Bootstrap extends StatefulWidget {
 class _BootstrapState extends State<_Bootstrap> {
   Widget? _app;
   String? _failedStage;
-  bool _slow = false;
   bool _starting = false;
-  Timer? _slowTimer;
 
   @override
   void initState() {
@@ -52,11 +77,6 @@ class _BootstrapState extends State<_Bootstrap> {
     setState(() {
       _starting = true;
       _failedStage = null;
-      _slow = false;
-    });
-    _slowTimer?.cancel();
-    _slowTimer = Timer(const Duration(seconds: 5), () {
-      if (mounted && _starting) setState(() => _slow = true);
     });
     try {
       final app = await _initializeApp();
@@ -76,15 +96,8 @@ class _BootstrapState extends State<_Bootstrap> {
         _failedStage = error is _StartupFailure ? error.stage : 'APP';
       });
     } finally {
-      _slowTimer?.cancel();
       _starting = false;
     }
-  }
-
-  @override
-  void dispose() {
-    _slowTimer?.cancel();
-    super.dispose();
   }
 
   @override
@@ -105,7 +118,8 @@ class _BootstrapState extends State<_Bootstrap> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const StreamiaBrandLogo(size: 96),
+                            const Icon(Icons.warning_amber_rounded, size: 56,
+                                color: Color(0xFF20D9EC)),
                             const SizedBox(height: 20),
                             const Text('Streamia Player'),
                             const SizedBox(height: 12),
