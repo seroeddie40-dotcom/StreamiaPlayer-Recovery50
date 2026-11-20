@@ -22,6 +22,7 @@ class PlaylistParser {
     int? activationGeneration,
     bool Function()? mayPublish,
     bool durableRefresh = false,
+    void Function(int live, int movies, int series)? onParseProgress,
   }) async {
     final input = urlOrContent.trim();
     if (input.isEmpty) throw const FormatException('Die Playlist ist leer.');
@@ -50,6 +51,7 @@ class PlaylistParser {
           activationGeneration: activationGeneration,
           mayPublish: mayPublish,
           durableRefresh: durableRefresh,
+          onParseProgress: onParseProgress,
           sourceHost: uri.host,
         );
       } finally {
@@ -63,6 +65,7 @@ class PlaylistParser {
         activationGeneration: activationGeneration,
           mayPublish: mayPublish,
           durableRefresh: durableRefresh,
+          onParseProgress: onParseProgress,
       );
     }
   }
@@ -76,6 +79,7 @@ class PlaylistParser {
     int? activationGeneration,
     bool Function()? mayPublish,
     bool durableRefresh = false,
+    void Function(int live, int movies, int series)? onParseProgress,
   }) async {
     final file = File(path);
     if (!await file.exists()) {
@@ -90,6 +94,7 @@ class PlaylistParser {
       activationGeneration: activationGeneration,
           mayPublish: mayPublish,
           durableRefresh: durableRefresh,
+          onParseProgress: onParseProgress,
     );
   }
 
@@ -100,6 +105,7 @@ class PlaylistParser {
     int? activationGeneration,
     bool Function()? mayPublish,
     bool durableRefresh = false,
+    void Function(int live, int movies, int series)? onParseProgress,
     String? sourceHost,
   }) async {
     final channels = <Channel>[];
@@ -113,6 +119,7 @@ class PlaylistParser {
     String? group;
     String? tvgId;
     bool headerSeen = false;
+    var parsedEntries = 0;
 
     await for (final raw in lines) {
       final line = raw.trim();
@@ -244,12 +251,18 @@ class PlaylistParser {
         descriptors.add('live|${item.id}');
       }
 
+      // Throttle UI notifications to avoid rebuilding during every M3U entry.
+      parsedEntries++;
+      if (parsedEntries % 500 == 0) {
+        onParseProgress?.call(channels.length, vod.length, series.length);
+      }
       name = null;
       logo = null;
       group = null;
       tvgId = null;
     }
 
+    onParseProgress?.call(channels.length, vod.length, series.length);
     if (!headerSeen) {
       throw const FormatException(
         'Ungültige M3U-Datei: #EXTM3U-Kopfzeile fehlt.',

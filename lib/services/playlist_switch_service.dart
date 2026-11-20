@@ -60,7 +60,7 @@ class PlaylistSwitchService {
     }
   }
 
-  Future<bool> activate(PlaylistProfile profile, ContentProvider content, {bool forceRefresh = false, bool Function()? mayPublish}) async {
+  Future<bool> activate(PlaylistProfile profile, ContentProvider content, {bool forceRefresh = false, bool Function()? mayPublish, void Function(int completed, String stage)? onXtreamProgress, void Function(int live, int movies, int series)? onM3uProgress}) async {
     if (mayPublish != null && !mayPublish()) return false;
     final generation = content.beginLibraryActivation();
     // A previously loaded source can be switched to immediately, even offline.
@@ -77,13 +77,13 @@ class PlaylistSwitchService {
     }
     if (config.type == 'm3u' && config.m3uUrl != null) {
       if (!await PlaylistParser.parseAndLoad(config.m3uUrl!, content,
-          sourceKeyOverride: profile.sourceKey, activationGeneration: generation, mayPublish: mayPublish, durableRefresh: forceRefresh)) return false;
+          sourceKeyOverride: profile.sourceKey, activationGeneration: generation, mayPublish: mayPublish, durableRefresh: forceRefresh, onParseProgress: onM3uProgress)) return false;
     } else if (config.type == 'm3u' && config.localFilePath != null) {
       final file = File(config.localFilePath!);
       if (!await file.exists()) throw StateError('Die lokal gespeicherte M3U-Datei wurde nicht gefunden. Bitte importiere sie erneut.');
       if (!content.isLibraryActivationCurrent(generation)) return false;
       if (!await PlaylistParser.parseAndLoadFile(file.path, content,
-          sourceKeyOverride: profile.sourceKey, activationGeneration: generation, mayPublish: mayPublish, durableRefresh: forceRefresh)) return false;
+          sourceKeyOverride: profile.sourceKey, activationGeneration: generation, mayPublish: mayPublish, durableRefresh: forceRefresh, onParseProgress: onM3uProgress)) return false;
     } else if (config.type == 'xtream' && config.serverUrl != null &&
         config.username != null && config.password != null) {
       final service = XtreamService(
@@ -93,8 +93,10 @@ class PlaylistSwitchService {
       try {
         final live = await service.getLiveStreams();
         if (!content.isLibraryActivationCurrent(generation)) return false;
+        onXtreamProgress?.call(1, 'live');
         final vod = await service.getVodStreams();
         if (!content.isLibraryActivationCurrent(generation)) return false;
+        onXtreamProgress?.call(2, 'vod');
         final series = await service.getSeries();
         if (!content.isLibraryActivationCurrent(generation)) return false;
         if (forceRefresh && live.isEmpty && vod.isEmpty && series.isEmpty) {
@@ -113,6 +115,11 @@ class PlaylistSwitchService {
           sourceLabel: profile.displayName,
           activationGeneration: generation,
         );
+        }
+        // Report completion only after the fetched catalog has been
+        // handed to ContentProvider, not merely after the final HTTP call.
+        if (content.isLibraryActivationCurrent(generation)) {
+          onXtreamProgress?.call(3, 'series');
         }
       } finally {
         service.close();
