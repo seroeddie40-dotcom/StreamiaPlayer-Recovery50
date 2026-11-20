@@ -4,6 +4,7 @@ import '../widgets/favorites_quick_filter.dart';
 import '../services/category_sort_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 
 import '../core/focus_navigation.dart';
@@ -13,6 +14,7 @@ import '../core/theme/app_theme.dart';
 import '../models/channel.dart';
 import '../providers/content_provider.dart';
 import '../providers/family_session_provider.dart';
+import '../services/family_content_access_service.dart';
 import '../providers/locale_provider.dart';
 import '../widgets/favorite_toggle_button.dart';
 import '../widgets/voice_input_field.dart';
@@ -39,6 +41,48 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
 
   List<String> _cachedCategories = const [];
   Map<String, int> _cachedCounts = const {};
+  Map<String, List<Channel>> _channelsByCategory = const {};
+  List<Channel> _visibleChannels = const [];
+  List<Channel>? _indexedSourceChannels;
+  FamilyContentAccessSnapshot? _indexedPermissions;
+  String? _indexedSourceKey;
+  CategorySortOrder? _indexedSortOrder;
+  bool _indexedReady = false;
+  // Reuse the filtered catalogue across focus, clock and unrelated UI rebuilds.
+  // Favorites are intentionally not cached: membership updates asynchronously.
+  List<Channel>? _filteredSource;
+  String? _filteredCategory;
+  String? _filteredSearch;
+  List<Channel> _filteredChannels = const [];
+
+  List<Channel> _channelsForView(List<Channel> channels, String category) {
+    if (!favoritesOnly &&
+        identical(channels, _filteredSource) &&
+        category == _filteredCategory &&
+        _search == _filteredSearch) {
+      return _filteredChannels;
+    }
+    // Use the category index instead of scanning the entire catalogue on
+    // every folder change. Favorites still use their live membership check.
+    final candidates = category == _all || favoritesOnly
+        ? channels
+        : (_channelsByCategory[category] ?? const <Channel>[]);
+    final result = <Channel>[];
+    for (final channel in candidates) {
+      if (!matchesFavorite(channel.id)) continue;
+      if (!favoritesOnly && category != _all && _categoryFor(channel) != category) continue;
+      if (_search.isNotEmpty && !channel.name.toLowerCase().contains(_search)) continue;
+      result.add(channel);
+    }
+    if (!favoritesOnly) {
+      _filteredSource = channels;
+      _filteredCategory = category;
+      _filteredSearch = _search;
+      _filteredChannels = List<Channel>.unmodifiable(result);
+      return _filteredChannels;
+    }
+    return result;
+  }
 
   @override
   void initState() {
@@ -75,14 +119,71 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
   }
 
   void _updateCategories(List<Channel> channels) {
-    final counts = <String, int>{};
+    final grouped = <String, List<Channel>>{};
     for (final channel in channels) {
-      final category = _categoryFor(channel);
-      counts[category] = (counts[category] ?? 0) + 1;
+      grouped.putIfAbsent(_categoryFor(channel), () => <Channel>[]).add(channel);
     }
+    _channelsByCategory = grouped;
+    final counts = <String, int>{
+      for (final entry in grouped.entries) entry.key: entry.value.length,
+    };
     final categories = CategorySortService.sorted(counts, sortOrder);
     _cachedCounts = counts;
     _cachedCategories = <String>[_all, ...categories];
+  }
+
+  // Rebuild the permitted catalogue only when its source, permission snapshot,
+  // or category ordering changes. Search and focus changes must not rescan all
+  // channels and permissions on every frame.
+  List<Channel> _permittedChannels(
+    List<Channel> allChannels,
+    FamilySessionProvider family,
+    String sourceKey,
+  ) {
+    final permissions = family.snapshot;
+    final ready = family.isReady;
+    if (identical(allChannels, _indexedSourceChannels) &&
+        identical(permissions, _indexedPermissions) &&
+        sourceKey == _indexedSourceKey &&
+        sortOrder == _indexedSortOrder && ready == _indexedReady) {
+      return _visibleChannels;
+    }
+    final indexingTimer = Stopwatch()..start();
+    _indexedSourceChannels = allChannels;
+    _indexedPermissions = permissions;
+    _indexedSourceKey = sourceKey;
+    _indexedSortOrder = sortOrder;
+    _indexedReady = ready;
+    if (!ready) {
+      _visibleChannels = const [];
+    } else {
+      // A family rule applies to a folder, not to an individual channel.
+      // Resolve each category permission once, even for very large playlists.
+      final allowedByCategory = <String, bool>{};
+      final permitted = <Channel>[];
+      for (final channel in allChannels) {
+        final key = channel.categoryKey ?? '';
+        final allowed = allowedByCategory.putIfAbsent(
+          key,
+          () => family.canAccessCategory(
+            sourceKey: sourceKey,
+            contentType: 'live',
+            categoryKey: key,
+          ),
+        );
+        if (allowed) permitted.add(channel);
+      }
+      _visibleChannels = List<Channel>.unmodifiable(permitted);
+    }
+    _updateCategories(_visibleChannels);
+    indexingTimer.stop();
+    if (kDebugMode && indexingTimer.elapsedMilliseconds >= 100) {
+      debugPrint('[Streamia/LiveTV] catalogue indexing took '
+          '${indexingTimer.elapsedMilliseconds}ms; '
+          'total=${allChannels.length}, visible=${_visibleChannels.length}, '
+          'categories=${_cachedCounts.length}');
+    }
+    return _visibleChannels;
   }
 
   String _label(String category) {
@@ -186,23 +287,10 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
     final family = context.watch<FamilySessionProvider>();
     final content = context.watch<ContentProvider>();
     final allChannels = content.channels;
-    final channels = family.isReady
-        ? allChannels.where((channel) => family.canAccessCategory(
-            sourceKey: content.sourceKey,
-            contentType: 'live',
-            categoryKey: channel.categoryKey ?? '',
-          )).toList(growable: false)
-        : <Channel>[];
-    _updateCategories(channels);
+    final channels = _permittedChannels(allChannels, family, content.sourceKey);
     final category = _cachedCategories.contains(_selectedCategory)
         ? _selectedCategory : _all;
-    final filtered = <Channel>[];
-    for (final channel in channels) {
-      if (!matchesFavorite(channel.id)) continue;
-      if (!favoritesOnly && category != _all && _categoryFor(channel) != category) continue;
-      if (_search.isNotEmpty && !channel.name.toLowerCase().contains(_search)) continue;
-      filtered.add(channel);
-    }
+    final filtered = _channelsForView(channels, category);
 
     return LayoutBuilder(builder: (context, constraints) {
       final tv = DeviceLayout.isTelevision;
@@ -331,7 +419,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
                       ),
                       itemCount: filtered.length,
                       itemBuilder: (context, index) => _ChannelTile(
-                        key: ValueKey(filtered[index].id),
+                        key: ValueKey((filtered[index].id, index)),
                         channel: filtered[index],
                       ),
                     ),

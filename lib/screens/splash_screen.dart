@@ -65,7 +65,7 @@ class SplashScreen extends StatelessWidget {
       body: SizedBox.expand(
         child: Image.asset(
           asset,
-          fit: BoxFit.contain,
+          fit: BoxFit.cover,
           gaplessPlayback: true,
           frameBuilder: (
             context,
@@ -77,7 +77,7 @@ class SplashScreen extends StatelessWidget {
               return child;
             }
 
-            return _fallback();
+            return const ColoredBox(color: Color(0xFF020B18));
           },
           errorBuilder: (context, error, stackTrace) {
             debugPrint(
