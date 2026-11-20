@@ -10,6 +10,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
 import '../core/localization/app_localizations.dart';
 import '../core/theme/app_theme.dart';
+import '../core/platform/device_layout.dart';
 import '../models/channel.dart';
 import '../models/series.dart';
 import '../models/vod_item.dart';
@@ -226,9 +227,22 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         _lastObservedPlaybackPosition = p;
         _lastPlaybackProgressAt = DateTime.now();
       }
-      setState(() => _position = p);
+      if (DeviceLayout.isTelevision && widget.isLive) {
+        // Live playback has no seek bar. Keep stall detection current without
+        // rebuilding the video surface and thousands of navigation entries.
+        _position = p;
+      } else {
+        setState(() => _position = p);
+      }
     });
-    _durSub = _player.stream.duration.listen((d) { if (mounted) setState(() => _duration = d); });
+    _durSub = _player.stream.duration.listen((d) {
+      if (!mounted || d == _duration) return;
+      if (DeviceLayout.isTelevision && widget.isLive) {
+        _duration = d;
+      } else {
+        setState(() => _duration = d);
+      }
+    });
     _playSub = _player.stream.playing.listen((p) {
       if (mounted) setState(() {
         _playing = p;
@@ -1177,6 +1191,15 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     );
   }
 
+  Widget _navigationBackdrop({required Widget child}) {
+    // Blurring a continuously changing video texture is expensive on TV GPUs.
+    if (DeviceLayout.isTelevision) return child;
+    return BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+      child: child,
+    );
+  }
+
   Widget _buildHistorySidebar() {
     final library = context.watch<ContentProvider>();
     final lists = <List<RecentPlaybackEntry>>[
@@ -1203,12 +1226,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       bottom: 0,
       child: ClipRRect(
         borderRadius: const BorderRadius.horizontal(left: Radius.circular(22)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: _navigationBackdrop(
           child: Container(
             width: MediaQuery.sizeOf(context).width.clamp(0.0, 380.0).toDouble(),
             decoration: BoxDecoration(
-              color: const Color(0xE6101724),
+              color: DeviceLayout.isTelevision
+                ? const Color(0xFF101724) : const Color(0xE6101724),
               border: Border(
                 left: BorderSide(color: Colors.white.withOpacity(0.16)),
               ),
@@ -1512,11 +1535,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       left: 0, top: 0, bottom: 0,
       child: ClipRRect(
         borderRadius: const BorderRadius.horizontal(right: Radius.circular(22)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: _navigationBackdrop(
           child: Container(
-            width: MediaQuery.sizeOf(context).width.clamp(0.0, 360.0).toDouble(),
-            decoration: BoxDecoration(color: const Color(0xE6101724),
+            width: DeviceLayout.isTelevision
+                ? MediaQuery.sizeOf(context).width * 0.60
+                : MediaQuery.sizeOf(context).width.clamp(0.0, 360.0).toDouble(),
+            decoration: BoxDecoration(color: DeviceLayout.isTelevision
+                ? const Color(0xFF101724) : const Color(0xE6101724),
               border: Border(right: BorderSide(color: Colors.white.withOpacity(0.16)))),
             child: Column(children: [
               Padding(padding: const EdgeInsets.fromLTRB(16, 18, 12, 10), child: Row(children: [
@@ -1531,7 +1556,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       if (!favoritesOnly) SizedBox(
-                        width: MediaQuery.sizeOf(context).width >= 900 ? 230 : 180,
+                        width: DeviceLayout.isTelevision
+                            ? MediaQuery.sizeOf(context).width * 0.22
+                            : (MediaQuery.sizeOf(context).width >= 900 ? 230 : 180),
                         child: ListView(
                           controller: _categoryListScroll,
                           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
@@ -1565,7 +1592,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                                 ? const Icon(Icons.live_tv, color: Colors.white70, size: 20)
                                 : SizedBox(width: 34, height: 30, child: Image.network(channel.logoUrl!, fit: BoxFit.contain,
                                     errorBuilder: (_, __, ___) => const Icon(Icons.live_tv, color: Colors.white70))),
-                              title: Text(channel.name, maxLines: 2, overflow: TextOverflow.ellipsis,
+                              title: Text(channel.name, maxLines: DeviceLayout.isTelevision ? 3 : 2, overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(color: Colors.white, fontSize: 12)),
                               onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(
                                 builder: (_) => PlayerScreen(channel: channel, isLive: true))),
@@ -1621,11 +1648,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       left: 0, top: 0, bottom: 0,
       child: ClipRRect(
         borderRadius: const BorderRadius.horizontal(right: Radius.circular(22)),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: _navigationBackdrop(
           child: Container(
             width: MediaQuery.sizeOf(context).width.clamp(0.0, 360.0).toDouble(),
-            decoration: BoxDecoration(color: const Color(0xE6101724),
+            decoration: BoxDecoration(color: DeviceLayout.isTelevision
+                ? const Color(0xFF101724) : const Color(0xE6101724),
               border: Border(right: BorderSide(color: Colors.white.withOpacity(0.16)))),
             child: Column(children: [
               Padding(padding: const EdgeInsets.all(18), child: Align(alignment: Alignment.centerLeft,
