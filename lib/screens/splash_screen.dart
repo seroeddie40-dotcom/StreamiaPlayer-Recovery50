@@ -34,8 +34,6 @@ class SplashScreen extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          StreamiaBrandLogo(size: 120),
-          SizedBox(height: 20),
           Text(
             'STREAMIA PLAYER',
             style: TextStyle(

@@ -39,26 +39,29 @@ class DashboardScreen extends StatefulWidget {
 class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingObserver {
   Timer? _refreshTimer;
   bool _refreshRunning = false;
+  final Stopwatch _dashboardStartup = Stopwatch()..start();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // One-shot timing marker: distinguish a dashboard render problem from
+    // a crash in the player or a later background operation.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        debugPrint('[Streamia/Dashboard] first frame '
+            '${_dashboardStartup.elapsedMilliseconds}ms '
+            'tv=${DeviceLayout.isTelevision}');
+      }
+    });
     _refreshTimer = Timer.periodic(const Duration(minutes: 1), (_) => _checkRefresh());
-    WidgetsBinding.instance.addPostFrameCallback((_) => _checkRefresh());
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _checkRefresh());
-    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
+    debugPrint('[Streamia/Dashboard] disposed after ${_dashboardStartup.elapsedMilliseconds}ms');
     super.dispose();
   }
 
@@ -78,15 +81,25 @@ class _DashboardScreenState extends State<DashboardScreen> with WidgetsBindingOb
       final profiles = await PlaylistProfileStore().load();
       for (final profile in profiles) {
         if (!profile.isActive || profile.sourceKey != key) continue;
+        // Check inexpensive scheduling flags before traversing large catalogs.
+        // The old ordering created three category iterables even when an
+        // automatic refresh was disabled or not due.
+        if (await PlaylistRefreshSchedule.hours(key) == 0) return;
+        if (!mounted || !_canRefresh() || content.sourceKey != key) return;
+        if (!await PlaylistRefreshSchedule.automaticAttemptAllowed(key)) return;
+        if (!mounted || !_canRefresh() || content.sourceKey != key) return;
+        final repairPending = !await PlaylistRefreshSchedule.repairAttempted(key);
+        if (!mounted || !_canRefresh() || content.sourceKey != key) return;
+        final due = await PlaylistRefreshSchedule.due(key);
+        if (!mounted || !_canRefresh() || content.sourceKey != key) return;
+        if (!due && !repairPending) return;
         bool needsRepair() => [
           content.channels.map((item) => item.categoryKey),
           content.vodItems.map((item) => item.categoryKey),
           content.series.map((item) => item.categoryKey),
         ].any(PlaylistRefreshSchedule.needsLegacyRepair);
-        if (await PlaylistRefreshSchedule.hours(key) == 0) return;
-        if (!await PlaylistRefreshSchedule.automaticAttemptAllowed(key)) return;
-        final repair = !await PlaylistRefreshSchedule.repairAttempted(key) && needsRepair();
-        if (!repair && !await PlaylistRefreshSchedule.due(key)) return;
+        final repair = repairPending && needsRepair();
+        if (!repair && !due) return;
         bool allowed() => _canRefresh() && content.sourceKey == key;
         if (!allowed()) return;
         final refreshed = await PlaylistSwitchService().refresh(profile, content,
@@ -687,8 +700,15 @@ class _PremiumTileState extends State<_PremiumTile> {
         onFocusChange: (focused) {
           if (mounted) setState(() => _focused = focused);
           if (focused && isTv) {
+            // A focus event should not repeatedly schedule animated scrolling
+            // while the dashboard is still being laid out on a TV device.
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) Scrollable.ensureVisible(context, duration: const Duration(milliseconds: 180), alignment: 0.35);
+              if (!mounted || !_focused) return;
+              final scrollable = Scrollable.maybeOf(context);
+              if (scrollable == null || !scrollable.position.hasContentDimensions) return;
+              Scrollable.ensureVisible(context,
+                  duration: const Duration(milliseconds: 120),
+                  alignment: 0.35);
             });
           }
         },
