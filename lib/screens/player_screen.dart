@@ -47,6 +47,11 @@ enum PlaybackStartChoice { resume, fromBeginning, cancel }
 class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver, FavoritesQuickFilter<PlayerScreen> {
   @override
   String get sortArea => 'live';
+  // A single media player survives Live TV channel changes.
+  Channel? _activeChannel;
+  List<Channel>? _indexedChannelList;
+  Map<String, List<Channel>> _channelById = const {};
+  Future<void> _openQueue = Future<void>.value();
   late final Player _player;
   late final VideoController _videoController;
   late final FamilySessionProvider _familySession;
@@ -62,23 +67,41 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
   List<RecentPlaybackEntry> _historyEntries(RecentPlaybackType type, ContentProvider library) {
     if (!_historyService.isCurrent || _historyService.source != library.sourceKey) return [];
+    final channelById = {for (final item in library.channels) item.id: item};
+    final vodById = {for (final item in library.vodItems) item.id: item};
+    final seriesById = {for (final item in library.series) item.id: item};
     final result = <RecentPlaybackEntry>[];
     for (final row in _profileHistory) {
       if (row['content_type'] != type.name) continue;
-      final id = row['content_id'] as String;
+      final id = row['content_id'];
+      if (id is! String) continue;
       final viewed = DateTime.tryParse(row['viewed_at'] as String? ?? '');
       if (viewed == null) continue;
       if (type == RecentPlaybackType.live) {
-        for (final item in library.channels) { if (item.id == id) { result.add(RecentPlaybackEntry(type:type,id:id,title:item.name,imageUrl:item.logoUrl,channel:item,viewedAt:viewed,sourceKey:library.sourceKey)); break; } }
+        final item = channelById[id];
+        if (item != null) result.add(RecentPlaybackEntry(type: type, id: id,
+          title: item.name, imageUrl: item.logoUrl, channel: item,
+          viewedAt: viewed, sourceKey: library.sourceKey));
       } else if (type == RecentPlaybackType.vod) {
-        for (final item in library.vodItems) { if (item.id == id) { result.add(RecentPlaybackEntry(type:type,id:id,title:item.title,imageUrl:item.posterUrl ?? item.backdropUrl,vod:item,viewedAt:viewed,sourceKey:library.sourceKey)); break; } }
+        final item = vodById[id];
+        if (item != null) result.add(RecentPlaybackEntry(type: type, id: id,
+          title: item.title, imageUrl: item.posterUrl ?? item.backdropUrl,
+          vod: item, viewedAt: viewed, sourceKey: library.sourceKey));
       } else {
-        for (final item in library.series) {
-          if (!id.startsWith('${item.id}::')) continue;
-          for (final season in item.seasons) { for (final episode in season.episodes) {
-            if (id == '${item.id}::${episode.id}') result.add(RecentPlaybackEntry(type:type,id:id,title:'${item.title} · S${season.number} E${episode.number} · ${episode.title}',imageUrl:episode.stillUrl ?? item.posterUrl,series:item,viewedAt:viewed,sourceKey:library.sourceKey));
-          } }
-          break;
+        final separator = id.indexOf('::');
+        if (separator < 0) continue;
+        final item = seriesById[id.substring(0, separator)];
+        if (item == null) continue;
+        final episodeId = id.substring(separator + 2);
+        for (final season in item.seasons) {
+          for (final episode in season.episodes) {
+            if (episode.id != episodeId) continue;
+            result.add(RecentPlaybackEntry(type: type, id: id,
+              title: '${item.title} · S${season.number} E${episode.number} · ${episode.title}',
+              imageUrl: episode.stillUrl ?? item.posterUrl, series: item,
+              viewedAt: viewed, sourceKey: library.sourceKey));
+            break;
+          }
         }
       }
     }
@@ -111,11 +134,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       if (!mounted || !_showDrawer) return;
       if (widget.episodes != null && _episodeListScroll.hasClients) {
         _jumpToNavigationIndex(_episodeListScroll, _currentEpisode);
-      } else if (widget.channel != null && _channelListScroll.hasClients) {
+      } else if (_activeChannel != null && _channelListScroll.hasClients) {
         final channels = context.read<ContentProvider>().channels
             .where(_canPlayChannel).toList(growable: false);
         final visible = _visibleLiveChannels(channels);
-        final index = visible.indexWhere((c) => c.id == widget.channel!.id);
+        final index = visible.indexWhere((c) => c.id == _activeChannel!.id);
         if (index >= 0) _jumpToNavigationIndex(_channelListScroll, index);
       }
     });
@@ -185,11 +208,59 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   bool _saveInFlight = false;
   int _currentEpisode = 0;
 
+  void _indexChannels(ContentProvider library) {
+    if (identical(_indexedChannelList, library.channels)) return;
+    _indexedChannelList = library.channels;
+    final index = <String, List<Channel>>{};
+    for (final channel in library.channels) {
+      index.putIfAbsent(channel.id, () => <Channel>[]).add(channel);
+    }
+    _channelById = index;
+  }
+
+  void _switchLiveChannel(Channel channel) {
+    if (!mounted || !widget.isLive || _playbackRevoked ||
+        !_canPlayChannel(channel)) return;
+    if (_activeChannel?.id == channel.id &&
+        _activeChannel?.streamUrl == channel.streamUrl) {
+      _closeNavigationDrawerIfOpen();
+      _closeHistoryIfOpen();
+      return;
+    }
+    ++_streamLoadGeneration;
+    _reconnectTimer?.cancel();
+    _navigationScrollEpoch++;
+    _focusedRowRequest++;
+    setState(() {
+      _activeChannel = channel;
+      _showDrawer = false;
+      _showHistory = false;
+      _selectedLiveCategory = null;
+      _position = Duration.zero;
+      _duration = Duration.zero;
+      _buffering = false;
+      _streamFailed = false;
+      _reconnecting = false;
+      _automaticReconnects = 0;
+    });
+    _restorePlayerFocus();
+    _updateHistory(_historyService.record('live', channel.id));
+    unawaited(_loadStream());
+  }
+
+  void _closeNavigationDrawerIfOpen() {
+    if (_showDrawer) _closeNavigationDrawer();
+  }
+
+  void _closeHistoryIfOpen() {
+    if (_showHistory) _closeHistorySidebar();
+  }
+
   String? get _currentUrl {
     if (widget.episodes != null && widget.episodes!.isNotEmpty) {
       return widget.episodes![_currentEpisode].streamUrl;
     }
-    return widget.streamUrl ?? widget.channel?.streamUrl;
+    return widget.streamUrl ?? _activeChannel?.streamUrl;
   }
 
   String? get _progressContentId {
@@ -205,13 +276,14 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (widget.episodes != null && widget.episodes!.isNotEmpty) {
       return widget.episodes![_currentEpisode].title;
     }
-    return widget.title ?? widget.channel?.name ?? 'Stream';
+    return widget.title ?? _activeChannel?.name ?? 'Stream';
   }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _activeChannel = widget.channel;
     _player = MediaEngine.createPlayer();
     _videoController = VideoController(_player);
     _familySession = context.read<FamilySessionProvider>();
@@ -278,17 +350,21 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _stallMonitor = Timer.periodic(const Duration(seconds: 5), (_) => _checkPlaybackStall());
     _progressTimer = Timer.periodic(const Duration(seconds: 15), (_) => _saveProgress());
     // Retry queued offline progress while the player remains open.
-    _queueSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) { _progressService.flushPending(); _updateHistory(_historyService.refresh()); });
+    _queueSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!_appInForeground || _playbackRevoked) return;
+      unawaited(_progressService.flushPending());
+      // History is refreshed on demand when its sidebar opens.
+    });
     _startHideTimer();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Live TV starts with folders on the left and channels beside them.
       // This is only the initial view; Back/close still hides the drawer.
       if (!mounted || _playbackRevoked || !_isCurrentStreamAuthorized()) return;
-      if (widget.isLive && widget.channel != null) {
+      if (widget.isLive && _activeChannel != null) {
         _openNavigationDrawer();
       }
       final library = context.read<ContentProvider>();
-      if (widget.channel != null) _updateHistory(_historyService.record('live', widget.channel!.id));
+      if (_activeChannel != null) _updateHistory(_historyService.record('live', _activeChannel!.id));
       if (widget.contentId != null && !widget.isLive && widget.episodes == null) {
         for (final item in library.vodItems) {
           if (item.id == widget.contentId) { _updateHistory(_historyService.record('vod', item.id)); break; }
@@ -372,12 +448,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     final family = context.read<FamilySessionProvider>();
     final library = context.read<ContentProvider>();
     if (!family.isReady || channel.sourceKey != library.sourceKey) return false;
-    final current = library.channels.where((candidate) =>
-        candidate.id == channel.id &&
-        candidate.streamUrl == channel.streamUrl &&
-        candidate.categoryKey == channel.categoryKey &&
-        candidate.sourceKey == channel.sourceKey);
-    if (current.isEmpty) return false;
+    _indexChannels(library);
+    final candidates = _channelById[channel.id];
+    if (candidates == null || !candidates.any((current) =>
+        current.streamUrl == channel.streamUrl &&
+        current.categoryKey == channel.categoryKey &&
+        current.sourceKey == channel.sourceKey)) return false;
     return family.canAccessCategory(
       sourceKey: channel.sourceKey ?? '',
       contentType: 'live',
@@ -426,7 +502,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   bool _isCurrentStreamAuthorized() {
     final family = context.read<FamilySessionProvider>();
     final content = context.read<ContentProvider>();
-    final channel = widget.channel;
+    final channel = _activeChannel;
     bool permitted = family.isReady;
     final offlineId = widget.offlineDownloadId;
     if (offlineId != null) {
@@ -512,14 +588,21 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _bufferingStartedAt = null;
     if (mounted) setState(() { _reconnecting = reconnect; _streamFailed = false; });
     try {
-      await _player.open(Media(url));
-      if (!mounted || generation != _streamLoadGeneration ||
-          !_isCurrentStreamAuthorized()) {
-        await _player.stop();
-        if (mounted && generation == _streamLoadGeneration) {
+      final previousOpen = _openQueue;
+      final opening = Completer<void>();
+      _openQueue = opening.future;
+      try {
+        await previousOpen.catchError((Object _) {});
+        if (!mounted || generation != _streamLoadGeneration ||
+            !_isCurrentStreamAuthorized()) return;
+        await _player.open(Media(url));
+        if (!mounted || generation != _streamLoadGeneration) return;
+        if (!_isCurrentStreamAuthorized()) {
           _onFamilySessionChanged();
+          return;
         }
-        return;
+      } finally {
+        opening.complete();
       }
       // Reconnect always takes precedence over stored progress. A first open
       // may fail before the initial progress lookup; in that case the retry
@@ -849,8 +932,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
                            overflow: TextOverflow.ellipsis),
                          if (widget.isLive &&
-                             (widget.channel?.category ?? '').trim().isNotEmpty)
-                           Text(widget.channel!.category!.trim(),
+                             (_activeChannel?.category ?? '').trim().isNotEmpty)
+                           Text(_activeChannel!.category!.trim(),
                              maxLines: 1,
                              overflow: TextOverflow.ellipsis,
                              style: const TextStyle(color: Colors.white70, fontSize: 13)),
@@ -1421,7 +1504,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (!_canOpenRecent(entry)) return;
     setState(() => _showHistory = false);
     if (entry.channel != null) {
-      await Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => PlayerScreen(channel: entry.channel, isLive: true)));
+      if (widget.isLive) {
+        _switchLiveChannel(entry.channel!);
+      } else {
+        await Navigator.pushReplacement(context, MaterialPageRoute(
+          builder: (_) => PlayerScreen(channel: entry.channel, isLive: true)));
+      }
       return;
     }
     if (entry.vod != null) {
@@ -1483,15 +1571,14 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   void _zapBy(int offset) {
     final library = context.read<ContentProvider>();
-    if (widget.channel == null) return;
+    if (_activeChannel == null) return;
     final allowed = library.channels.where(_canPlayChannel).toList(growable: false);
     if (allowed.isEmpty) return;
-    final current = allowed.indexWhere((c) => c.id == widget.channel!.id);
+    final current = allowed.indexWhere((c) => c.id == _activeChannel!.id);
     if (current < 0) return;
     final next = (current + offset + allowed.length) % allowed.length;
     final channel = allowed[next];
-    Navigator.pushReplacement(context, MaterialPageRoute(
-      builder: (_) => PlayerScreen(channel: channel, isLive: true)));
+    _switchLiveChannel(channel);
   }
 
   void _restorePlayerFocus() {
@@ -1603,7 +1690,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                           itemCount: visible.length,
                           itemBuilder: (context, index) {
                             final channel = visible[index];
-                            final selected = channel.id == widget.channel?.id;
+                            final selected = channel.id == _activeChannel?.id;
                             return Builder(builder: (rowContext) => Focus(
                               onFocusChange: (focused) =>
                                   _keepFocusedNavigationRowVisible(rowContext, focused),
@@ -1620,8 +1707,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                                     errorBuilder: (_, __, ___) => const Icon(Icons.live_tv, color: Colors.white70))),
                               title: Text(channel.name, maxLines: DeviceLayout.isTelevision ? 3 : 2, overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(color: Colors.white, fontSize: 12)),
-                              onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(
-                                builder: (_) => PlayerScreen(channel: channel, isLive: true))),
+                              onTap: () => _switchLiveChannel(channel),
                             )));
                           },
                         ),
@@ -1788,9 +1874,9 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _showTrackMessage('Keine Stream-Adresse für die Aufnahme vorhanden.');
       return;
     }
-    if (widget.channel == null || !_canPlayChannel(widget.channel!)) return;
+    if (_activeChannel == null || !_canPlayChannel(_activeChannel!)) return;
     final accepted = await RecordingService.start(
-      widget.channel?.name ?? _currentTitle,
+      _activeChannel?.name ?? _currentTitle,
       streamUrl: url,
       ownerKey: owner,
     );
