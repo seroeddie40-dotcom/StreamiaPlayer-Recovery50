@@ -130,22 +130,7 @@ class _BootstrapState extends State<_Bootstrap> {
                     ),
                   ),
                 )
-               : Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    const SplashScreen(),
-                    if (_slow)
-                      const SafeArea(
-                        child: Align(
-                          alignment: Alignment.bottomCenter,
-                          child: Padding(
-                            padding: EdgeInsets.all(24),
-                            child: CircularProgressIndicator(),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
+               : const SplashScreen(),
         );
   }
 }

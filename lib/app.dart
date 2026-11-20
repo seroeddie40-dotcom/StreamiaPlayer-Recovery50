@@ -18,6 +18,7 @@ import 'providers/auth_provider.dart';
 import 'providers/family_session_provider.dart';
 import 'screens/family_profile_selection_screen.dart';
 import 'services/playlist_profile_store.dart';
+import 'models/playlist_profile.dart';
 import 'services/family_profile_service.dart';
 import 'services/playlist_switch_service.dart';
 
@@ -315,6 +316,80 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
   bool _loading = true;
   bool _hasProfiles = false;
   bool _loadFailed = false;
+  String _loadStage = 'profiles';
+  int? _xtreamCompleted;
+  (int, int, int)? _m3uCounts;
+  int _loadAttempt = 0;
+  // Dart Future.timeout does not cancel the underlying database/network work.
+  // Keep the original operation until it really finishes so Retry cannot
+  // start another restore or activation against the same catalog.
+  Future<List<PlaylistProfile>>? _pendingProfiles;
+  Future<bool>? _pendingRestore;
+  Future<bool>? _pendingActivation;
+  String? _pendingSourceKey;
+
+  // A timed-out secure-storage read continues in the background. Reuse it
+  // instead of issuing another read when the user taps Retry.
+  Future<List<PlaylistProfile>> _loadProfilesOnce() {
+    final existing = _pendingProfiles;
+    if (existing != null) return existing;
+    final task = PlaylistProfileStore().load();
+    _pendingProfiles = task;
+    unawaited(task.then((_) {
+      if (identical(_pendingProfiles, task)) _pendingProfiles = null;
+    }, onError: (Object _, StackTrace __) {
+      if (identical(_pendingProfiles, task)) _pendingProfiles = null;
+    }));
+    return task;
+  }
+
+  Future<bool> _restoreOnce(ContentProvider content, String sourceKey,
+      String sourceLabel) {
+    if (_pendingSourceKey != sourceKey) {
+      _pendingSourceKey = sourceKey;
+      _pendingRestore = null;
+      _pendingActivation = null;
+    }
+    final existing = _pendingRestore;
+    if (existing != null) return existing;
+    final task = content.restoreStoredLibrary(
+      sourceKey, sourceLabel: sourceLabel,
+    );
+    _pendingRestore = task;
+    unawaited(task.then((_) {
+      if (identical(_pendingRestore, task)) _pendingRestore = null;
+    }, onError: (Object _, StackTrace __) {
+      if (identical(_pendingRestore, task)) _pendingRestore = null;
+    }));
+    return task;
+  }
+
+  Future<bool> _activateOnce(ContentProvider content, PlaylistProfile profile,
+      int attempt) {
+    final existing = _pendingActivation;
+    if (existing != null) return existing;
+    final task = PlaylistSwitchService().activate(
+      profile, content,
+      onM3uProgress: (live, movies, series) {
+        if (mounted && attempt == _loadAttempt) {
+          setState(() => _m3uCounts = (live, movies, series));
+        }
+      },
+      onXtreamProgress: (completed, _) {
+        if (mounted && attempt == _loadAttempt) {
+          setState(() => _xtreamCompleted = completed);
+        }
+      },
+    );
+    _pendingActivation = task;
+    unawaited(task.then((_) {
+      if (identical(_pendingActivation, task)) _pendingActivation = null;
+    }, onError: (Object _, StackTrace __) {
+      if (identical(_pendingActivation, task)) _pendingActivation = null;
+    }));
+    return task;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -323,35 +398,58 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
 
   Future<void> _loadLibrary() async {
     if (!mounted) return;
-    setState(() { _loading = true; _loadFailed = false; });
+    final attempt = ++_loadAttempt;
+    setState(() { _loading = true; _loadFailed = false; _loadStage = 'profiles'; _xtreamCompleted = null; _m3uCounts = null; });
     final content = context.read<ContentProvider>();
     try {
-      final profiles = await PlaylistProfileStore().load().timeout(const Duration(seconds: 15));
-      if (!mounted) return;
+      final profiles = await _loadProfilesOnce().timeout(const Duration(seconds: 15));
+      if (!mounted || attempt != _loadAttempt) return;
       if (profiles.isEmpty) {
         setState(() { _hasProfiles = false; _loading = false; });
         return;
       }
       _hasProfiles = true;
+      setState(() => _loadStage = 'local');
       final active = profiles.where((p) => p.isActive).firstOrNull ?? profiles.first;
+      // A timed-out activation may still be running. Rejoin it instead of
+      // beginning a new restore, which would invalidate its generation.
+      if (_pendingSourceKey == active.sourceKey && _pendingActivation != null) {
+        setState(() => _loadStage = 'network');
+        final activated = await _pendingActivation!
+            .timeout(const Duration(seconds: 120));
+        if (!activated && !content.isLoaded) {
+          throw StateError('Playlist activation did not complete');
+        }
+        if (mounted && attempt == _loadAttempt && !content.isLoaded) {
+          setState(() => _loading = false);
+        }
+        return;
+      }
       // Prefer the encrypted offline catalog, so opening the app does not
       // depend on the playlist server being reachable.
-      final restored = await content.restoreStoredLibrary(
-        active.sourceKey, sourceLabel: active.displayName,
+      final restored = await _restoreOnce(
+        content, active.sourceKey, active.displayName,
       ).timeout(const Duration(seconds: 30));
       if (!restored && !content.isLoaded) {
         // No cached catalog: use the already saved secure source credentials.
-        await PlaylistSwitchService().activate(active, content).timeout(const Duration(seconds: 120));
+        if (!mounted || attempt != _loadAttempt) return;
+        setState(() => _loadStage = 'network');
+        final activated = await _activateOnce(
+          content, active, attempt,
+        ).timeout(const Duration(seconds: 120));
+        if (!activated && !content.isLoaded) {
+          throw StateError('Playlist activation did not complete');
+        }
       }
-      if (!mounted) return;
+      if (!mounted || attempt != _loadAttempt) return;
       if (!content.isLoaded) {
         setState(() { _loading = false; });
       }
     } catch (error) {
       debugPrint('Streamia startup library load failed: ${error.runtimeType}');
-      if (mounted) {
-        content.beginLibraryActivation();
-        setState(() { _loading = false; _loadFailed = true; });
+      if (mounted && attempt == _loadAttempt) {
+        // Do not invalidate a potentially finishing restore on a timeout.
+        setState(() { _loading = false; _loadFailed = !content.isLoaded; });
       }
     }
   }
@@ -380,10 +478,45 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (_loading) ...[
-                  const CircularProgressIndicator(),
+                  Text('Streamia Player', style: Theme.of(context).textTheme.headlineSmall),
+                  const SizedBox(height: 22),
+                  LinearProgressIndicator(
+                    value: _xtreamCompleted == null ? null : _xtreamCompleted! / 3,
+                    minHeight: 9,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  const SizedBox(height: 12),
+                  if (_xtreamCompleted != null)
+                    Text('${(_xtreamCompleted! * 100 / 3).round()} %'),
+                  if (_m3uCounts case final counts?) ...[
+                    const SizedBox(height: 10),
+                    Text(_copy(context,
+                      'Erfasst: ${counts.$1} Sender · ${counts.$2} Filme · ${counts.$3} Serien',
+                      'İşlenen: ${counts.$1} kanal · ${counts.$2} film · ${counts.$3} dizi',
+                      'Parsed: ${counts.$1} channels · ${counts.$2} movies · ${counts.$3} series',
+                    ), textAlign: TextAlign.center),
+                  ],
                   const SizedBox(height: 18),
-                  Text(_copy(context, 'Mediathek wird geladen…',
-                      'Medya kitaplığı yükleniyor…', 'Loading your library…')),
+                  Wrap(spacing: 18, runSpacing: 8, alignment: WrapAlignment.center, children: [
+                    for (final phase in [
+                      (0, _copy(context, 'Live-TV', 'Canlı TV', 'Live TV')),
+                      (1, _copy(context, 'Filme', 'Filmler', 'Movies')),
+                      (2, _copy(context, 'Serien', 'Diziler', 'Series')),
+                    ])
+                      Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(_xtreamCompleted != null && _xtreamCompleted! > phase.$1
+                            ? Icons.check_circle_outline : Icons.circle_outlined,
+                            color: const Color(0xFF20D9EC), size: 18),
+                        const SizedBox(width: 6),
+                        Text(phase.$2),
+                      ]),
+                  ]),
+                  const SizedBox(height: 20),
+                  Text(switch (_loadStage) {
+                    'profiles' => _copy(context, 'Playlist-Profile werden geladen…', 'Oynatma listesi profilleri yükleniyor…', 'Loading playlist profiles…'),
+                    'local' => _copy(context, 'Gespeicherte Mediathek wird geöffnet…', 'Kayıtlı medya kitaplığı açılıyor…', 'Opening saved library…'),
+                    _ => _copy(context, 'Playlist-Daten werden geladen…', 'Oynatma listesi verileri yükleniyor…', 'Loading playlist data…'),
+                  }, textAlign: TextAlign.center),
                 ] else ...[
                   const Icon(Icons.cloud_off_outlined, size: 48),
                   const SizedBox(height: 16),
