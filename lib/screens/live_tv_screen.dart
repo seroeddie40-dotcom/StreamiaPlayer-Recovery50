@@ -132,6 +132,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
                     child: InkWell(
                       borderRadius: BorderRadius.circular(9),
                       focusColor: AppTheme.electricBlue.withValues(alpha: 0.25),
+                      autofocus: DeviceLayout.isTelevision && index == 0,
                       onTap: () {
                         _selectCategory(category);
                         if (inDrawer) Navigator.of(context).pop();
@@ -148,16 +149,14 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
                               Expanded(
                                 child: Tooltip(
                                   message: _label(category),
-                                  child: SingleChildScrollView(
-                                    scrollDirection: Axis.horizontal,
-                                    child: Text(
+                                  child: Text(
                                     _label(category),
                                     maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                     softWrap: false,
                                     style: TextStyle(
                                       fontSize: DeviceLayout.isTelevision ? 16 : 13,
                                       fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
-                                    ),
                                     ),
                                   ),
                                 ),
@@ -245,14 +244,14 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
           : Row(children: [
           if (!compact)
             AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
+              duration: tv ? Duration.zero : const Duration(milliseconds: 220),
               curve: Curves.easeInOut,
-              width: tv ? (constraints.maxWidth * 0.32).clamp(180.0, 420.0).toDouble() : _folderFocusExpanded
+              width: tv ? (constraints.maxWidth * 0.26).clamp(180.0, 360.0).toDouble() : _folderFocusExpanded
                   ? (constraints.maxWidth * 0.46).clamp(285.0, 480.0)
                   : (constraints.maxWidth >= 1100 ? 340.0 : 285.0),
               child: Focus(
                 onFocusChange: (focused) {
-                  if (mounted && focused != _folderFocusExpanded) {
+                  if (!tv && mounted && focused != _folderFocusExpanded) {
                     setState(() => _folderFocusExpanded = focused);
                   }
                 },
@@ -328,7 +327,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
                         crossAxisCount: columns,
                         mainAxisSpacing: 8,
                         crossAxisSpacing: 8,
-                        mainAxisExtent: tv ? 150 : (width < 520 ? 118 : 136),
+                        mainAxisExtent: tv ? 164 : (width < 520 ? 118 : 136),
                       ),
                       itemCount: filtered.length,
                       itemBuilder: (context, index) => _ChannelTile(
@@ -390,12 +389,12 @@ class _ChannelTile extends StatelessWidget {
                   )
                 : const Icon(Icons.tv_rounded, size: 30)),
             )),
-            SizedBox(height: DeviceLayout.isTelevision ? 46 : 39, child: Padding(
+            SizedBox(height: DeviceLayout.isTelevision ? 62 : 39, child: Padding(
               padding: const EdgeInsets.fromLTRB(7, 1, 7, 5),
               child: Center(child: Text(
                 channel.name,
                 textAlign: TextAlign.center,
-                maxLines: 2,
+                maxLines: DeviceLayout.isTelevision ? 3 : 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontSize: DeviceLayout.isTelevision ? 15 : 12, height: 1.15, fontWeight: FontWeight.w600),
               )),
