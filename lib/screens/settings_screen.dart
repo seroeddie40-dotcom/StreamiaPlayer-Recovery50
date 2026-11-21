@@ -195,10 +195,20 @@ class SettingsScreen extends StatelessWidget {
                       'Modo oscuro / claro',
                       'Mode sombre / clair',
                     )),
-                    trailing: Switch(
-                      value: isDark,
-                      onChanged: (_) => theme.toggleTheme(),
-                    ),
+                    // The ListTile is the single D-pad target on Android TV.
+                    // The switch remains tappable on phones but must not create
+                    // a second remote-focus stop inside the same setting.
+                    trailing: DeviceLayout.isTelevision
+                        ? ExcludeFocus(
+                            child: Switch(
+                              value: isDark,
+                              onChanged: (_) => theme.toggleTheme(),
+                            ),
+                          )
+                        : Switch(
+                            value: isDark,
+                            onChanged: (_) => theme.toggleTheme(),
+                          ),
                     onTap: () => theme.toggleTheme(),
                   )),
 
