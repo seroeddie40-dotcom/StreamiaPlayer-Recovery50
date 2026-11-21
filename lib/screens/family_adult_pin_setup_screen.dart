@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/family_pin_service.dart';
+import '../core/platform/device_layout.dart';
+import '../widgets/tv_pin_keypad.dart';
 
 /// First-time PIN setup for an adult family profile.
 ///
@@ -47,6 +49,7 @@ class _FamilyAdultPinSetupScreenState
 
   bool _busy = false;
   bool _showPin = false;
+  bool _tvConfirming = false;
   String? _error;
 
   @override
@@ -233,8 +236,117 @@ class _FamilyAdultPinSetupScreenState
     );
   }
 
+  Widget _buildTvPinSetup(BuildContext context) {
+    final theme = Theme.of(context);
+    final controller = _tvConfirming ? _confirmController : _pinController;
+    return PopScope(
+      canPop: !_busy,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Erwachsenen-PIN einrichten')),
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) => SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 980),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Icon(Icons.lock_person_outlined, size: 48,
+                                color: theme.colorScheme.primary),
+                            const SizedBox(height: 12),
+                            Text('Persönliche Profil-PIN',
+                                textAlign: TextAlign.center,
+                                style: theme.textTheme.titleLarge),
+                            const SizedBox(height: 12),
+                            Text('Für "${widget.profileName}" eine eigene PIN einrichten. '
+                                'Die Profil-PIN ist unabhängig von der Eltern-PIN.',
+                                textAlign: TextAlign.center),
+                            const SizedBox(height: 20),
+                            Text(_tvConfirming ? 'PIN wiederholen' : 'Neue PIN (6–12 Ziffern)'),
+                            const SizedBox(height: 8),
+                            InputDecorator(
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.lock_outline),
+                              ),
+                              child: Text(_showPin ? controller.text : '●' * controller.text.length),
+                            ),
+                            CheckboxListTile(
+                              value: _showPin,
+                              title: const Text('PIN anzeigen'),
+                              onChanged: _busy ? null : (v) =>
+                                  setState(() => _showPin = v ?? false),
+                            ),
+                            if (_error != null)
+                              Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+                            const SizedBox(height: 12),
+                            OutlinedButton(
+                              onPressed: _busy ? null : () {
+                                if (_tvConfirming) {
+                                  setState(() {
+                                    _tvConfirming = false;
+                                    _error = null;
+                                  });
+                                } else {
+                                  _cancel();
+                                }
+                              },
+                              child: Text(_tvConfirming ? 'Zurück' : 'Später einrichten'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 28),
+                      Expanded(
+                        child: _busy
+                            ? const Center(child: CircularProgressIndicator())
+                            : TvPinKeypad(
+                                key: ValueKey(_tvConfirming),
+                                autofocus: true,
+                                value: controller.text,
+                                maxLength: 12,
+                                onChanged: (value) => setState(() {
+                                  controller.text = value;
+                                  _error = null;
+                                }),
+                                onSubmit: () {
+                                  if (!_tvConfirming) {
+                                    if (!RegExp(r'^[0-9]{6,12}$')
+                                        .hasMatch(_pinController.text)) {
+                                      setState(() => _error =
+                                          'Die PIN muss aus 6 bis 12 Ziffern bestehen.');
+                                      return;
+                                    }
+                                    setState(() {
+                                      _tvConfirming = true;
+                                      _error = null;
+                                    });
+                                  } else {
+                                    _savePin();
+                                  }
+                                },
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (DeviceLayout.isTelevision) return _buildTvPinSetup(context);
     final colorScheme = Theme.of(context).colorScheme;
 
     return PopScope(
