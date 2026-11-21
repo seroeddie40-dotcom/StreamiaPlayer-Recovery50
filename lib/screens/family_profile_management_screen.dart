@@ -1,4 +1,6 @@
 import '../widgets/tv_catalog_focus.dart';
+import '../widgets/tv_pin_keypad.dart';
+import '../core/platform/device_layout.dart';
 
 import 'package:flutter/material.dart';
 import '../core/localization/app_localizations.dart';
@@ -292,6 +294,78 @@ class _FamilyProfileManagementScreenState
                     });
                   }
                 }
+              }
+
+              if (DeviceLayout.isTelevision) {
+                return Dialog(
+                  insetPadding: const EdgeInsets.all(18),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 940),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(_t('family_pin_required'),
+                                    style: Theme.of(dialogContext).textTheme.titleLarge),
+                                const SizedBox(height: 12),
+                                Text(_t('family_management_protected')),
+                                const SizedBox(height: 18),
+                                InputDecorator(
+                                  decoration: InputDecoration(
+                                    border: const OutlineInputBorder(),
+                                    labelText: _t('family_parent_pin'),
+                                  ),
+                                  child: Text(showPin
+                                      ? controller.text
+                                      : '●' * controller.text.length),
+                                ),
+                                CheckboxListTile(
+                                  value: showPin,
+                                  contentPadding: EdgeInsets.zero,
+                                  title: Text(_t('family_show_pin')),
+                                  onChanged: checking ? null : (value) =>
+                                      updateDialog(() => showPin = value ?? false),
+                                ),
+                                if (errorMessage != null)
+                                  Text(errorMessage!,
+                                      style: TextStyle(
+                                          color: Theme.of(dialogContext)
+                                              .colorScheme.error)),
+                                const SizedBox(height: 12),
+                                OutlinedButton(
+                                  onPressed: checking ? null : () =>
+                                      Navigator.of(dialogContext).pop(),
+                                  child: Text(_t('playlist_cancel')),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 24),
+                          Expanded(
+                            child: checking
+                                ? const Center(child: CircularProgressIndicator())
+                                : TvPinKeypad(
+                                    autofocus: true,
+                                    value: controller.text,
+                                    maxLength: 12,
+                                    onChanged: (value) => updateDialog(() {
+                                      controller.text = value;
+                                      errorMessage = null;
+                                    }),
+                                    onSubmit: submit,
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
               }
 
               return Dialog(
