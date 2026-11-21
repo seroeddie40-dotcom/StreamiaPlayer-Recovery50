@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 
 import '../services/family_pin_service.dart';
 import '../core/localization/app_localizations.dart';
+import '../core/platform/device_layout.dart';
+import '../widgets/tv_pin_keypad.dart';
 
 class FamilyParentPinSetupScreen extends StatefulWidget {
   const FamilyParentPinSetupScreen({
@@ -36,6 +38,7 @@ class _FamilyParentPinSetupScreenState
 
   bool _isSaving = false;
   bool _showPin = false;
+  bool _tvConfirming = false;
   String? _errorMessage;
 
   @override
@@ -152,6 +155,125 @@ class _FamilyParentPinSetupScreenState
     }
   }
 
+  Widget _buildTvPinSetup(BuildContext context) {
+    final theme = Theme.of(context);
+    final isConfirming = _tvConfirming;
+    final controller = isConfirming ? _confirmController : _pinController;
+    return Scaffold(
+      appBar: AppBar(title: Text(_t('family_setup_pin_setup'))),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            padding: const EdgeInsets.all(20),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 980),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Icon(Icons.family_restroom, size: 48,
+                              color: theme.colorScheme.primary),
+                          const SizedBox(height: 12),
+                          Text(_t('family_setup_pin_protect'),
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.titleLarge),
+                          const SizedBox(height: 12),
+                          Text(_t('family_setup_pin_intro'),
+                              textAlign: TextAlign.center),
+                          const SizedBox(height: 20),
+                          Text(isConfirming
+                              ? _t('family_setup_pin_confirm')
+                              : _t('family_setup_pin_new')),
+                          const SizedBox(height: 8),
+                          Semantics(
+                            label: isConfirming
+                                ? _t('family_setup_pin_confirm')
+                                : _t('family_setup_pin_new'),
+                            value: '${controller.text.length} digits',
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.lock_outline),
+                              ),
+                              child: Text(_showPin
+                                  ? controller.text
+                                  : '●' * controller.text.length),
+                            ),
+                          ),
+                          CheckboxListTile(
+                            value: _showPin,
+                            title: Text(_t('family_setup_pin_show')),
+                            onChanged: _isSaving ? null : (v) =>
+                                setState(() => _showPin = v ?? false),
+                          ),
+                          if (_errorMessage != null)
+                            Text(_errorMessage!,
+                                style: TextStyle(color: theme.colorScheme.error)),
+                          const SizedBox(height: 12),
+                          OutlinedButton(
+                            onPressed: _isSaving ? null : () {
+                              if (_tvConfirming) {
+                                setState(() {
+                                  _tvConfirming = false;
+                                  _errorMessage = null;
+                                });
+                              } else {
+                                Navigator.of(context).maybePop();
+                              }
+                            },
+                            child: Text(MaterialLocalizations.of(context).cancelButtonLabel),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(_t('family_setup_pin_note'),
+                              style: theme.textTheme.bodySmall),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 28),
+                    Expanded(
+                      child: _isSaving
+                          ? const Center(child: CircularProgressIndicator())
+                          : TvPinKeypad(
+                              key: ValueKey(isConfirming),
+                              autofocus: true,
+                              value: controller.text,
+                              maxLength: 10,
+                              onChanged: (value) => setState(() {
+                                controller.text = value;
+                                _errorMessage = null;
+                              }),
+                              onSubmit: () {
+                                if (!isConfirming) {
+                                  if (!RegExp(r'^[0-9]{6,10}$')
+                                      .hasMatch(_pinController.text)) {
+                                    setState(() => _errorMessage =
+                                        _t('family_setup_pin_length'));
+                                    return;
+                                  }
+                                  setState(() {
+                                    _tvConfirming = true;
+                                    _errorMessage = null;
+                                  });
+                                } else {
+                                  _savePin();
+                                }
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildPinField({
     required String label,
     required TextEditingController controller,
@@ -183,6 +305,7 @@ class _FamilyParentPinSetupScreenState
 
   @override
   Widget build(BuildContext context) {
+    if (DeviceLayout.isTelevision) return _buildTvPinSetup(context);
     final theme = Theme.of(context);
 
     return Scaffold(
