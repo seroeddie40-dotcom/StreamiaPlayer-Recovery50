@@ -1,5 +1,6 @@
 import '../core/platform/device_layout.dart';
 import '../widgets/tv_catalog_focus.dart';
+import '../widgets/tv_long_ok_action.dart';
 import '../widgets/profile_clock.dart';
 import '../widgets/category_sort_control.dart';
 import '../widgets/favorites_quick_filter.dart';
@@ -650,6 +651,8 @@ class _VodTile extends StatefulWidget {
 }
 
 class _VodTileState extends State<_VodTile> {
+  final GlobalKey<FavoriteToggleButtonState> _favoriteKey = GlobalKey<FavoriteToggleButtonState>();
+
   String? get _downloadId {
     final family = context.read<FamilySessionProvider>();
     final profile = family.activeProfile;
@@ -743,8 +746,12 @@ class _VodTileState extends State<_VodTile> {
     final isDark =
         Theme.of(context).brightness == Brightness.dark;
 
-    return InkWell(
-      autofocus: widget.autofocus,
+    return TvLongOkAction(
+      onShortPress: () { if (!_opening) _openDetails(); },
+      onLongPress: () { _favoriteKey.currentState?.toggleFromRemote(); },
+      child: InkWell(
+      canRequestFocus: !DeviceLayout.isTelevision,
+      autofocus: widget.autofocus && !DeviceLayout.isTelevision,
       focusColor: AppTheme.electricBlue.withOpacity(0.22),
       borderRadius: BorderRadius.circular(16),
       onTap: _opening ? null : _openDetails,
@@ -784,6 +791,7 @@ class _VodTileState extends State<_VodTile> {
                     left: 4,
                     top: 4,
                     child: FavoriteToggleButton(
+                      key: _favoriteKey,
                       contentId: widget.item.id,
                       contentType: 'vod',
                       title: widget.item.title,
@@ -884,6 +892,7 @@ class _VodTileState extends State<_VodTile> {
             ),
           ],
         ),
+      ),
       ),
     );
   }
