@@ -1,3 +1,8 @@
+import 'dart:async';
+
+import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../widgets/profile_clock.dart';
 import '../widgets/category_sort_control.dart';
 import '../widgets/favorites_quick_filter.dart';
@@ -18,6 +23,8 @@ import '../services/family_content_access_service.dart';
 import '../providers/locale_provider.dart';
 import '../widgets/favorite_toggle_button.dart';
 import '../widgets/voice_input_field.dart';
+import '../config/supabase_config.dart';
+import '../services/profile_favorite_outbox.dart';
 import 'player_screen.dart';
 
 /// Compact, keyboard-safe Live TV catalogue for phones, tablets and Android TV.
@@ -306,10 +313,66 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
               }
             },
             onOpen: () => _openLiveChannel(channel),
+            onToggleFavorite: () => _toggleTvFavorite(channel),
           );
         },
       ),
     );
+  }
+
+  // Long-OK on Android TV toggles the favorite for the active family profile.
+  // The same outbox and server-side sync path is used by FavoriteToggleButton.
+  Future<void> _toggleTvFavorite(Channel channel) async {
+    if (!mounted || !SupabaseConfig.isConfigured) return;
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+    final family = context.read<FamilySessionProvider>();
+    final content = context.read<ContentProvider>();
+    final profile = family.activeProfile;
+    if (user == null || profile == null || !family.isReady ||
+        profile.accountUserId != user.id ||
+        !family.canAccessCategory(
+          sourceKey: content.sourceKey,
+          contentType: 'live',
+          categoryKey: channel.categoryKey ?? '',
+        )) return;
+    final profileId = profile.id;
+    final sourceKey = content.sourceKey;
+    final token = family.parentAccessToken;
+    try {
+      final pending = await ProfileFavoriteOutbox.pendingValue(
+        user.id, profileId, sourceKey, 'live', channel.id);
+      final rows = pending == null
+          ? await ProfileFavoriteOutbox.load(client, user.id, profileId,
+              token, () => mounted && family.isReady &&
+                  family.activeProfile?.id == profileId)
+          : const <Map<String, dynamic>>[];
+      final current = pending ?? rows.any((row) =>
+          row['source_key'] == sourceKey &&
+          row['content_type'] == 'live' &&
+          row['content_id'].toString() == channel.id);
+      if (!mounted || family.activeProfile?.id != profileId ||
+          client.auth.currentUser?.id != user.id ||
+          context.read<ContentProvider>().sourceKey != sourceKey) return;
+      await ProfileFavoriteOutbox.enqueue(user.id, profileId, sourceKey,
+          'live', channel.id, channel.name, content.sourceLabel ?? '', !current);
+      await ProfileFavoriteOutbox.flush(client, user.id, profileId, token,
+          () => family.isReady && family.activeProfile?.id == profileId &&
+              family.parentAccessToken == token);
+      if (!mounted || family.activeProfile?.id != profileId) return;
+      favoritesRevision.value++;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        duration: const Duration(seconds: 2),
+        content: Text(current
+            ? _text('Aus Favoriten entfernt', 'Favorilerden kaldırıldı', 'Removed from favorites')
+            : _text('Zu Favoriten hinzugefügt', 'Favorilere eklendi', 'Added to favorites')),
+      ));
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(_text('Favorit konnte nicht gespeichert werden',
+            'Favori kaydedilemedi', 'Could not save favorite')),
+      ));
+    }
   }
 
   void _openLiveChannel(Channel channel) {
@@ -535,10 +598,11 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
 /// not a separate D-pad target in the TV catalogue.
 class _TvChannelRow extends StatefulWidget {
   const _TvChannelRow({super.key, required this.channel,
-    required this.onFocused, required this.onOpen});
+    required this.onFocused, required this.onOpen, required this.onToggleFavorite});
   final Channel channel;
   final VoidCallback onFocused;
   final VoidCallback onOpen;
+  final VoidCallback onToggleFavorite;
 
   @override
   State<_TvChannelRow> createState() => _TvChannelRowState();
@@ -546,33 +610,80 @@ class _TvChannelRow extends StatefulWidget {
 
 class _TvChannelRowState extends State<_TvChannelRow> {
   bool _focused = false;
+  Timer? _holdTimer;
+  bool _pressed = false;
+  bool _longPressed = false;
+
+  @override
+  void dispose() {
+    _holdTimer?.cancel();
+    super.dispose();
+  }
+
+  KeyEventResult _handleRemoteKey(FocusNode node, KeyEvent event) {
+    final key = event.logicalKey;
+    if (key != LogicalKeyboardKey.select &&
+        key != LogicalKeyboardKey.enter &&
+        key != LogicalKeyboardKey.numpadEnter) {
+      return KeyEventResult.ignored;
+    }
+    if (event is KeyDownEvent) {
+      if (!_pressed) {
+        _pressed = true;
+        _longPressed = false;
+        _holdTimer?.cancel();
+        _holdTimer = Timer(const Duration(seconds: 2), () {
+          if (!mounted || !_pressed) return;
+          _longPressed = true;
+          widget.onToggleFavorite();
+        });
+      }
+      return KeyEventResult.handled;
+    }
+    if (event is KeyRepeatEvent) return KeyEventResult.handled;
+    if (event is KeyUpEvent) {
+      final wasPressed = _pressed;
+      _pressed = false;
+      _holdTimer?.cancel();
+      if (wasPressed && !_longPressed) widget.onOpen();
+      _longPressed = false;
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
 
   @override
   Widget build(BuildContext context) {
     final logo = widget.channel.logoUrl?.trim();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Material(
+      child: Focus(
+        onKeyEvent: _handleRemoteKey,
+        onFocusChange: (focused) {
+          if (!mounted) return;
+          setState(() => _focused = focused);
+          if (!focused) {
+            _pressed = false;
+            _holdTimer?.cancel();
+          } else {
+            widget.onFocused();
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && _focused && ModalRoute.of(context)?.isCurrent == true) {
+                Scrollable.ensureVisible(context,
+                    duration: const Duration(milliseconds: 120),
+                    alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd);
+              }
+            });
+          }
+        },
+        child: Material(
         color: _focused
             ? AppTheme.electricBlue.withValues(alpha: 0.20)
             : Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
-          onFocusChange: (focused) {
-            if (!mounted) return;
-            setState(() => _focused = focused);
-            if (focused) {
-              widget.onFocused();
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted && _focused && ModalRoute.of(context)?.isCurrent == true) {
-                  Scrollable.ensureVisible(context,
-                      duration: const Duration(milliseconds: 120),
-                      alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd);
-                }
-              });
-            }
-          },
+          canRequestFocus: false,
           onTap: widget.onOpen,
           child: Container(
             height: 66,
@@ -602,6 +713,7 @@ class _TvChannelRowState extends State<_TvChannelRow> {
             ]),
           ),
         ),
+      ),
       ),
     );
   }
