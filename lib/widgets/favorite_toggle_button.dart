@@ -1,3 +1,4 @@
+import '../core/platform/device_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -86,23 +87,29 @@ class _FavoriteToggleButtonState extends State<FavoriteToggleButton> {
       _loadFuture = _read(sourceKey, profileId);
     }
     if (!SupabaseConfig.isConfigured || Supabase.instance.client.auth.currentUser == null) {
-      return IconButton(
+      return ExcludeFocus(
+        excluding: DeviceLayout.isTelevision,
+        child: IconButton(
         tooltip: 'Zum Synchronisieren anmelden',
         onPressed: null,
         icon: const Icon(Icons.favorite_border),
+        ),
       );
     }
     return FutureBuilder<bool>(
       future: _favorite == null ? (_loadFuture ??= _read(sourceKey, profileId)) : Future.value(_favorite),
       builder: (context, snapshot) {
         final value = _favorite ?? snapshot.data ?? false;
-        return IconButton(
+        return ExcludeFocus(
+          excluding: DeviceLayout.isTelevision,
+          child: IconButton(
           focusColor: Theme.of(context).colorScheme.primary.withOpacity(0.35),
           tooltip: value ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
           onPressed: _busy || !snapshot.hasData && _favorite == null ? null : () => _toggle(sourceKey, profileId),
           icon: _busy ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
               : Icon(value ? Icons.favorite : Icons.favorite_border,
                   color: value ? Colors.redAccent : null),
+          ),
         );
       },
     );
