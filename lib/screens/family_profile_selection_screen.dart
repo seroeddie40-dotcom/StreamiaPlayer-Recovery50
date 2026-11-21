@@ -225,12 +225,10 @@ class _FamilyProfileSelectionScreenState
     }
   }
 
-  Future<String?> _requestParentPin(
-    FamilyProfile profile,
-  ) async {
+  Future<String?> _requestParentPin(FamilyProfile profile) async {
     final pinController = TextEditingController();
     final pinFocus = FocusNode();
-
+    final isTv = DeviceLayout.isTelevision;
     bool showPin = false;
     String? errorMessage;
 
@@ -238,175 +236,206 @@ class _FamilyProfileSelectionScreenState
       return await showDialog<String>(
         context: context,
         barrierDismissible: false,
-        builder: (dialogContext) {
-          return StatefulBuilder(
-            builder: (dialogContext, updateDialog) {
-              void submit() {
-                final value = pinController.text.trim();
-
-                if (!RegExp(r'^[0-9]{6,10}$')
-                    .hasMatch(value)) {
-                  updateDialog(() {
-                    errorMessage =
-                        'Die Eltern-PIN muss aus '
-                        '6 bis 10 Ziffern bestehen.';
-                  });
-                  return;
-                }
-
-                Navigator.of(dialogContext).pop(value);
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, updateDialog) {
+            void submit() {
+              final value = pinController.text.trim();
+              if (!RegExp(r'^[0-9]{6,10}$').hasMatch(value)) {
+                updateDialog(() => errorMessage =
+                    'Die Eltern-PIN muss aus 6 bis 10 Ziffern bestehen.');
+                return;
               }
+              Navigator.of(dialogContext).pop(value);
+            }
 
-              return Dialog(
-                insetPadding:
-                    const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 16,
-                ),
-                child: SafeArea(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: 420,
-                    ),
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment:
-                            CrossAxisAlignment.stretch,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.admin_panel_settings_outlined,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  'Eltern-PIN eingeben',
-                                  style:
-                                      Theme.of(dialogContext)
-                                          .textTheme
-                                          .titleLarge,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Erwachsenenprofil '
-                            '"${profile.displayName}" '
-                            'entsperren.',
-                          ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'Verwende die gemeinsame '
-                            'Eltern-PIN deines Kontos.',
-                          ),
-                          const SizedBox(height: 20),
-                          TextField(
-                            controller: pinController,
-                            focusNode: pinFocus,
-                            autofocus: true,
-                            obscureText: !showPin,
-                            keyboardType:
-                                TextInputType.number,
-                            textInputAction:
-                                TextInputAction.done,
-                            maxLength: 10,
-                            inputFormatters: [
-                              FilteringTextInputFormatter
-                                  .digitsOnly,
-                            ],
-                            decoration:
-                                InputDecoration(
-                              labelText: _t('family_parent_pin'),
-                              counterText: '',
-                              prefixIcon: Icon(
-                                Icons.lock_outline,
-                              ),
-                              border: OutlineInputBorder(),
-                            ),
-                            onChanged: (_) {
-                              if (errorMessage != null) {
-                                updateDialog(() {
-                                  errorMessage = null;
-                                });
-                              }
-                            },
-                            onSubmitted: (_) => submit(),
-                          ),
-                          CheckboxListTile(
-                            value: showPin,
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text(
-                              'PIN anzeigen',
-                            ),
-                            controlAffinity:
-                                ListTileControlAffinity
-                                    .leading,
-                            onChanged: (value) {
-                              updateDialog(() {
-                                showPin = value ?? false;
-                              });
-                            },
-                          ),
-                          if (errorMessage != null) ...[
-                            const SizedBox(height: 8),
-                            Text(
-                              errorMessage!,
-                              style: TextStyle(
-                                color:
-                                    Theme.of(dialogContext)
-                                        .colorScheme
-                                        .error,
-                              ),
-                            ),
-                          ],
-                          const SizedBox(height: 16),
-                          Wrap(
-                            alignment: WrapAlignment.end,
-                            spacing: 10,
-                            runSpacing: 10,
-                            children: [
-                              TextButton(
-                                autofocus: false,
-                                onPressed: () {
-                                  Navigator.of(dialogContext)
-                                      .pop();
-                                },
-                                child: const Text(
-                                  'Abbrechen',
-                                ),
-                              ),
-                              FilledButton.icon(
-                                onPressed: submit,
-                                icon: const Icon(
-                                  Icons.lock_open_outlined,
-                                ),
-                                label: const Text(
-                                  'Entsperren',
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+            void appendDigit(String digit) {
+              if (pinController.text.length >= 10) return;
+              updateDialog(() {
+                pinController.text += digit;
+                errorMessage = null;
+              });
+            }
+
+            void deleteDigit() {
+              if (pinController.text.isEmpty) return;
+              updateDialog(() {
+                pinController.text = pinController.text.substring(
+                  0, pinController.text.length - 1,
+                );
+                errorMessage = null;
+              });
+            }
+
+            Widget pinDetails() => Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(children: [
+                  const Icon(Icons.admin_panel_settings_outlined),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text('Eltern-PIN eingeben',
+                    style: Theme.of(dialogContext).textTheme.titleLarge)),
+                ]),
+                const SizedBox(height: 16),
+                Text('Erwachsenenprofil "${profile.displayName}" entsperren.'),
+                const SizedBox(height: 8),
+                const Text('Verwende die gemeinsame Eltern-PIN deines Kontos.'),
+                const SizedBox(height: 18),
+                if (isTv)
+                  Semantics(
+                    label: 'Eingegebene PIN: ${pinController.text.length} Ziffern',
+                    child: InkWell(
+                      canRequestFocus: true,
+                      onTap: () {
+                        // TV uses the always-visible keypad, not the system IME.
+                        FocusScope.of(dialogContext).nextFocus();
+                      },
+                      child: InputDecorator(
+                        decoration: InputDecoration(
+                          labelText: _t('family_parent_pin'),
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          border: const OutlineInputBorder(),
+                        ),
+                        child: Text(
+                          showPin ? pinController.text :
+                            '●' * pinController.text.length,
+                          style: Theme.of(dialogContext).textTheme.titleMedium,
+                        ),
                       ),
                     ),
+                  )
+                else
+                  TextField(
+                    controller: pinController,
+                    focusNode: pinFocus,
+                    autofocus: true,
+                    obscureText: !showPin,
+                    keyboardType: TextInputType.number,
+                    textInputAction: TextInputAction.done,
+                    maxLength: 10,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: InputDecoration(
+                      labelText: _t('family_parent_pin'),
+                      counterText: '',
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      border: const OutlineInputBorder(),
+                    ),
+                    onChanged: (_) {
+                      if (errorMessage != null) {
+                        updateDialog(() => errorMessage = null);
+                      }
+                    },
+                    onSubmitted: (_) => submit(),
+                  ),
+                CheckboxListTile(
+                  value: showPin,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('PIN anzeigen'),
+                  controlAffinity: ListTileControlAffinity.leading,
+                  onChanged: (value) =>
+                      updateDialog(() => showPin = value ?? false),
+                ),
+                if (errorMessage != null) ...[
+                  const SizedBox(height: 8),
+                  Text(errorMessage!, style: TextStyle(
+                    color: Theme.of(dialogContext).colorScheme.error,
+                  )),
+                ],
+                const SizedBox(height: 12),
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      child: const Text('Abbrechen'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: submit,
+                      icon: const Icon(Icons.lock_open_outlined),
+                      label: const Text('Entsperren'),
+                    ),
+                  ],
+                ),
+              ],
+            );
+
+            Widget keypad() {
+              final keys = ['1', '2', '3', '4', '5', '6',
+                '7', '8', '9', '⌫', '0', '✓'];
+              return SizedBox(
+                width: 260,
+                child: FocusTraversalGroup(
+                  policy: WidgetOrderTraversalPolicy(),
+                  child: GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 3,
+                      mainAxisSpacing: 8,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 1.45,
+                    ),
+                    itemCount: keys.length,
+                    itemBuilder: (context, index) {
+                      final key = keys[index];
+                      return FilledButton.tonal(
+                        autofocus: index == 0,
+                        onPressed: () {
+                          if (key == '⌫') {
+                            deleteDigit();
+                          } else if (key == '✓') {
+                            submit();
+                          } else {
+                            appendDigit(key);
+                          }
+                        },
+                        style: FilledButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                        ),
+                        child: Text(key, style: const TextStyle(fontSize: 23)),
+                      );
+                    },
                   ),
                 ),
               );
-            },
-          );
-        },
+            }
+
+            return Dialog(
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 16, vertical: 16),
+              child: SafeArea(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: isTv
+                    ? ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 790),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(child: pinDetails()),
+                            const SizedBox(width: 28),
+                            keypad(),
+                          ],
+                        ),
+                      )
+                    : ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 420),
+                        child: pinDetails(),
+                      ),
+                ),
+              ),
+            );
+          },
+        ),
       );
     } finally {
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) {
-          pinController.dispose();
-          pinFocus.dispose();
-        },
-      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        pinController.dispose();
+        pinFocus.dispose();
+      });
     }
   }
 
