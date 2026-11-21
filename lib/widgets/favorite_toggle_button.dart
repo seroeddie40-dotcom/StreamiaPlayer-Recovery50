@@ -17,10 +17,10 @@ class FavoriteToggleButton extends StatefulWidget {
     required this.contentType, required this.title});
 
   @override
-  State<FavoriteToggleButton> createState() => _FavoriteToggleButtonState();
+  State<FavoriteToggleButton> createState() => FavoriteToggleButtonState();
 }
 
-class _FavoriteToggleButtonState extends State<FavoriteToggleButton> {
+class FavoriteToggleButtonState extends State<FavoriteToggleButton> {
   bool? _favorite;
   bool _busy = false;
   String? _loadedKey;
@@ -70,6 +70,16 @@ class _FavoriteToggleButtonState extends State<FavoriteToggleButton> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  /// Used by the focused TV catalog card on a long OK press. The same
+  /// profile-scoped outbox and authorization checks as the touch button apply.
+  Future<void> toggleFromRemote() async {
+    if (!mounted || _busy) return;
+    final family = context.read<FamilySessionProvider>();
+    final profile = family.activeProfile;
+    if (!family.isReady || profile == null) return;
+    await _toggle(context.read<ContentProvider>().sourceKey, profile.id);
   }
 
   @override

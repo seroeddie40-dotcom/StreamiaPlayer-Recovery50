@@ -89,8 +89,9 @@ class _TvLongOkActionState extends State<TvLongOkAction> {
   Widget build(BuildContext context) {
     if (!DeviceLayout.isTelevision) return widget.child;
     return Focus(
-      canRequestFocus: false,
-      skipTraversal: true,
+      canRequestFocus: true,
+      skipTraversal: false,
+      descendantsAreFocusable: false,
       onFocusChange: (focused) {
         if (!focused) _cancelPress();
       },
