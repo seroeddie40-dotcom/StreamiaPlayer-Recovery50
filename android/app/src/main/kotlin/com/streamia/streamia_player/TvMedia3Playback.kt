@@ -1,50 +1,53 @@
 package com.streamia.streamia_player
 
 import android.content.Context
-import android.os.Handler
 import android.os.Looper
-import android.view.SurfaceView
+import android.view.TextureView
 import android.widget.FrameLayout
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 
 /**
- * Isolated Android-TV Media3 playback surface.
- * Not yet wired to Flutter: integration must also implement lifecycle,
- * channel switching and event forwarding before this is used in production.
+ * Android TV Media3 video surface embedded in a Flutter PlatformView.
+ *
+ * TextureView avoids SurfaceView's separate surface composition when embedded
+ * in Flutter's AndroidView. Keep the public API used by TvMedia3PlatformView.
  */
 class TvMedia3Playback(context: Context) : FrameLayout(context) {
-    private val mainHandler = Handler(Looper.getMainLooper())
     private val exoPlayer = ExoPlayer.Builder(context).build()
-    private val playerView = PlayerView(context).apply {
-        useController = false
-        player = exoPlayer
-    }
+    private val videoView = TextureView(context)
+    private var released = false
 
     var onPlaybackState: ((Int, Boolean) -> Unit)? = null
     var onPlaybackError: ((String) -> Unit)? = null
 
     init {
-        addView(playerView, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
+        addView(
+            videoView,
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)
+        )
+        exoPlayer.setVideoTextureView(videoView)
         exoPlayer.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(playbackState: Int) {
-                onPlaybackState?.invoke(playbackState, exoPlayer.isPlaying)
+                if (!released) onPlaybackState?.invoke(playbackState, exoPlayer.isPlaying)
             }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
-                onPlaybackState?.invoke(exoPlayer.playbackState, isPlaying)
+                if (!released) onPlaybackState?.invoke(exoPlayer.playbackState, isPlaying)
             }
+
             override fun onPlayerError(error: PlaybackException) {
-                // Never forward stream URLs or exception messages: Xtream URLs may contain credentials.
-                onPlaybackError?.invoke(error.errorCodeName)
+                // Error codes are safe to forward; exception messages may expose credentials.
+                if (!released) onPlaybackError?.invoke(error.errorCodeName)
             }
         })
     }
 
     fun open(url: String) {
         check(Looper.myLooper() == Looper.getMainLooper()) { "Must run on main thread" }
+        check(!released) { "Player already released" }
         exoPlayer.setMediaItem(MediaItem.fromUri(url))
         exoPlayer.prepare()
         exoPlayer.playWhenReady = true
@@ -52,16 +55,18 @@ class TvMedia3Playback(context: Context) : FrameLayout(context) {
 
     fun stop() {
         check(Looper.myLooper() == Looper.getMainLooper()) { "Must run on main thread" }
+        if (released) return
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
     }
 
     fun release() {
         check(Looper.myLooper() == Looper.getMainLooper()) { "Must run on main thread" }
-        playerView.player = null
+        if (released) return
+        released = true
+        exoPlayer.clearVideoTextureView(videoView)
         exoPlayer.release()
         onPlaybackState = null
         onPlaybackError = null
-        mainHandler.removeCallbacksAndMessages(null)
     }
 }
