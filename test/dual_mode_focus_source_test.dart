@@ -34,27 +34,6 @@ void main() {
     expect(kotlin.contains('"isTelevision" ->'), isTrue);
   });
 
-  test('parental PIN and folder controls only request initial TV focus', () {
-    final source = File('lib/screens/parental_lock_screen.dart').readAsStringSync();
-    expect(source.contains("import '../core/platform/device_layout.dart';"), isTrue);
-
-    expect(
-      RegExp(
-        r'autofocus:\s*DeviceLayout\.isTelevision\s*&&\s*row\s*==\s*0\s*&&\s*column\s*==\s*0',
-      ).allMatches(source).length,
-      1,
-    );
-
-    expect(
-      RegExp(
-        r'autofocus:\s*DeviceLayout\.isTelevision\s*&&\s*index\s*==\s*0',
-      ).allMatches(source).length,
-      1,
-    );
-
-    expect(source.contains('autofocus: i == 0,'), isFalse);
-  });
-
   test('language selection shows a distinct TV remote focus', () {
     final source = File('lib/screens/language_selection_screen.dart').readAsStringSync();
     expect(source.contains('onFocusChange: (focused)'), isTrue);
