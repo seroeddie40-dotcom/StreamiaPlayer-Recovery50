@@ -38,6 +38,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
   String _selectedCategory = _all;
   bool _folderFocusExpanded = false;
   String _search = '';
+  Channel? _tvHighlightedChannel;
 
   List<String> _cachedCategories = const [];
   Map<String, int> _cachedCounts = const {};
@@ -282,6 +283,98 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
     );
   }
 
+  // TV-only: folders / channels / information. The right pane deliberately
+  // does not start a second decoder; playback stays owned by PlayerScreen.
+  Widget _tvChannelPanel(List<Channel> filtered, List<Channel> allChannels) {
+    if (filtered.isEmpty) {
+      return Center(child: Text(allChannels.isEmpty
+          ? _text('Keine Sender vorhanden', 'Kanal bulunamadı', 'No channels available')
+          : _text('Keine passenden Sender', 'Eşleşen kanal yok', 'No matching channels')));
+    }
+    return FocusTraversalGroup(
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        itemCount: filtered.length,
+        itemBuilder: (context, index) {
+          final channel = filtered[index];
+          return _TvChannelRow(
+            key: ValueKey(channel.id),
+            channel: channel,
+            onFocused: () {
+              if (mounted && _tvHighlightedChannel?.id != channel.id) {
+                setState(() => _tvHighlightedChannel = channel);
+              }
+            },
+            onOpen: () => _openLiveChannel(channel),
+          );
+        },
+      ),
+    );
+  }
+
+  void _openLiveChannel(Channel channel) {
+    final family = context.read<FamilySessionProvider>();
+    final content = context.read<ContentProvider>();
+    if (!family.isReady || !family.canAccessCategory(
+      sourceKey: content.sourceKey,
+      contentType: 'live',
+      categoryKey: channel.categoryKey ?? '',
+    )) return;
+    pushWithFocusRestore(
+      context,
+      MaterialPageRoute(builder: (_) => PlayerScreen(channel: channel, isLive: true)),
+    );
+  }
+
+  Widget _tvPreviewPanel(List<Channel> filtered) {
+    final selected = _tvHighlightedChannel;
+    Channel? channel;
+    if (selected != null) {
+      for (final candidate in filtered) {
+        if (candidate.id == selected.id) {
+          channel = candidate;
+          break;
+        }
+      }
+    }
+    channel ??= filtered.isNotEmpty ? filtered.first : null;
+    final logo = channel?.logoUrl?.trim();
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AspectRatio(
+            aspectRatio: 16 / 9,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: AppTheme.darkSurface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.electricBlue.withValues(alpha: 0.35)),
+              ),
+              child: Center(child: logo != null && logo.isNotEmpty
+                  ? CachedNetworkImage(
+                      imageUrl: logo,
+                      fit: BoxFit.contain,
+                      memCacheWidth: 320,
+                      errorWidget: (_, __, ___) => const Icon(Icons.live_tv_rounded, size: 64),
+                    )
+                  : const Icon(Icons.live_tv_rounded, size: 64)),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text(channel?.name ?? '',
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          Text(_text('OK: Sender öffnen', 'OK: Kanalı aç', 'OK: Open channel'),
+              style: Theme.of(context).textTheme.bodyMedium),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final family = context.watch<FamilySessionProvider>();
@@ -396,7 +489,13 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
                 ),
               ),
             ),
-            Expanded(child: filtered.isEmpty
+            Expanded(child: tv && !compact
+              ? Row(children: [
+                  Expanded(flex: 5, child: _tvChannelPanel(filtered, channels)),
+                  VerticalDivider(width: 1, color: AppTheme.electricBlue.withValues(alpha: 0.24)),
+                  Expanded(flex: 5, child: _tvPreviewPanel(filtered)),
+                ])
+              :  filtered.isEmpty
               ? Center(child: Text(
                   channels.isEmpty
                       ? _text('Keine Sender vorhanden', 'Kanal bulunamadı', 'No channels available')
@@ -429,6 +528,82 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
         ]),
       );
     });
+  }
+}
+
+/// One focus stop per channel on Android TV. The favorite heart is deliberately
+/// not a separate D-pad target in the TV catalogue.
+class _TvChannelRow extends StatefulWidget {
+  const _TvChannelRow({super.key, required this.channel,
+    required this.onFocused, required this.onOpen});
+  final Channel channel;
+  final VoidCallback onFocused;
+  final VoidCallback onOpen;
+
+  @override
+  State<_TvChannelRow> createState() => _TvChannelRowState();
+}
+
+class _TvChannelRowState extends State<_TvChannelRow> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final logo = widget.channel.logoUrl?.trim();
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Material(
+        color: _focused
+            ? AppTheme.electricBlue.withValues(alpha: 0.20)
+            : Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onFocusChange: (focused) {
+            if (!mounted) return;
+            setState(() => _focused = focused);
+            if (focused) {
+              widget.onFocused();
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted && _focused && ModalRoute.of(context)?.isCurrent == true) {
+                  Scrollable.ensureVisible(context,
+                      duration: const Duration(milliseconds: 120),
+                      alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd);
+                }
+              });
+            }
+          },
+          onTap: widget.onOpen,
+          child: Container(
+            height: 66,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                  color: _focused ? AppTheme.electricBlue : Colors.transparent,
+                  width: 3),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(children: [
+              SizedBox(width: 52, height: 42,
+                child: logo != null && logo.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: logo,
+                        fit: BoxFit.contain,
+                        memCacheWidth: 120,
+                        errorWidget: (_, __, ___) => const Icon(Icons.tv_rounded))
+                    : const Icon(Icons.tv_rounded)),
+              const SizedBox(width: 12),
+              Expanded(child: Text(widget.channel.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600))),
+              if (_focused) const Icon(Icons.chevron_right_rounded,
+                  color: AppTheme.electricBlue),
+            ]),
+          ),
+        ),
+      ),
+    );
   }
 }
 
