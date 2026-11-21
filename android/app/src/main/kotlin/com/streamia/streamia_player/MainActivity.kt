@@ -673,6 +673,13 @@ class MainActivity : FlutterActivity() {
             flutterEngine
         )
 
+        // Register the isolated Android-TV Media3 video surface.
+        // Existing device identity and recording channels below remain unchanged.
+        flutterEngine.platformViewsController.registry.registerViewFactory(
+            TvMedia3PlatformViewFactory.VIEW_TYPE,
+            TvMedia3PlatformViewFactory(flutterEngine.dartExecutor.binaryMessenger)
+        )
+
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             DEVICE_CHANNEL
