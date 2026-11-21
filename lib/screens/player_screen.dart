@@ -1263,23 +1263,24 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
               ],
             ),
             if (!widget.isLive) _buildProgressBar(),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              child: Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 8,
-                runSpacing: 6,
-                children: [
-                  if (!widget.isLive) ...[
+            // Live TV uses a minimal channel-navigation overlay. Subtitle,
+            // audio-track, aspect-ratio and seek actions are VOD-only.
+            if (!widget.isLive)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
                     _controlButton(Icons.replay_10, AppLocalizations.of(context).t('player_seek_back'), () => _seekBy(-10)),
                     _controlButton(Icons.forward_10, AppLocalizations.of(context).t('player_seek_forward'), () => _seekBy(10)),
+                    _controlButton(Icons.closed_caption, AppLocalizations.of(context).t('player_subtitles'), _showSubtitleTracks, focusNode: _subtitleButtonFocus),
+                    _controlButton(Icons.audiotrack, AppLocalizations.of(context).t('player_audio'), _showAudioTracks, focusNode: _audioButtonFocus),
+                    _controlButton(Icons.aspect_ratio, "${AppLocalizations.of(context).t('player_video_fit')}: ${_videoFitLabel(_videoFitIndex)}", _cycleVideoFit),
                   ],
-                  _controlButton(Icons.closed_caption, AppLocalizations.of(context).t('player_subtitles'), _showSubtitleTracks, focusNode: _subtitleButtonFocus),
-                  _controlButton(Icons.audiotrack, AppLocalizations.of(context).t('player_audio'), _showAudioTracks, focusNode: _audioButtonFocus),
-                  _controlButton(Icons.aspect_ratio, "${AppLocalizations.of(context).t('player_video_fit')}: ${_videoFitLabel(_videoFitIndex)}", _cycleVideoFit),
-                ],
+                ),
               ),
-            ),
             Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
