@@ -9,6 +9,7 @@ import '../services/media_engine.dart';
 import '../services/live_stream_format.dart';
 import '../services/live_stream_format_preferences.dart';
 import '../services/tv_playback_diagnostics.dart';
+import '../services/tv_media3_controller.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:provider/provider.dart';
 import '../core/localization/app_localizations.dart';
@@ -57,6 +58,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   Future<void> _openQueue = Future<void>.value();
   bool _playerDisposalStarted = false;
   late final TvPlaybackDiagnostics _tvDiagnostics;
+  // Android TV Live uses Media3; media_kit remains the mobile/VOD engine.
+  bool get _useTvMedia3 => widget.isLive && DeviceLayout.isTelevision;
+  String _tvMedia3Url = '';
+  int _tvMedia3Epoch = 0;
   late final Player _player;
   late final VideoController _videoController;
   late final FamilySessionProvider _familySession;
@@ -318,6 +323,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _contentProvider.addListener(_onFamilySessionChanged);
     _currentEpisode = widget.initialEpisodeIndex ?? 0;
     _posSub = _player.stream.position.listen((p) {
+      if (_useTvMedia3) return;
       if (!mounted) return;
       if (p > _lastObservedPlaybackPosition) {
         _lastObservedPlaybackPosition = p;
@@ -332,6 +338,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       }
     });
     _durSub = _player.stream.duration.listen((d) {
+      if (_useTvMedia3) return;
       if (!mounted || d == _duration) return;
       if (DeviceLayout.isTelevision && widget.isLive) {
         _duration = d;
@@ -340,6 +347,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       }
     });
     _playSub = _player.stream.playing.listen((p) {
+      if (_useTvMedia3) return;
       if (!mounted) return;
       _tvDiagnostics.playing(p);
       final changed = _playing != p || (p && (_streamFailed || _reconnecting));
@@ -368,6 +376,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     // Buffering is not a playback failure. Allow a bounded grace period so
     // slow connections can recover, without hanging indefinitely.
     _bufferingSub = _player.stream.buffering.listen((buffering) {
+      if (_useTvMedia3) return;
       if (!mounted) return;
       _tvDiagnostics.buffering(buffering);
       if (buffering) {
@@ -383,6 +392,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     });
     // Do not show raw player errors: stream URLs can contain account secrets.
     _errorSub = _player.stream.error.listen((_) {
+      if (_useTvMedia3) return;
       _tvDiagnostics.failure('native-player-error');
       _handlePlaybackFailure();
     });
@@ -500,7 +510,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     unawaited(() async {
       try {
         await previousOpen.catchError((Object _) {});
-        await _player.stop();
+        if (_useTvMedia3) {
+          if (mounted) setState(() { _tvMedia3Url = ''; ++_tvMedia3Epoch; });
+        } else {
+          await _player.stop();
+        }
       } catch (_) {
         // Revocation must remain terminal even if the native player fails.
       } finally {
@@ -645,7 +659,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _openQueue = stopping.future;
       try {
         await previousOpen.catchError((Object _) {});
-        if (!_playerDisposalStarted) await _player.stop();
+        if (!_playerDisposalStarted) {
+          if (_useTvMedia3) {
+            if (mounted) setState(() { _tvMedia3Url = ''; ++_tvMedia3Epoch; });
+          } else {
+            await _player.stop();
+          }
+        }
       } catch (_) {
         // An inaccessible stream must never be reopened on stop failure.
       } finally {
@@ -712,6 +732,18 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       if (!mounted || _playerDisposalStarted ||
           generation != _streamLoadGeneration ||
           !_isCurrentStreamAuthorized()) return;
+      if (_useTvMedia3) {
+        // Media3 owns the only active decoder for Android TV Live.
+        // A new key recreates the native view even when retrying the same URL.
+        if (mounted && generation == _streamLoadGeneration &&
+            _isCurrentStreamAuthorized()) {
+          setState(() {
+            _tvMedia3Url = candidates.first;
+            ++_tvMedia3Epoch;
+          });
+        }
+        return;
+      }
       for (var index = 0; index < candidates.length; index++) {
         try {
           await _player.open(Media(candidates[index]));
@@ -778,6 +810,44 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         _onFamilySessionChanged();
       }
     }
+  }
+
+  void _onTvMedia3State(int state, bool playing) {
+    if (!_useTvMedia3 || !mounted || _playerDisposalStarted ||
+        _playbackRevoked || _tvMedia3Url.isEmpty) return;
+    // Media3 Player.STATE_BUFFERING=2, READY=3, ENDED=4.
+    final buffering = state == 2;
+    _tvDiagnostics.buffering(buffering);
+    _tvDiagnostics.playing(playing);
+    _buffering = buffering;
+    if (buffering) {
+      _bufferingStartedAt ??= DateTime.now();
+      _stablePlaybackStartedAt = null;
+    } else {
+      _bufferingStartedAt = null;
+      if (playing) _stablePlaybackStartedAt ??= DateTime.now();
+    }
+    if (_playing != playing || (playing && (_streamFailed || _reconnecting))) {
+      setState(() {
+        _playing = playing;
+        if (playing) {
+          _streamFailed = false;
+          _reconnecting = false;
+        }
+      });
+    }
+    if (state == 4) {
+      _tvDiagnostics.failure('media3-ended');
+      _handlePlaybackFailure();
+    }
+  }
+
+  void _onTvMedia3Error(String code) {
+    if (!_useTvMedia3 || !mounted || _playerDisposalStarted ||
+        _playbackRevoked || _tvMedia3Url.isEmpty) return;
+    // Native side forwards error codes only, never credential-bearing URLs.
+    _tvDiagnostics.failure('media3-error');
+    _handlePlaybackFailure();
   }
 
   void _retryPlaybackManually() {
@@ -986,7 +1056,16 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
           },
           child: Stack(
             children: [
-              Center(child: Video(
+              if (_useTvMedia3)
+                Positioned.fill(
+                  child: TvMedia3View(
+                    key: ValueKey(_tvMedia3Epoch),
+                    url: _tvMedia3Url,
+                    onState: _onTvMedia3State,
+                    onError: _onTvMedia3Error,
+                  ),
+                )
+              else Center(child: Video(
                 controller: _videoController,
                 fit: _videoFits[_videoFitIndex],
                 // The package's built-in controls are the unwanted seek bar
