@@ -1,5 +1,6 @@
 import '../core/platform/device_layout.dart';
 import '../widgets/tv_catalog_focus.dart';
+import '../widgets/tv_long_ok_action.dart';
 import '../widgets/profile_clock.dart';
 import '../widgets/category_sort_control.dart';
 import '../widgets/favorites_quick_filter.dart';
@@ -265,7 +266,7 @@ String _seriesText(String language, String key) {
   return (labels[language] ?? labels['en']!)[key] ?? labels['en']![key] ?? key;
 }
 
-class _SeriesTile extends StatelessWidget {
+class _SeriesTile extends StatefulWidget {
   final Series series;
   final bool autofocus;
 
@@ -275,22 +276,36 @@ class _SeriesTile extends StatelessWidget {
   });
 
   @override
+  State<_SeriesTile> createState() => _SeriesTileState();
+}
+
+class _SeriesTileState extends State<_SeriesTile> {
+  final GlobalKey<FavoriteToggleButtonState> _favoriteKey =
+      GlobalKey<FavoriteToggleButtonState>();
+
+  void _openDetails() {
+    pushWithFocusRestore(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SeriesDetailScreen(series: widget.series),
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final isDark =
         Theme.of(context).brightness == Brightness.dark;
 
-    return InkWell(
-      autofocus: autofocus,
+    return TvLongOkAction(
+      onShortPress: _openDetails,
+      onLongPress: () => _favoriteKey.currentState?.toggleFromRemote(),
+      child: InkWell(
+      canRequestFocus: !DeviceLayout.isTelevision,
+      autofocus: widget.autofocus && !DeviceLayout.isTelevision,
       focusColor:
           AppTheme.electricBlue.withValues(alpha: 0.22),
-      onTap: () => pushWithFocusRestore(
-        context,
-        MaterialPageRoute(
-          builder: (_) => SeriesDetailScreen(
-            series: series,
-          ),
-        ),
-      ),
+      onTap: _openDetails,
       child: Container(
         decoration: BoxDecoration(
           color: isDark
@@ -306,9 +321,9 @@ class _SeriesTile extends StatelessWidget {
                   CrossAxisAlignment.stretch,
               children: [
                 Expanded(
-                  child: series.posterUrl != null
+                  child: widget.series.posterUrl != null
                       ? CachedNetworkImage(
-                          imageUrl: series.posterUrl!,
+                          imageUrl: widget.series.posterUrl!,
                           fit: BoxFit.cover,
                           errorWidget: (_, __, ___) =>
                               const Icon(
@@ -328,19 +343,19 @@ class _SeriesTile extends StatelessWidget {
                         CrossAxisAlignment.start,
                     children: [
                       Text(
-                        series.title,
+                        widget.series.title,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                      if (series.releaseDate != null ||
-                          series.genre != null)
+                      if (widget.series.releaseDate != null ||
+                          widget.series.genre != null)
                         Text(
                           [
-                            RegExp(r"^\d{4}").firstMatch(series.releaseDate ?? "")?.group(0),
-                            series.genre,
+                            RegExp(r"^\d{4}").firstMatch(widget.series.releaseDate ?? "")?.group(0),
+                            widget.series.genre,
                           ]
                               .whereType<String>()
                               .where((v) => v.isNotEmpty)
@@ -360,13 +375,15 @@ class _SeriesTile extends StatelessWidget {
               top: 4,
               left: 4,
               child: FavoriteToggleButton(
-                contentId: series.id,
+                key: _favoriteKey,
+                contentId: widget.series.id,
                 contentType: 'series',
-                title: series.title,
+                title: widget.series.title,
               ),
             ),
           ],
         ),
+      ),
       ),
     );
   }
