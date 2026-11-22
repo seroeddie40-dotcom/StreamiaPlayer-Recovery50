@@ -66,8 +66,19 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   void _onConnectivityChanged(List<ConnectivityResult> results) {
     _networkRetryTimer?.cancel();
-    if (_disposed || !_foreground || !isReady ||
+    if (_disposed || !_foreground ||
         !results.any((result) => result != ConnectivityResult.none)) return;
+    // A child profile whose permissions were revoked after a network failure
+    // cannot run the normal cache sync (isReady is false). Revalidate against
+    // the server instead; no content is unlocked until that succeeds.
+    if (!isReady) {
+      if (isChild && _belongsToCurrentAccount && !_refreshing && !_isLoading) {
+        _childRecoveryTimer?.cancel();
+        _childRecoveryTimer = null;
+        unawaited(refreshPermissions());
+      }
+      return;
+    }
     unawaited(_syncProfileCache());
     // A transport event can precede internet reachability (e.g. Wi-Fi DHCP).
     _networkRetryTimer = Timer(const Duration(seconds: 3), () {
@@ -88,13 +99,17 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   void _startProfileSync() {
     _stopProfileSync();
-    if (_disposed || !_foreground || !isReady) return;
+    if (_disposed || !_foreground || !_belongsToCurrentAccount) return;
+    // Keep the connectivity observer even while a child's permissions are
+    // revoked. Otherwise a resume during an outage removes the observer and
+    // reconnection can never trigger the recovery path.
     _connectivitySubscription = Connectivity().onConnectivityChanged.listen(
       _onConnectivityChanged,
       onError: (Object error, StackTrace stack) {
-        // Periodic sync remains available if the platform stream fails.
+        // The independent child retry timer remains the fallback.
       },
     );
+    if (!isReady) return;
     _profileSyncTimer = Timer.periodic(const Duration(seconds: 45), (_) {
       unawaited(_syncProfileCache());
     });
@@ -161,11 +176,14 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Timer? _adultExpiryTimer;
   Timer? _childRefreshTimer;
+  Timer? _childRecoveryTimer;
   static const _childRefreshInterval = Duration(seconds: 60);
   bool _refreshing = false;
   bool get isRefreshingPermissions => _refreshing;
 
   void _stopChildRefresh() {
+    _childRecoveryTimer?.cancel();
+    _childRecoveryTimer = null;
     _childRefreshTimer?.cancel();
     _childRefreshTimer = null;
   }
@@ -299,8 +317,42 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    _adultExpiryTimer =
-        Timer(remaining, clearSession);
+    // The default adult grant is short-lived. Attempt renewal early, but
+    // never let a concurrent sync skip the expiry watchdog. Keep retrying
+    // briefly until the original server-verified deadline is reached.
+    // PIN-protected adult sessions must NEVER be silently extended.
+    if (_unprotectedDefault) {
+      final advance = const Duration(seconds: 30);
+      final renewalDelay = remaining > advance ? remaining - advance : Duration.zero;
+      final expectedGeneration = _generation;
+      void attemptRenewal() {
+        if (_disposed || expectedGeneration != _generation ||
+            !_unprotectedDefault || !_belongsToCurrentAccount) return;
+        final currentExpiry = _adultValidUntil;
+        if (currentExpiry == null || !currentExpiry.isAfter(DateTime.now())) {
+          clearSession();
+          return;
+        }
+        if (_refreshing || _isLoading) {
+          final untilExpiry = currentExpiry.difference(DateTime.now());
+          final retry = untilExpiry < const Duration(seconds: 1)
+              ? untilExpiry : const Duration(seconds: 1);
+          _adultExpiryTimer = Timer(retry, attemptRenewal);
+          return;
+        }
+        // refreshPermissions will schedule the next renewal only after
+        // verifying that the default adult profile still belongs to us.
+        unawaited(refreshPermissions());
+        // The original grant must still expire if the request stalls.
+        _adultExpiryTimer = Timer(currentExpiry.difference(DateTime.now()), () {
+          if (!_disposed && expectedGeneration == _generation &&
+              !_adultSessionCurrent) clearSession();
+        });
+      }
+      _adultExpiryTimer = Timer(renewalDelay, attemptRenewal);
+      return;
+    }
+    _adultExpiryTimer = Timer(remaining, clearSession);
   }
 
   /// Activates a profile after checking account ownership.
@@ -515,8 +567,8 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
             clearSession();
             return false;
           }
-          _adultValidUntil = DateTime.now().add(const Duration(seconds: 60));
-          _scheduleAdultExpiry(_adultValidUntil!);
+          // Do not renew the grant yet. Profile membership and the complete
+          // permission snapshot must both be verified before extending it.
         } else if (adultToken == null || adultExpiry == null ||
             !adultExpiry.isAfter(DateTime.now()) ||
             !await _pinService.checkSession(
@@ -546,9 +598,21 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
           loaded.isChild != (currentProfile.type == FamilyProfileType.child)) {
         return _failRefresh(generation, profile);
       }
+      // Commit the short-lived default-adult grant only after every server
+      // validation succeeded. A failed snapshot must never extend access.
+      if (_unprotectedDefault) {
+        if (!_adultSessionCurrent) {
+          clearSession();
+          return false;
+        }
+        _adultValidUntil = DateTime.now().add(const Duration(seconds: 60));
+        _scheduleAdultExpiry(_adultValidUntil!);
+      }
       _activeProfile = currentProfile;
       _snapshot = loaded;
       _refreshing = false;
+      _childRecoveryTimer?.cancel();
+      _childRecoveryTimer = null;
       _notify();
       if (_profileSyncTimer == null) _startProfileSync();
       return isReady;
@@ -572,6 +636,20 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     _snapshot = null;
     _refreshing = false;
     _notify();
+    if (_foreground && _connectivitySubscription == null) {
+      _startProfileSync();
+    }
+    // A temporary network outage must never grant child access. Retry with
+    // permissions still revoked; only a fresh validated snapshot restores it.
+    _childRecoveryTimer?.cancel();
+    _childRecoveryTimer = Timer(const Duration(seconds: 15), () {
+      _childRecoveryTimer = null;
+      if (!_disposed && _foreground && !_refreshing && !_isLoading &&
+          _belongsToCurrentAccount && _activeProfile?.id == profile.id &&
+          _activeProfile?.type == FamilyProfileType.child && !isReady) {
+        unawaited(refreshPermissions());
+      }
+    });
     return false;
   }
 
