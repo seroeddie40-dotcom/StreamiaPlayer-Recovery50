@@ -216,6 +216,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   Duration _duration = Duration.zero;
   bool _playing = false;
   bool _showControls = true;
+  // TV Live drawer: first LEFT channels, second LEFT categories + channels.
+  bool _tvDrawerShowCategories = false;
   bool _showHistory = false;
   bool _showDrawer = false;
   String? _selectedLiveCategory;
@@ -542,6 +544,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   @override
   void initState() {
     super.initState();
+    // Enter live TV fullscreen cleanly; controls appear only on explicit OK.
+    if (widget.isLive && DeviceLayout.isTelevision) _showControls = false;
     WidgetsBinding.instance.addObserver(this);
     _activeChannel = widget.channel;
     _tvDiagnostics = TvPlaybackDiagnostics(
@@ -755,7 +759,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (!_appInForeground) return;
     _tvMedia3AwaitingFirstStateAt = null;
     _tvMedia3IdleSince = null;
-    setState(() { _streamFailed = true; _reconnecting = false; _showControls = true; });
+    setState(() { _streamFailed = true; _reconnecting = false; _showControls = !widget.isLive || !DeviceLayout.isTelevision; });
     _hideTimer?.cancel();
     if (!allowAutomaticRetry ||
         _automaticReconnects >= _maxAutomaticReconnects) return;
@@ -1273,14 +1277,26 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   KeyEventResult _handleRemoteKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     // Overlay widgets own their remote actions; never toggle playback behind them.
+    if (_showDrawer && widget.isLive && DeviceLayout.isTelevision &&
+        event.logicalKey == LogicalKeyboardKey.arrowLeft &&
+        !_tvDrawerShowCategories) {
+      _expandTvDrawerCategories();
+      return KeyEventResult.handled;
+    }
     if (_showDrawer || _showHistory) return KeyEventResult.ignored;
     final key = event.logicalKey;
-    // Left/Right on the Live TV surface must not unexpectedly open history.
-    // Navigation overlays are opened only through their explicit controls.
+    // TV remote: LEFT opens channels; RIGHT opens the three history tabs.
+    // No seek operation is available for live television.
     if (widget.isLive && DeviceLayout.isTelevision &&
         key == LogicalKeyboardKey.arrowLeft &&
         _playerSurfaceFocus.hasPrimaryFocus) {
       _openNavigationDrawer();
+      return KeyEventResult.handled;
+    }
+    if (widget.isLive && DeviceLayout.isTelevision &&
+        key == LogicalKeyboardKey.arrowRight &&
+        _playerSurfaceFocus.hasPrimaryFocus) {
+      _toggleHistorySidebar();
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.arrowLeft) {
@@ -2362,13 +2378,29 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _restorePlayerFocus();
   }
 
+  void _expandTvDrawerCategories() {
+    if (!_showDrawer || !widget.isLive || !DeviceLayout.isTelevision ||
+        _tvDrawerShowCategories) return;
+    ++_navigationScrollEpoch;
+    ++_focusedRowRequest;
+    setState(() => _tvDrawerShowCategories = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _showDrawer && _tvDrawerShowCategories) {
+        _categoryAllFocus.requestFocus();
+      }
+    });
+  }
+
   void _closeNavigationDrawer() {
     _tvDrawerPendingIndex = null;
     _tvDrawerPendingChannelId = null;
     _tvDrawerFocusRequest++;
     _navigationScrollEpoch++;
     _focusedRowRequest++;
-    setState(() => _showDrawer = false);
+    setState(() {
+      _showDrawer = false;
+      _tvDrawerShowCategories = false;
+    });
     _restorePlayerFocus();
   }
 
@@ -2386,6 +2418,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _hideTimer?.cancel();
     setState(() {
       _showDrawer = true;
+      _tvDrawerShowCategories = false;
+      _selectedLiveCategory = null;
       _showHistory = false;
       if (DeviceLayout.isTelevision && widget.isLive) _showControls = false;
     });
@@ -2405,7 +2439,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   // there, so doing so can silently hide channels with no way to recover.
   List<Channel> _visibleLiveChannels(List<Channel> channels) => channels
       .where((c) => matchesFavorite(c.id) &&
-          (DeviceLayout.isTelevision || favoritesOnly ||
+          ((DeviceLayout.isTelevision && !_tvDrawerShowCategories) || favoritesOnly ||
               _selectedLiveCategory == null ||
               (c.category ?? '') == _selectedLiveCategory))
       .toList(growable: false);
@@ -2424,7 +2458,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         child: _navigationBackdrop(
           child: Container(
             width: DeviceLayout.isTelevision
-                ? MediaQuery.sizeOf(context).width * 0.60
+                ? MediaQuery.sizeOf(context).width * (_tvDrawerShowCategories ? 0.72 : 0.40)
                 : MediaQuery.sizeOf(context).width.clamp(0.0, 360.0).toDouble(),
             decoration: BoxDecoration(color: DeviceLayout.isTelevision
                 ? const Color(0xFF101724) : const Color(0xE6101724),
@@ -2444,7 +2478,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (!favoritesOnly && !DeviceLayout.isTelevision) SizedBox(
+                      if (!favoritesOnly && (!DeviceLayout.isTelevision || _tvDrawerShowCategories)) SizedBox(
                         width: DeviceLayout.isTelevision
                             ? MediaQuery.sizeOf(context).width * 0.22
                             : (MediaQuery.sizeOf(context).width >= 900 ? 230 : 180),
@@ -2452,12 +2486,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                           controller: _categoryListScroll,
                           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
                           children: [
-                            _categoryTile(AppLocalizations.of(context).t('player_all'), null, autofocus: true),
+                            _categoryTile(AppLocalizations.of(context).t('player_all'), null, autofocus: !DeviceLayout.isTelevision),
                             ...categories.map((category) => _categoryTile(category, category)),
                           ],
                         ),
                       ),
-                      if (!favoritesOnly && !DeviceLayout.isTelevision)
+                      if (!favoritesOnly && (!DeviceLayout.isTelevision || _tvDrawerShowCategories))
                         const VerticalDivider(color: Colors.white24, width: 1),
                       Expanded(
                         child: ListView.builder(
