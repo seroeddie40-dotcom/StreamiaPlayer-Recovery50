@@ -105,7 +105,7 @@ class _TvPinKeypadState extends State<TvPinKeypad> {
           primary: false,
           shrinkWrap: false,
           physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 3,
             childAspectRatio: cellWidth / cellHeight,
             mainAxisSpacing: 8,
