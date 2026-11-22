@@ -65,7 +65,7 @@ class _FamilyProfileSelectionScreenState
       setState(() {
         _isLoading = false;
         _errorMessage =
-            'Die Familienprofile konnten nicht geladen werden.';
+            _t('family_selection_load_failed');
       });
     }
   }
@@ -92,7 +92,7 @@ class _FamilyProfileSelectionScreenState
       );
     } catch (_) {
       _showMessage(
-        'Die Familienverwaltung konnte nicht geöffnet werden.',
+        _t('family_selection_manage_failed'),
       );
     } finally {
       if (mounted) {
@@ -196,8 +196,7 @@ class _FamilyProfileSelectionScreenState
           }
         } else {
           _showMessage(
-            'Das Kinderprofil konnte nicht aktiviert '
-            'werden. Bitte versuche es erneut.',
+            _t('family_selection_child_failed'),
           );
         }
         return;
@@ -213,8 +212,7 @@ class _FamilyProfileSelectionScreenState
       }
     } catch (_) {
       _showMessage(
-        'Bei der Profilaktivierung ist '
-        'ein Fehler aufgetreten.',
+        _t('family_selection_activation_failed'),
       );
     } finally {
       if (mounted) {
@@ -242,7 +240,7 @@ class _FamilyProfileSelectionScreenState
               final value = pinController.text.trim();
               if (!RegExp(r'^[0-9]{6,10}$').hasMatch(value)) {
                 updateDialog(() => errorMessage =
-                    'Die Eltern-PIN muss aus 6 bis 10 Ziffern bestehen.');
+                    _t('family_selection_pin_length'));
                 return;
               }
               Navigator.of(dialogContext).pop(value);
@@ -273,17 +271,17 @@ class _FamilyProfileSelectionScreenState
                 Row(children: [
                   const Icon(Icons.admin_panel_settings_outlined),
                   const SizedBox(width: 10),
-                  Expanded(child: Text('Eltern-PIN eingeben',
+                  Expanded(child: Text(_t('family_selection_pin_title'),
                     style: Theme.of(dialogContext).textTheme.titleLarge)),
                 ]),
                 const SizedBox(height: 16),
-                Text('Erwachsenenprofil "${profile.displayName}" entsperren.'),
+                Text(_t('family_selection_unlock_adult').replaceAll('{name}', profile.displayName)),
                 const SizedBox(height: 8),
-                const Text('Verwende die gemeinsame Eltern-PIN deines Kontos.'),
+                Text(_t('family_selection_pin_hint')),
                 const SizedBox(height: 18),
                 if (isTv)
                   Semantics(
-                    label: 'Eingegebene PIN: ${pinController.text.length} Ziffern',
+                    label: _t('family_selection_pin_digits').replaceAll('{count}', '${pinController.text.length}'),
                     child: InkWell(
                       canRequestFocus: true,
                       onTap: () {
@@ -330,7 +328,7 @@ class _FamilyProfileSelectionScreenState
                 CheckboxListTile(
                   value: showPin,
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('PIN anzeigen'),
+                  title: Text(_t('family_show_pin')),
                   controlAffinity: ListTileControlAffinity.leading,
                   onChanged: (value) =>
                       updateDialog(() => showPin = value ?? false),
@@ -349,12 +347,12 @@ class _FamilyProfileSelectionScreenState
                   children: [
                     TextButton(
                       onPressed: () => Navigator.of(dialogContext).pop(),
-                      child: const Text('Abbrechen'),
+                      child: Text(_t('family_selection_cancel')),
                     ),
                     FilledButton.icon(
                       onPressed: submit,
                       icon: const Icon(Icons.lock_open_outlined),
-                      label: const Text('Entsperren'),
+                      label: Text(_t('family_unlock')),
                     ),
                   ],
                 ),
@@ -554,18 +552,15 @@ class _FamilyProfileSelectionScreenState
             ),
             const SizedBox(height: 16),
             Text(
-              'Willkommen bei den Familienprofilen',
+              _t('family_selection_welcome'),
               textAlign: TextAlign.center,
               style: Theme.of(context)
                   .textTheme
                   .titleLarge,
             ),
             const SizedBox(height: 12),
-            const Text(
-              'Noch keine Familienprofile vorhanden. '
-              'Richte deine Eltern-PIN ein und '
-              'erstelle anschließend das erste '
-              'Erwachsenenprofil.',
+            Text(
+              _t('family_selection_empty'),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
@@ -576,9 +571,7 @@ class _FamilyProfileSelectionScreenState
               icon: const Icon(
                 Icons.admin_panel_settings_outlined,
               ),
-              label: const Text(
-                'Familienprofile einrichten',
-              ),
+              label: Text(_t('family_selection_setup')),
             ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
@@ -619,9 +612,7 @@ class _FamilyProfileSelectionScreenState
               FilledButton.icon(
                 onPressed: _loadProfiles,
                 icon: const Icon(Icons.refresh),
-                label: const Text(
-                  'Erneut versuchen',
-                ),
+                label: Text(_t('family_retry')),
               ),
             ],
           ),
