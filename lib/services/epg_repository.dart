@@ -84,7 +84,12 @@ class EpgRepository {
             _lastAttempt.remove(_lastAttempt.keys.first);
           }
         }
-        await (_pending[url] ??= _fetch(url).whenComplete(() => _pending.remove(url)));
+        // IMPORTANT: Use a block body. Returning _pending.remove(url) from
+        // whenComplete would return this very same Future and create a
+        // self-referential wait, freezing every EPG request indefinitely.
+        await (_pending[url] ??= _fetch(url).whenComplete(() {
+          _pending.remove(url);
+        }));
       } catch (_) { /* Retain stale cache when the guide is unreachable. */ }
     }
     return cached(url, channelId);
