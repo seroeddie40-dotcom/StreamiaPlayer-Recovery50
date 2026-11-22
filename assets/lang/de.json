@@ -266,5 +266,7 @@
   "clock_date": "Datum anzeigen",
   "clock_format": "Uhrzeitformat",
   "clock_24": "24 Stunden",
-  "clock_12": "12 Stunden (AM/PM)"
+  "clock_12": "12 Stunden (AM/PM)",
+  "epg_no_data": "Keine EPG-Daten verfügbar",
+  "epg_no_description": "Keine Beschreibung verfügbar"
 }
