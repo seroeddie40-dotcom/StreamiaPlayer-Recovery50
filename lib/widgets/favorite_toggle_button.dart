@@ -27,6 +27,64 @@ class FavoriteToggleButtonState extends State<FavoriteToggleButton> {
   int _seenSyncRevision = -1;
   Future<bool>? _loadFuture;
 
+  String _message(String key) {
+    final language = Localizations.localeOf(context).languageCode;
+    const translations = <String, Map<String, String>>{
+      'login': {
+        'de': 'Bitte anmelden, um Favoriten zu synchronisieren.',
+        'tr': 'Favorileri eşitlemek için giriş yapın.',
+        'en': 'Sign in to sync favorites.',
+        'ru': 'Войдите, чтобы синхронизировать избранное.',
+        'pl': 'Zaloguj się, aby synchronizować ulubione.',
+        'es': 'Inicia sesión para sincronizar favoritos.',
+        'fr': 'Connectez-vous pour synchroniser les favoris.',
+        'ar': 'سجّل الدخول لمزامنة المفضلة.',
+      },
+      'failed': {
+        'de': 'Favorit konnte nicht gespeichert werden',
+        'tr': 'Favori kaydedilemedi',
+        'en': 'Could not save favorite',
+        'ru': 'Не удалось сохранить избранное',
+        'pl': 'Nie udało się zapisać ulubionego',
+        'es': 'No se pudo guardar el favorito',
+        'fr': 'Impossible d’enregistrer le favori',
+        'ar': 'تعذّر حفظ المفضلة',
+      },
+      'signIn': {
+        'de': 'Zum Synchronisieren anmelden',
+        'tr': 'Eşitlemek için giriş yapın',
+        'en': 'Sign in to sync',
+        'ru': 'Войдите для синхронизации',
+        'pl': 'Zaloguj się, aby synchronizować',
+        'es': 'Inicia sesión para sincronizar',
+        'fr': 'Connectez-vous pour synchroniser',
+        'ar': 'سجّل الدخول للمزامنة',
+      },
+      'remove': {
+        'de': 'Aus Favoriten entfernen',
+        'tr': 'Favorilerden kaldır',
+        'en': 'Remove from favorites',
+        'ru': 'Удалить из избранного',
+        'pl': 'Usuń z ulubionych',
+        'es': 'Quitar de favoritos',
+        'fr': 'Retirer des favoris',
+        'ar': 'إزالة من المفضلة',
+      },
+      'add': {
+        'de': 'Zu Favoriten hinzufügen',
+        'tr': 'Favorilere ekle',
+        'en': 'Add to favorites',
+        'ru': 'Добавить в избранное',
+        'pl': 'Dodaj do ulubionych',
+        'es': 'Añadir a favoritos',
+        'fr': 'Ajouter aux favoris',
+        'ar': 'إضافة إلى المفضلة',
+      },
+    };
+    final values = translations[key]!;
+    return values[language] ?? values['en']!;
+  }
+
   Future<bool> _read(String sourceKey, String profileId) async {
     if (!SupabaseConfig.isConfigured) return false;
     final client = Supabase.instance.client;
@@ -47,7 +105,7 @@ class FavoriteToggleButtonState extends State<FavoriteToggleButton> {
     final user = client.auth.currentUser;
     if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Bitte anmelden, um Favoriten zu synchronisieren.')));
+        SnackBar(content: Text(_message('login'))));
       return;
     }
     setState(() => _busy = true);
@@ -66,7 +124,7 @@ class FavoriteToggleButtonState extends State<FavoriteToggleButton> {
       favoritesRevision.value++;
     } catch (e) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Favorit konnte nicht gespeichert werden: $e')));
+        SnackBar(content: Text("${_message('failed')}: $e")));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -100,7 +158,7 @@ class FavoriteToggleButtonState extends State<FavoriteToggleButton> {
       return ExcludeFocus(
         excluding: DeviceLayout.isTelevision,
         child: IconButton(
-        tooltip: 'Zum Synchronisieren anmelden',
+        tooltip: _message('signIn'),
         onPressed: null,
         icon: const Icon(Icons.favorite_border),
         ),
@@ -114,7 +172,7 @@ class FavoriteToggleButtonState extends State<FavoriteToggleButton> {
           excluding: DeviceLayout.isTelevision,
           child: IconButton(
           focusColor: Theme.of(context).colorScheme.primary.withOpacity(0.35),
-          tooltip: value ? 'Aus Favoriten entfernen' : 'Zu Favoriten hinzufügen',
+          tooltip: _message(value ? 'remove' : 'add'),
           onPressed: _busy || !snapshot.hasData && _favorite == null ? null : () => _toggle(sourceKey, profileId),
           icon: _busy ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
               : Icon(value ? Icons.favorite : Icons.favorite_border,
