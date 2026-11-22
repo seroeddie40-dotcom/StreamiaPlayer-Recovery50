@@ -24,6 +24,10 @@ import '../services/recording_service.dart';
 import '../services/download_service.dart';
 import '../services/watch_progress_service.dart';
 import '../widgets/favorites_quick_filter.dart';
+import '../models/epg_programme.dart';
+import '../services/epg_repository.dart';
+import '../services/playlist_source_store.dart';
+import '../widgets/channel_epg_panel.dart';
 
 class PlayerScreen extends StatefulWidget {
   final Channel? channel;
@@ -53,8 +57,56 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   String get sortArea => 'live';
   // A single media player survives Live TV channel changes.
   Channel? _activeChannel;
+  final EpgRepository _epgRepository = EpgRepository();
+  Future<List<EpgProgramme>>? _epgFuture;
+  String? _epgChannelKey;
+
+  void _prepareEpg() {
+    if (!widget.isLive || !mounted) return;
+    final channel = _activeChannel;
+    final channelId = channel?.epgChannelId;
+    if (channelId == null || channelId.isEmpty) return;
+    final key = '${_contentProvider.sourceKey}::$channelId';
+    if (_epgChannelKey == key) return;
+    _epgChannelKey = key;
+    _epgFuture = () async {
+      final config = await PlaylistSourceStore().read(_contentProvider.sourceKey);
+      final url = config?.epgUrl;
+      if (url == null || url.trim().isEmpty) return <EpgProgramme>[];
+      return _epgRepository.programmes(url, channelId);
+    }();
+  }
+
   List<Channel>? _indexedChannelList;
   Map<String, List<Channel>> _channelById = const {};
+  // Reuse the authorized channel list across channel zaps and overlay rebuilds.
+  // Every family/content notification invalidates this cache before checking
+  // revocation, so a changed child-profile rule cannot reuse stale access.
+  List<Channel>? _allowedLiveChannelCache;
+  List<Channel>? _allowedLiveChannelSource;
+  String? _allowedLiveChannelSourceKey;
+
+  void _invalidateAllowedLiveChannels() {
+    _allowedLiveChannelCache = null;
+    _allowedLiveChannelSource = null;
+    _allowedLiveChannelSourceKey = null;
+  }
+
+  List<Channel> _allowedLiveChannels() {
+    final library = context.read<ContentProvider>();
+    final family = context.read<FamilySessionProvider>();
+    if (!family.isReady) return const <Channel>[];
+    final source = library.channels;
+    final cached = _allowedLiveChannelCache;
+    if (cached != null && identical(source, _allowedLiveChannelSource) &&
+        library.sourceKey == _allowedLiveChannelSourceKey) return cached;
+    final allowed = source.where(_canPlayChannel).toList(growable: false);
+    _allowedLiveChannelSource = source;
+    _allowedLiveChannelSourceKey = library.sourceKey;
+    _allowedLiveChannelCache = allowed;
+    return allowed;
+  }
+
   Future<void> _openQueue = Future<void>.value();
   bool _playerDisposalStarted = false;
   late final TvPlaybackDiagnostics _tvDiagnostics;
@@ -126,6 +178,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   late final ContentProvider _contentProvider;
   bool _playbackRevoked = false;
   StreamSubscription? _posSub, _durSub, _playSub, _errorSub, _bufferingSub;
+  // Position callbacks may arrive dozens of times per second. A TV needs at
+  // most one UI progress update per second; the exact value is retained for
+  // progress saving and stall monitoring without rebuilding the video tree.
+  int _lastTvVodRenderedSecond = -1;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   bool _playing = false;
@@ -203,6 +259,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   DateTime? _lastPlaybackProgressAt;
   static const Duration _stallTimeout = Duration(seconds: 35);
   static const Duration _bufferingTimeout = Duration(seconds: 60);
+  // Only Android TV Media3: detect a native open that never reaches READY/BUFFERING.
+  static const Duration _tvMedia3StartupTimeout = Duration(seconds: 30);
+  DateTime? _tvMedia3AwaitingFirstStateAt;
+  // STATE_IDLE after a successful native callback must not hang forever.
+  static const Duration _tvMedia3IdleTimeout = Duration(seconds: 25);
+  DateTime? _tvMedia3IdleSince;
   bool _buffering = false;
   DateTime? _bufferingStartedAt;
   DateTime? _stablePlaybackStartedAt;
@@ -264,6 +326,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       _reconnecting = false;
       _automaticReconnects = 0;
     });
+    _epgChannelKey = null;
+    _epgFuture = null;
     _restorePlayerFocus();
     _updateHistory(_historyService.record('live', channel.id));
     unawaited(_loadStream());
@@ -333,6 +397,15 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         // Live playback has no seek bar. Keep stall detection current without
         // rebuilding the video surface and thousands of navigation entries.
         _position = p;
+      } else if (DeviceLayout.isTelevision && !widget.isLive) {
+        _position = p;
+        final second = p.inSeconds;
+        if (second != _lastTvVodRenderedSecond) {
+          _lastTvVodRenderedSecond = second;
+          // Avoid rebuilding the entire TV video/overlay tree while hidden.
+          // On opening controls, the latest _position is already available.
+          if (_showControls || _showHistory || _showDrawer) setState(() {});
+        }
       } else {
         setState(() => _position = p);
       }
@@ -445,7 +518,33 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   // Detect streams that silently stop advancing without emitting a player error.
   // Never reconnect deliberately paused playback or content near its end.
   void _checkPlaybackStall() {
-    if (!mounted || !_appInForeground || _streamFailed || _reconnecting) return;
+    if (!mounted || !_appInForeground || _streamFailed) return;
+    // A platform-view creation/open can stall without emitting any Media3
+    // event. Do not let _reconnecting suppress this startup watchdog.
+    if (_useTvMedia3 && _tvMedia3AwaitingFirstStateAt != null) {
+      if (DateTime.now().difference(_tvMedia3AwaitingFirstStateAt!) >=
+          _tvMedia3StartupTimeout) {
+        _tvMedia3AwaitingFirstStateAt = null;
+        _tvMedia3IdleSince = null;
+        _tvDiagnostics.failure('media3-startup-timeout');
+        _handlePlaybackFailure();
+      }
+      return;
+    }
+    // Media3 STATE_IDLE=1 is neither buffering nor playing. A decoder can
+    // remain idle without raising an error, especially after a failed source
+    // transition. Check this before the reconnect guard, as a retry can still
+    // be waiting for its first usable frame.
+    if (_useTvMedia3 && _tvMedia3IdleSince != null) {
+      if (DateTime.now().difference(_tvMedia3IdleSince!) >=
+          _tvMedia3IdleTimeout) {
+        _tvMedia3IdleSince = null;
+        _tvDiagnostics.failure('media3-idle-timeout');
+        _handlePlaybackFailure();
+      }
+      return;
+    }
+    if (_reconnecting) return;
     // A buffering player may report playing=false; check buffering first.
     if (_buffering) {
       final since = _bufferingStartedAt;
@@ -472,28 +571,37 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _handlePlaybackFailure();
   }
 
-  void _handlePlaybackFailure() {
+  void _handlePlaybackFailure({bool allowAutomaticRetry = true}) {
     // Native error events can arrive after permission revocation or while
     // a route is being disposed. Never schedule a retry in either state.
     if (!mounted || _playerDisposalStarted || _playbackRevoked ||
         !_isCurrentStreamAuthorized() || _streamFailed) return;
     // Do not schedule retries while the operating system suspends playback.
     if (!_appInForeground) return;
+    _tvMedia3AwaitingFirstStateAt = null;
+    _tvMedia3IdleSince = null;
     setState(() { _streamFailed = true; _reconnecting = false; _showControls = true; });
     _hideTimer?.cancel();
-    if (_automaticReconnects >= _maxAutomaticReconnects) return;
+    if (!allowAutomaticRetry ||
+        _automaticReconnects >= _maxAutomaticReconnects) return;
     _automaticReconnects++;
     final generation = _streamLoadGeneration;
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(Duration(seconds: 2 * _automaticReconnects), () {
-      if (!mounted || generation != _streamLoadGeneration) return;
-      _loadStream(reconnect: true);
+      if (!mounted || generation != _streamLoadGeneration ||
+          !_streamFailed || !_appInForeground || _playbackRevoked ||
+          !_isCurrentStreamAuthorized()) return;
+      _reconnectTimer = null;
+      unawaited(_loadStream(reconnect: true));
     });
   }
 
   void _onFamilySessionChanged() {
+    _invalidateAllowedLiveChannels();
     if (!mounted || _playbackRevoked) return;
     if (_isCurrentStreamAuthorized()) return;
+    _tvMedia3AwaitingFirstStateAt = null;
+    _tvMedia3IdleSince = null;
 
     // A revoked permission must stop an already opened media stream,
     // including while a reconnect or asynchronous open is in flight.
@@ -507,12 +615,16 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     final previousOpen = _openQueue;
     final revocation = Completer<void>();
     _openQueue = revocation.future;
+    // Remove the native view's playable URL immediately. Its own serialized
+    // method-channel queue orders stop after any already running open. Waiting
+    // for the unrelated Dart queue here would leave revoked TV video visible.
+    if (_useTvMedia3 && mounted) {
+      setState(() { _tvMedia3Url = ''; ++_tvMedia3Epoch; });
+    }
     unawaited(() async {
       try {
         await previousOpen.catchError((Object _) {});
-        if (_useTvMedia3) {
-          if (mounted) setState(() { _tvMedia3Url = ''; ++_tvMedia3Epoch; });
-        } else {
+        if (!_useTvMedia3) {
           await _player.stop();
         }
       } catch (_) {
@@ -651,20 +763,29 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     final permitted = !_playbackRevoked && _isCurrentStreamAuthorized();
 
     if (!permitted) {
+      // Fail closed immediately: callbacks or retry timers must not revive a
+      // stream while the queued native stop is still waiting for an open.
+      _playbackRevoked = true;
+      _reconnectTimer?.cancel();
+      _stallMonitor?.cancel();
+      _tvMedia3AwaitingFirstStateAt = null;
+      _tvMedia3IdleSince = null;
       ++_streamLoadGeneration;
       // Do not race a pending native Media.open with a permission stop.
       // Reserve the queue immediately, before the first await.
       final previousOpen = _openQueue;
       final stopping = Completer<void>();
       _openQueue = stopping.future;
+      // Native TV stop must be requested immediately. Waiting on the Dart
+      // media_kit queue can leave a revoked channel visible on Android TV.
+      // TvMedia3View serializes its own native open/stop operations.
+      if (_useTvMedia3 && mounted) {
+        setState(() { _tvMedia3Url = ''; ++_tvMedia3Epoch; });
+      }
       try {
         await previousOpen.catchError((Object _) {});
-        if (!_playerDisposalStarted) {
-          if (_useTvMedia3) {
-            if (mounted) setState(() { _tvMedia3Url = ''; ++_tvMedia3Epoch; });
-          } else {
-            await _player.stop();
-          }
+        if (!_playerDisposalStarted && !_useTvMedia3) {
+          await _player.stop();
         }
       } catch (_) {
         // An inaccessible stream must never be reopened on stop failure.
@@ -699,6 +820,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _lastObservedPlaybackPosition = Duration.zero;
     _buffering = false;
     _bufferingStartedAt = null;
+    _tvMedia3AwaitingFirstStateAt = null;
+    _tvMedia3IdleSince = null;
     _playing = false;
     if (mounted) setState(() { _reconnecting = reconnect; _streamFailed = false; });
     // Keep the queue reserved through post-open seeks and progress restore.
@@ -734,9 +857,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
           !_isCurrentStreamAuthorized()) return;
       if (_useTvMedia3) {
         // Media3 owns the only active decoder for Android TV Live.
-        // A new key recreates the native view even when retrying the same URL.
+        // Reopen the existing native player even when retrying the same URL.
         if (mounted && generation == _streamLoadGeneration &&
             _isCurrentStreamAuthorized()) {
+          // Arm only once the native view is requested; canceled on its first
+          // state callback, a newer open, permission loss or app suspension.
+          _tvMedia3AwaitingFirstStateAt = DateTime.now();
           setState(() {
             _tvMedia3Url = candidates.first;
             ++_tvMedia3Epoch;
@@ -813,9 +939,19 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   void _onTvMedia3State(int state, bool playing) {
+    // Native callbacks queued before Activity.pause must not revive playback
+    // state or consume recovery policy while Android owns the lifecycle.
     if (!_useTvMedia3 || !mounted || _playerDisposalStarted ||
-        _playbackRevoked || _tvMedia3Url.isEmpty) return;
+        !_appInForeground || _playbackRevoked || _tvMedia3Url.isEmpty) return;
+    _tvMedia3AwaitingFirstStateAt = null;
     // Media3 Player.STATE_BUFFERING=2, READY=3, ENDED=4.
+    // Do not restart the clock on repeated IDLE callbacks: that would allow
+    // an indefinitely idle decoder to escape the watchdog.
+    if (state == 1) {
+      _tvMedia3IdleSince ??= DateTime.now();
+    } else {
+      _tvMedia3IdleSince = null;
+    }
     final buffering = state == 2;
     _tvDiagnostics.buffering(buffering);
     _tvDiagnostics.playing(playing);
@@ -826,6 +962,14 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     } else {
       _bufferingStartedAt = null;
       if (playing) _stablePlaybackStartedAt ??= DateTime.now();
+    }
+    // A late READY/playing callback can arrive while a delayed retry is
+    // pending. Cancel that retry rather than tearing down recovered playback.
+    if (playing) {
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      _tvMedia3IdleSince = null;
+      _tvMedia3AwaitingFirstStateAt = null;
     }
     if (_playing != playing || (playing && (_streamFailed || _reconnecting))) {
       setState(() {
@@ -843,11 +987,27 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   void _onTvMedia3Error(String code) {
+    // Native callbacks queued before Activity.pause must not revive playback
+    // state or consume recovery policy while Android owns the lifecycle.
     if (!_useTvMedia3 || !mounted || _playerDisposalStarted ||
-        _playbackRevoked || _tvMedia3Url.isEmpty) return;
+        !_appInForeground || _playbackRevoked || _tvMedia3Url.isEmpty) return;
+    _tvMedia3AwaitingFirstStateAt = null;
     // Native side forwards error codes only, never credential-bearing URLs.
+    _tvMedia3IdleSince = null;
+    // These Media3 errors describe an unsupported source/codec or a blocked
+    // cleartext transport. Reopening the identical URL cannot fix them and
+    // needlessly churns the TV decoder. Keep manual retry available after
+    // the source or device configuration has been corrected.
+    const nonRecoverableCodes = <String>{
+      'ERROR_CODE_DECODING_FORMAT_UNSUPPORTED',
+      'ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED',
+      'ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED',
+      'ERROR_CODE_IO_CLEARTEXT_NOT_PERMITTED',
+    };
     _tvDiagnostics.failure('media3-error');
-    _handlePlaybackFailure();
+    _handlePlaybackFailure(
+      allowAutomaticRetry: !nonRecoverableCodes.contains(code),
+    );
   }
 
   void _retryPlaybackManually() {
@@ -858,7 +1018,18 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      final returningFromBackground = !_appInForeground;
       _appInForeground = true;
+      // The Android TV PlatformView stops and clears Media3 on Activity pause.
+      // Reopen its single native decoder only when returning from the
+      // background and only for a still-authorized, previously opened stream.
+      // Never restart a revoked or failed stream (manual retry remains possible).
+      if (returningFromBackground && _useTvMedia3 &&
+          !_playerDisposalStarted && !_playbackRevoked &&
+          _tvMedia3Url.isNotEmpty && !_streamFailed &&
+          _isCurrentStreamAuthorized()) {
+        unawaited(_loadStream(reconnect: true));
+      }
       // Background playback can pause position updates; reset stall clock.
       _lastPlaybackProgressAt = DateTime.now();
       _lastObservedPlaybackPosition = _position;
@@ -868,6 +1039,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     } else if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused || state == AppLifecycleState.detached) {
       _appInForeground = false;
+      _tvMedia3AwaitingFirstStateAt = null;
+      _tvMedia3IdleSince = null;
       _saveProgress();
     }
   }
@@ -922,15 +1095,16 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         return KeyEventResult.ignored;
       }
       if (_streamFailed || _reconnecting) return KeyEventResult.ignored;
-      // Live TV must never be paused by OK. Open its channel/category
-      // navigation instead; the recording control remains accessible.
+      // OK on the video surface opens the controls for all media types.
+      // Playback itself is changed only by the explicit play/pause control.
+      // In Live TV, a second OK on the surface may hide the overlay.
       if (widget.isLive) {
         _toggleLiveControls();
-        return KeyEventResult.handled;
+      } else {
+        if (!_showControls) setState(() => _showControls = true);
+        _focusFirstPlayerAction();
+        _startHideTimer();
       }
-      _playing ? _player.pause() : _player.play();
-      setState(() => _showControls = true);
-      _startHideTimer();
       return KeyEventResult.handled;
     }
     if ((key == LogicalKeyboardKey.arrowUp || key == LogicalKeyboardKey.arrowDown) &&
@@ -959,6 +1133,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _hideTimer?.cancel();
     setState(() => _showControls = !_showControls);
     if (_showControls) {
+      _prepareEpg();
       _focusFirstPlayerAction();
     } else {
       _restorePlayerFocus();
@@ -996,6 +1171,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   @override
   void dispose() {
+    _epgRepository.dispose();
     _familySession.removeListener(_onFamilySessionChanged);
     DownloadService.entries.removeListener(_onFamilySessionChanged);
     _contentProvider.removeListener(_onFamilySessionChanged);
@@ -1034,7 +1210,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         if (didPop) return;
         if (_showDrawer) { _closeNavigationDrawer(); return; }
         if (_showHistory) { _closeHistorySidebar(); return; }
-        if (_showControls) { setState(() => _showControls = false); return; }
+        if (_showControls) {
+          _hideTimer?.cancel();
+          setState(() => _showControls = false);
+          _restorePlayerFocus();
+          return;
+        }
         Navigator.of(context).pop();
       },
       child: Scaffold(
@@ -1050,7 +1231,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
             if (widget.isLive) {
               _toggleLiveControls();
             } else {
-              setState(() => _showControls = true);
+              if (!_showControls) setState(() => _showControls = true);
               _startHideTimer();
             }
           },
@@ -1059,8 +1240,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
               if (_useTvMedia3)
                 Positioned.fill(
                   child: TvMedia3View(
-                    key: ValueKey(_tvMedia3Epoch),
                     url: _tvMedia3Url,
+                    reloadToken: _tvMedia3Epoch,
                     onState: _onTvMedia3State,
                     onError: _onTvMedia3Error,
                   ),
@@ -1226,6 +1407,17 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
               ),
             ),
             const Spacer(),
+            if (widget.isLive && _epgFuture != null)
+              Flexible(child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: FutureBuilder<List<EpgProgramme>>(
+                  future: _epgFuture,
+                  builder: (context, snapshot) => snapshot.hasData
+                    ? ChannelEpgPanel(programmes: snapshot.data!)
+                    : const Text('EPG wird geladen …',
+                        style: TextStyle(color: Colors.white70)),
+                ),
+              )),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -1855,9 +2047,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   void _zapBy(int offset) {
-    final library = context.read<ContentProvider>();
     if (_activeChannel == null) return;
-    final allowed = library.channels.where(_canPlayChannel).toList(growable: false);
+    final allowed = _allowedLiveChannels();
     if (allowed.isEmpty) return;
     final current = allowed.indexWhere((c) => c.id == _activeChannel!.id);
     if (current < 0) return;
@@ -1924,8 +2115,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   Widget _buildLiveNavigationDrawer() {
     context.watch<FamilySessionProvider>();
-    final channels = context.watch<ContentProvider>().channels
-        .where(_canPlayChannel).toList(growable: false);
+    context.watch<ContentProvider>();
+    final channels = _allowedLiveChannels();
     final categories = channels.map((c) => c.category ?? '')
         .where((c) => c.isNotEmpty).toSet().toList()..sort();
     final visible = _visibleLiveChannels(channels);

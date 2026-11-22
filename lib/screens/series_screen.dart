@@ -88,33 +88,42 @@ class _SeriesScreenState extends State<SeriesScreen> with CategorySortState<Seri
     final width = MediaQuery.sizeOf(context).width;
     final wide = width >= 720;
 
+    // Keep category rows as the only actionable focus targets. The visual
+    // wrapper follows the actual ListTile focus and scrolls it into view.
     Widget categoryList({bool closeOnSelect = false}) => ListView(
       children: [
-        ListTile(
-          selected: selected == null,
-          leading: const Icon(Icons.apps),
-          title: Text(_seriesText(lang, 'all')),
-          trailing: Text('${all.length}'),
-          onTap: () {
-            setState(() => _category = null);
-            if (closeOnSelect) Navigator.of(context).pop();
-          },
-        ),
-        for (final category in categories)
-          ListTile(
-            selected: selected == category,
-            title: Tooltip(
-              message: category,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Text(category, softWrap: false, maxLines: 1),
-              ),
-            ),
-            trailing: Text('${categoryCounts[category] ?? 0}'),
+        TvCatalogFocus(
+          child: ListTile(
+            selected: selected == null,
+            leading: const Icon(Icons.apps),
+            title: Text(_seriesText(lang, 'all')),
+            trailing: Text('${all.length}'),
             onTap: () {
-              setState(() => _category = category);
+              setState(() => _category = null);
               if (closeOnSelect) Navigator.of(context).pop();
             },
+          ),
+        ),
+        for (final category in categories)
+          TvCatalogFocus(
+            key: ValueKey('series-category-$category'),
+            child: ListTile(
+              selected: selected == category,
+              title: Tooltip(
+                message: category,
+                child: Text(
+                  category,
+                  softWrap: false,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              trailing: Text('${categoryCounts[category] ?? 0}'),
+              onTap: () {
+                setState(() => _category = category);
+                if (closeOnSelect) Navigator.of(context).pop();
+              },
+            ),
           ),
       ],
     );

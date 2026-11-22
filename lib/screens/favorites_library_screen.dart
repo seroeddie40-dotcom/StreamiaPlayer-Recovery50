@@ -239,11 +239,26 @@ class _FavoritesLibraryScreenState
     if (id == null || type == null) return false;
     bool allowed(String? key) => family.canAccessCategory(
         sourceKey: content.sourceKey, contentType: type, categoryKey: key ?? '');
+    // Match the *first* catalog item, exactly as _openFavorite does.
+    // An allowed duplicate must never make a blocked first match visible.
     switch (type) {
-      case 'live': return content.channels.any((i) => i.id == id && allowed(i.categoryKey));
-      case 'vod': return content.vodItems.any((i) => i.id == id && allowed(i.categoryKey));
-      case 'series': return content.series.any((i) => i.id == id && allowed(i.categoryKey));
-      default: return false;
+      case 'live':
+        for (final item in content.channels) {
+          if (item.id == id) return allowed(item.categoryKey);
+        }
+        return false;
+      case 'vod':
+        for (final item in content.vodItems) {
+          if (item.id == id) return allowed(item.categoryKey);
+        }
+        return false;
+      case 'series':
+        for (final item in content.series) {
+          if (item.id == id) return allowed(item.categoryKey);
+        }
+        return false;
+      default:
+        return false;
     }
   }
 
