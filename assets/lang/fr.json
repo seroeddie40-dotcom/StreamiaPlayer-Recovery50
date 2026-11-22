@@ -267,6 +267,17 @@
   "clock_format": "Format horaire",
   "clock_24": "24 heures",
   "clock_12": "12 heures (AM/PM)",
-  "epg_no_data": "Aucune donnée EPG disponible",
-  "epg_no_description": "Aucune description disponible"
+  "family_selection_load_failed": "Impossible de charger les profils familiaux.",
+  "family_selection_manage_failed": "Impossible d’ouvrir la gestion familiale.",
+  "family_selection_child_failed": "Impossible d’activer le profil enfant. Réessayez.",
+  "family_selection_activation_failed": "Une erreur est survenue lors de l’activation du profil.",
+  "family_selection_pin_length": "Le code PIN parental doit contenir 6 à 10 chiffres.",
+  "family_selection_pin_title": "Saisir le code PIN parental",
+  "family_selection_unlock_adult": "Déverrouiller le profil adulte « {name} ».",
+  "family_selection_pin_hint": "Utilisez le code PIN parental commun à votre compte.",
+  "family_selection_pin_digits": "PIN saisi : {count} chiffres",
+  "family_selection_cancel": "Annuler",
+  "family_selection_welcome": "Bienvenue dans les profils familiaux",
+  "family_selection_empty": "Aucun profil familial pour le moment. Configurez le code PIN parental, puis créez le premier profil adulte.",
+  "family_selection_setup": "Configurer les profils familiaux"
 }

@@ -267,6 +267,17 @@
   "clock_format": "Формат времени",
   "clock_24": "24 часа",
   "clock_12": "12 часов (AM/PM)",
-  "epg_no_data": "Данные EPG недоступны",
-  "epg_no_description": "Описание отсутствует"
+  "family_selection_load_failed": "Не удалось загрузить семейные профили.",
+  "family_selection_manage_failed": "Не удалось открыть управление семьёй.",
+  "family_selection_child_failed": "Не удалось активировать детский профиль. Повторите попытку.",
+  "family_selection_activation_failed": "Ошибка при активации профиля.",
+  "family_selection_pin_length": "Родительский PIN должен содержать от 6 до 10 цифр.",
+  "family_selection_pin_title": "Введите родительский PIN",
+  "family_selection_unlock_adult": "Разблокировать взрослый профиль «{name}».",
+  "family_selection_pin_hint": "Используйте общий родительский PIN вашей учётной записи.",
+  "family_selection_pin_digits": "Введено цифр PIN: {count}",
+  "family_selection_cancel": "Отмена",
+  "family_selection_welcome": "Добро пожаловать в семейные профили",
+  "family_selection_empty": "Семейных профилей пока нет. Настройте родительский PIN, затем создайте первый взрослый профиль.",
+  "family_selection_setup": "Настроить семейные профили"
 }

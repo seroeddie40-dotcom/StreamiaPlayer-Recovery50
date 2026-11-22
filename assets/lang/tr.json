@@ -267,6 +267,17 @@
   "clock_format": "Saat biçimi",
   "clock_24": "24 saat",
   "clock_12": "12 saat (AM/PM)",
-  "epg_no_data": "EPG verisi mevcut değil",
-  "epg_no_description": "Açıklama mevcut değil"
+  "family_selection_load_failed": "Aile profilleri yüklenemedi.",
+  "family_selection_manage_failed": "Aile yönetimi açılamadı.",
+  "family_selection_child_failed": "Çocuk profili etkinleştirilemedi. Lütfen tekrar deneyin.",
+  "family_selection_activation_failed": "Profil etkinleştirilirken bir hata oluştu.",
+  "family_selection_pin_length": "Ebeveyn PIN kodu 6 ila 10 rakamdan oluşmalıdır.",
+  "family_selection_pin_title": "Ebeveyn PIN kodunu girin",
+  "family_selection_unlock_adult": "“{name}” yetişkin profilinin kilidini açın.",
+  "family_selection_pin_hint": "Hesabınızın ortak ebeveyn PIN kodunu kullanın.",
+  "family_selection_pin_digits": "Girilen PIN: {count} rakam",
+  "family_selection_cancel": "İptal",
+  "family_selection_welcome": "Aile profillerine hoş geldiniz",
+  "family_selection_empty": "Henüz aile profili yok. Ebeveyn PIN kodunuzu ayarlayın, ardından ilk yetişkin profilini oluşturun.",
+  "family_selection_setup": "Aile profillerini ayarla"
 }

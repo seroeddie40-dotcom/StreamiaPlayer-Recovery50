@@ -267,6 +267,17 @@
   "clock_format": "تنسيق الوقت",
   "clock_24": "24 ساعة",
   "clock_12": "12 ساعة (AM/PM)",
-  "epg_no_data": "لا تتوفر بيانات دليل البرامج",
-  "epg_no_description": "لا يتوفر وصف"
+  "family_selection_load_failed": "تعذر تحميل الملفات الشخصية العائلية.",
+  "family_selection_manage_failed": "تعذر فتح إدارة العائلة.",
+  "family_selection_child_failed": "تعذر تفعيل ملف الطفل. يُرجى المحاولة مرة أخرى.",
+  "family_selection_activation_failed": "حدث خطأ أثناء تفعيل الملف الشخصي.",
+  "family_selection_pin_length": "يجب أن يتكون رمز PIN للوالدين من 6 إلى 10 أرقام.",
+  "family_selection_pin_title": "أدخل رمز PIN للوالدين",
+  "family_selection_unlock_adult": "إلغاء قفل ملف البالغ «{name}».",
+  "family_selection_pin_hint": "استخدم رمز PIN المشترك للوالدين الخاص بحسابك.",
+  "family_selection_pin_digits": "رمز PIN المُدخل: {count} أرقام",
+  "family_selection_cancel": "إلغاء",
+  "family_selection_welcome": "مرحبًا بك في الملفات الشخصية العائلية",
+  "family_selection_empty": "لا توجد ملفات عائلية بعد. قم بإعداد رمز PIN للوالدين، ثم أنشئ أول ملف للبالغين.",
+  "family_selection_setup": "إعداد الملفات الشخصية العائلية"
 }

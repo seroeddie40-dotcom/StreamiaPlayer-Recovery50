@@ -267,6 +267,17 @@
   "clock_format": "Format czasu",
   "clock_24": "24 godziny",
   "clock_12": "12 godzin (AM/PM)",
-  "epg_no_data": "Brak danych EPG",
-  "epg_no_description": "Brak opisu"
+  "family_selection_load_failed": "Nie udało się wczytać profili rodzinnych.",
+  "family_selection_manage_failed": "Nie udało się otworzyć zarządzania rodziną.",
+  "family_selection_child_failed": "Nie udało się aktywować profilu dziecka. Spróbuj ponownie.",
+  "family_selection_activation_failed": "Wystąpił błąd podczas aktywacji profilu.",
+  "family_selection_pin_length": "Kod PIN rodzica musi mieć od 6 do 10 cyfr.",
+  "family_selection_pin_title": "Wpisz PIN rodzica",
+  "family_selection_unlock_adult": "Odblokuj profil dorosłego „{name}”.",
+  "family_selection_pin_hint": "Użyj wspólnego kodu PIN rodzica dla swojego konta.",
+  "family_selection_pin_digits": "Wprowadzony PIN: {count} cyfr",
+  "family_selection_cancel": "Anuluj",
+  "family_selection_welcome": "Witamy w profilach rodzinnych",
+  "family_selection_empty": "Nie ma jeszcze profili rodzinnych. Ustaw PIN rodzica, a następnie utwórz pierwszy profil dorosłego.",
+  "family_selection_setup": "Skonfiguruj profile rodzinne"
 }

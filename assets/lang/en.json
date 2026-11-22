@@ -267,6 +267,17 @@
   "clock_format": "Time format",
   "clock_24": "24 hours",
   "clock_12": "12 hours (AM/PM)",
-  "epg_no_data": "No EPG data available",
-  "epg_no_description": "No description available"
+  "family_selection_load_failed": "Family profiles could not be loaded.",
+  "family_selection_manage_failed": "Family management could not be opened.",
+  "family_selection_child_failed": "The child profile could not be activated. Please try again.",
+  "family_selection_activation_failed": "An error occurred while activating the profile.",
+  "family_selection_pin_length": "The parent PIN must contain 6 to 10 digits.",
+  "family_selection_pin_title": "Enter parent PIN",
+  "family_selection_unlock_adult": "Unlock adult profile “{name}”.",
+  "family_selection_pin_hint": "Use the shared parent PIN for your account.",
+  "family_selection_pin_digits": "PIN entered: {count} digits",
+  "family_selection_cancel": "Cancel",
+  "family_selection_welcome": "Welcome to family profiles",
+  "family_selection_empty": "No family profiles yet. Set up your parent PIN, then create the first adult profile.",
+  "family_selection_setup": "Set up family profiles"
 }
