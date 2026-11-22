@@ -1,0 +1,56 @@
+STREAMIA PLAYER – NUR ERSATZ- UND NEUE GITHUB-DATEIEN
+Phase 27.5 | 22.11.2026
+
+BASIS FÜR DEN VERGLEICH:
+StreamiaPlayer-Recovery50-main(20261121-133144).zip
+
+DIESE ZIP ENTHÄLT NICHT DAS GESAMTPROJEKT.
+Sie enthält nur Dateien, die gegenüber dieser Recovery50-Basis geändert
+oder neu hinzugekommen sind und zum App-Quellcode, Build oder den Dart-Tests gehören.
+Die Ordnerstruktur entspricht dem GitHub-Repository; es gibt keinen
+zusätzlichen StreamiaPlayer-Hauptordner im ZIP.
+
+HANDY / GITHUB:
+1. ZIP entpacken.
+2. Im richtigen GitHub-Repository und Branch jeden Dateipfad öffnen.
+3. BESTEHENDE Dateien durch den VOLLSTÄNDIGEN Inhalt ersetzen.
+4. NEUE Dateien in exakt demselben Verzeichnis anlegen.
+5. Die unveränderten Dateien im Repository NICHT löschen.
+6. Änderungen committen und den bestehenden Android-APK-Workflow starten.
+
+WICHTIG: Falls dein derzeitiger GitHub-Stand NICHT Recovery50 ist oder
+bereits neuere Änderungen enthält, darfst du die Dateien nicht blind
+überschreiben, sonst könnten spätere Änderungen verloren gehen.
+
+Empfohlene Commit-Nachricht:
+Phase 27.5: TV Media3, EPG, D-Pad und Profilberechtigungen konsolidieren
+
+TESTSTATUS: Statische Prüfungen zuvor bestanden; Flutter/Android-Build
+und echte TCL-/Nokia-Gerätetests stehen noch aus. Keine APK enthalten.
+
+GEÄNDERTE DATEIEN (10):
+.github/workflows/android-apk.yml
+android/app/src/main/kotlin/com/streamia/streamia_player/TvMedia3PlatformView.kt
+android/app/src/main/kotlin/com/streamia/streamia_player/TvMedia3Playback.kt
+lib/providers/family_session_provider.dart
+lib/screens/favorites_library_screen.dart
+lib/screens/live_tv_screen.dart
+lib/screens/player_screen.dart
+lib/screens/series_screen.dart
+lib/screens/vod_screen.dart
+lib/services/tv_media3_controller.dart
+
+NEUE DATEIEN (11):
+lib/models/epg_programme.dart
+lib/services/epg_repository.dart
+lib/services/epg_source_resolver.dart
+lib/services/xmltv_epg_parser.dart
+lib/widgets/channel_epg_panel.dart
+lib/widgets/epg_timeline.dart
+lib/widgets/mobile_epg_list.dart
+lib/widgets/tv_epg_timeline.dart
+lib/widgets/tv_long_ok_action.dart
+test/epg_repository_channel_match_test.dart
+test/xmltv_timestamp_validation_test.dart
+
+GELÖSCHTE DATEIEN: keine
