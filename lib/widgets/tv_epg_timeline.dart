@@ -233,19 +233,37 @@ class _TvEpgTimelineState extends State<TvEpgTimeline> {
             style: TextStyle(color: Colors.white70)),
       );
     }
-    return FocusTraversalGroup(child: Focus(onKeyEvent: _key, focusNode: _focus, child: Column(
+    // The parent player overlay may be shorter than the full guide on some
+    // Android TV resolutions. Keep a bounded scroll viewport instead of
+    // allowing the four timeline rows to overflow the available height.
+    return FocusTraversalGroup(child: Focus(
+      onKeyEvent: _key,
+      focusNode: _focus,
+      child: SingleChildScrollView(
+        primary: false,
+        physics: const ClampingScrollPhysics(),
+        child: Column(
       mainAxisSize: MainAxisSize.min,
       children: List.generate(4, (row) {
         final start = _windowStart.add(Duration(hours: row * 3));
         final end = start.add(const Duration(hours: 3));
         final visible = EpgTimeline.overlapping(items, start, end);
-        return SizedBox(height: 48, child: LayoutBuilder(builder: (context, box) => Stack(children: [
+        return SizedBox(height: 48, child: Column(children: [
+          SizedBox(height: 15, child: Row(children: List.generate(4, (tick) {
+            final hour = start.add(Duration(hours: tick));
+            final label = '${hour.hour.toString().padLeft(2, '0')}:00';
+            return Expanded(child: Text(label,
+              textAlign: tick == 3 ? TextAlign.right : TextAlign.left,
+              style: const TextStyle(fontSize: 10, color: Colors.white70),
+              maxLines: 1, overflow: TextOverflow.clip));
+          }))),
+          SizedBox(height: 33, child: LayoutBuilder(builder: (context, box) => Stack(children: [
           Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white.withOpacity(.12)))))),
           for (final item in visible)
             Positioned(
               left: box.maxWidth * EpgTimeline.clippedStart(item, start, end),
               width: box.maxWidth * EpgTimeline.clippedWidth(item, start, end),
-              top: 3, bottom: 3,
+              top: 1, bottom: 1,
               child: Builder(builder: (context) {
                 final selected = _hasFocus && items.indexOf(item) == _selected && _selectedRow == row;
                 final playing = item.isOnAir(now);
@@ -257,15 +275,16 @@ class _TvEpgTimelineState extends State<TvEpgTimeline> {
                       border: Border.all(color: selected ? Colors.white : Colors.white24, width: selected ? 2 : 1)),
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(item.title, maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white, fontSize: 12)),
+                        style: const TextStyle(color: Colors.white, fontSize: 11)),
                       if (playing) LinearProgressIndicator(value: item.progress(now), minHeight: 3,
                         color: Colors.cyanAccent, backgroundColor: Colors.black26),
                     ])),
                 );
               }),
             ),
-        ])));
+        ]))),
+        ]));
       }),
-    )));
+    ))));
   }
 }
