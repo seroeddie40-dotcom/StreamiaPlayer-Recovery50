@@ -1,4 +1,3 @@
-
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -40,6 +39,9 @@ class EpgRepository {
   static const failedFetchRetryDelay = Duration(seconds: 60);
   static const cacheTtl = Duration(minutes: 30);
   static const maxGuideBytes = 15 * 1024 * 1024;
+  // Tiny guides are cheap to parse directly; spawning an isolate for a few
+  // programmes adds overhead and can stall isolated Flutter test harnesses.
+  static const directParseLimit = 64 * 1024;
 
   /// Match XMLTV channel identifiers conservatively. First prefer an exact
   /// provider ID. A case/whitespace-insensitive match is only accepted if it
@@ -136,7 +138,9 @@ class EpgRepository {
     // XML parsing is CPU-heavy for large provider guides. Run it in a
     // background isolate so D-pad input and video overlays remain responsive.
     // The worker receives only XML text, never the authenticated guide URL.
-    final programmes = await compute(_parseGuideInBackground, xml);
+    final programmes = xml.length <= directParseLimit
+        ? XmltvEpgParser.parse(xml)
+        : await compute(_parseGuideInBackground, xml);
     // Do not overwrite a usable guide with an empty or malformed response.
     if (programmes.isNotEmpty) {
       _cache.remove(url);
