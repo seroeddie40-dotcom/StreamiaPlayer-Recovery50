@@ -4,37 +4,36 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/platform/device_layout.dart';
+import '../core/theme/app_theme.dart';
 
-/// Handles the TV remote's OK/Select key without triggering the short action
-/// after a completed long press. Place this *outside* the actual focusable
-/// card (InkWell, button, etc.). The card retains focus and touch behavior.
+/// A single D-pad focus target for catalogue cards on Android TV.
 ///
-/// This widget does not persist favorites itself. Its [onLongPress] callback
-/// must call the existing profile-scoped favorite service after access checks.
+/// A short OK opens the item; holding OK toggles its favorite state.
+/// Touch/mobile interaction remains owned by the wrapped child.
 class TvLongOkAction extends StatefulWidget {
   const TvLongOkAction({
     super.key,
     required this.child,
     required this.onShortPress,
     required this.onLongPress,
-    this.holdDuration = const Duration(seconds: 2),
   });
 
   final Widget child;
   final VoidCallback onShortPress;
   final VoidCallback onLongPress;
-  final Duration holdDuration;
 
   @override
   State<TvLongOkAction> createState() => _TvLongOkActionState();
 }
 
 class _TvLongOkActionState extends State<TvLongOkAction> {
+  static const _holdDuration = Duration(milliseconds: 650);
   Timer? _holdTimer;
   bool _pressed = false;
-  bool _longTriggered = false;
+  bool _longPressTriggered = false;
+  bool _focused = false;
 
-  bool _isOk(LogicalKeyboardKey key) =>
+  bool _isConfirmKey(LogicalKeyboardKey key) =>
       key == LogicalKeyboardKey.select ||
       key == LogicalKeyboardKey.enter ||
       key == LogicalKeyboardKey.numpadEnter ||
@@ -44,38 +43,37 @@ class _TvLongOkActionState extends State<TvLongOkAction> {
     _holdTimer?.cancel();
     _holdTimer = null;
     _pressed = false;
-    _longTriggered = false;
+    _longPressTriggered = false;
   }
 
-  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
-    if (!_isOk(event.logicalKey)) return KeyEventResult.ignored;
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (!_isConfirmKey(event.logicalKey)) return KeyEventResult.ignored;
 
-    if (event is KeyDownEvent) {
-      if (!_pressed) {
-        _pressed = true;
-        _longTriggered = false;
-        _holdTimer?.cancel();
-        _holdTimer = Timer(widget.holdDuration, () {
-          if (!mounted || !_pressed || !node.hasFocus) return;
-          _longTriggered = true;
-          widget.onLongPress();
-        });
+    if (event is KeyDownEvent && !_pressed) {
+      _pressed = true;
+      _longPressTriggered = false;
+      _holdTimer?.cancel();
+      _holdTimer = Timer(_holdDuration, () {
+        if (!mounted || !_pressed || !_focused ||
+            ModalRoute.of(context)?.isCurrent != true) return;
+        _longPressTriggered = true;
+        widget.onLongPress();
+      });
+      return KeyEventResult.handled;
+    }
+    if (event is KeyRepeatEvent || (event is KeyDownEvent && _pressed)) {
+      return KeyEventResult.handled;
+    }
+    if (event is KeyUpEvent) {
+      if (!_pressed) return KeyEventResult.handled;
+      final wasLongPress = _longPressTriggered;
+      _cancelPress();
+      if (!wasLongPress && mounted && _focused &&
+          ModalRoute.of(context)?.isCurrent == true) {
+        widget.onShortPress();
       }
       return KeyEventResult.handled;
     }
-
-    if (event is KeyRepeatEvent) {
-      return KeyEventResult.handled;
-    }
-
-    if (event is KeyUpEvent) {
-      if (!_pressed) return KeyEventResult.handled;
-      final shouldOpen = !_longTriggered;
-      _cancelPress();
-      if (shouldOpen) widget.onShortPress();
-      return KeyEventResult.handled;
-    }
-
     return KeyEventResult.ignored;
   }
 
@@ -89,14 +87,23 @@ class _TvLongOkActionState extends State<TvLongOkAction> {
   Widget build(BuildContext context) {
     if (!DeviceLayout.isTelevision) return widget.child;
     return Focus(
-      canRequestFocus: true,
-      skipTraversal: false,
-      descendantsAreFocusable: false,
+      onKeyEvent: _onKey,
       onFocusChange: (focused) {
         if (!focused) _cancelPress();
+        if (mounted && _focused != focused) {
+          setState(() => _focused = focused);
+        }
       },
-      onKeyEvent: _onKeyEvent,
-      child: widget.child,
+      child: Container(
+        foregroundDecoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: _focused ? AppTheme.electricBlue : Colors.transparent,
+            width: 3,
+          ),
+        ),
+        child: widget.child,
+      ),
     );
   }
 }
