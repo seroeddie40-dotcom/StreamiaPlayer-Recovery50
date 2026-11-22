@@ -1,0 +1,12 @@
+Phase 27.5 – Fehlende GitHub-Actions-Pruefskripte
+
+Diese 3 Dateien fehlen in der hochgeladenen Recovery50-ZIP vom 22.11.2026.
+Alle Dateien unter ihren originalen GitHub-Pfaden anlegen:
+tool/check_phase27_5_profile_revocation_decoder_chain.py
+tool/check_phase27_5_series_fast_switch.py
+tool/check_phase27_5_single_decoder_owner.py
+
+Andere Dateien nicht ersetzen.
+Commit: Phase 27.5: Fehlende TV Regressionstests fuer GitHub Actions hinzufuegen
+
+Alle 5 Workflow-Pruefskripte liefen mit den Dateien aus der hochgeladenen Recovery50-ZIP erfolgreich. Kein Flutter-/APK-Build in dieser Umgebung.
