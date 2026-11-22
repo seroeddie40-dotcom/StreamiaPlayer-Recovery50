@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
 import android.os.Bundle
+import android.net.Uri
 import android.view.View
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
@@ -41,6 +42,19 @@ private class TvMedia3PlatformView(
     // Identifies the current stream across queued platform-channel messages.
     private var streamGeneration = 0L
 
+    // Media3 decoders are scarce on Android TV. The catalogue preview and the
+    // fullscreen player must never retain two active video decoders. Platform
+    // views can coexist briefly during Flutter route transitions.
+    private companion object {
+        var activeOwner: TvMedia3PlatformView? = null
+    }
+
+    private fun relinquishDecoder() {
+        streamGeneration++
+        playback.stop()
+        if (activeOwner === this) activeOwner = null
+    }
+
     // Flutter's PlatformView.dispose() is not guaranteed to run when Android Home
     // sends the hosting Activity into the background. Stop native playback there.
     // Android normally calls onPause followed by onStop. Invalidate the
@@ -48,8 +62,7 @@ private class TvMedia3PlatformView(
     private fun suspendPlaybackForBackground() {
         if (disposed || hostPaused) return
         hostPaused = true
-        streamGeneration++
-        playback.stop()
+        relinquishDecoder()
     }
 
     private val lifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
@@ -74,12 +87,12 @@ private class TvMedia3PlatformView(
         application.registerActivityLifecycleCallbacks(lifecycleCallbacks)
         channel.setMethodCallHandler(this)
         playback.onPlaybackState = { state, playing ->
-            if (!disposed) {
+            if (!disposed && !hostPaused && activeOwner === this) {
                 channel.invokeMethod("state", mapOf("state" to state, "playing" to playing, "generation" to streamGeneration))
             }
         }
         playback.onPlaybackError = { code ->
-            if (!disposed) channel.invokeMethod("error", mapOf("code" to code, "generation" to streamGeneration))
+            if (!disposed && !hostPaused && activeOwner === this) channel.invokeMethod("error", mapOf("code" to code, "generation" to streamGeneration))
         }
     }
 
@@ -93,9 +106,17 @@ private class TvMedia3PlatformView(
         when (call.method) {
             "open" -> {
                 val url = call.argument<String>("url")
-                if (url.isNullOrBlank() ||
-                    !(url.startsWith("http://", true) || url.startsWith("https://", true))) {
-                    result.error("INVALID_URL", "Expected an HTTP(S) stream URL", null)
+                // Validate the URI structurally, not just by its prefix.
+                // A malformed replacement must not leave this view's previous
+                // stream running in the background. Never log credential URLs.
+                val parsed = try { if (url.isNullOrBlank()) null else Uri.parse(url) }
+                    catch (_: Exception) { null }
+                val validUrl = parsed != null &&
+                    (parsed.scheme.equals("http", true) || parsed.scheme.equals("https", true)) &&
+                    !parsed.host.isNullOrBlank()
+                if (!validUrl) {
+                    if (activeOwner === this) relinquishDecoder()
+                    result.error("INVALID_URL", "Expected an HTTP(S) stream URL with a host", null)
                     return
                 }
                 if (hostPaused || (hostActivity != null && !hostActivityIsAlive())) {
@@ -103,14 +124,28 @@ private class TvMedia3PlatformView(
                     return
                 }
                 try {
+                    // Stop the previous view synchronously on the Android main
+                    // thread before opening this view's stream. This also
+                    // protects against delayed PlatformView disposal.
+                    if (activeOwner !== this) activeOwner?.relinquishDecoder()
+                    activeOwner = this
                     streamGeneration++
                     playback.open(url)
                     result.success(streamGeneration)
                 } catch (_: Exception) {
+                    relinquishDecoder()
                     result.error("OPEN_FAILED", "Native player could not open stream", null)
                 }
             }
             "snapshot" -> {
+                // A previous PlatformView can remain mounted briefly after a
+                // fullscreen handoff. Never report its stopped state as the
+                // current stream's state, even when Flutter still has its
+                // earlier generation acknowledgement.
+                if (hostPaused || activeOwner !== this) {
+                    result.error("STALE_OWNER", "TV playback ownership changed", null)
+                    return
+                }
                 // Flutter may miss synchronous state changes during open().
                 // A generation-tagged snapshot reconciles the first state.
                 val (state, playing) = playback.playbackSnapshot()
@@ -121,8 +156,7 @@ private class TvMedia3PlatformView(
                 ))
             }
             "stop" -> {
-                streamGeneration++
-                playback.stop()
+                relinquishDecoder()
                 result.success(null)
             }
             else -> result.notImplemented()
@@ -139,6 +173,7 @@ private class TvMedia3PlatformView(
         disposed = true
         application.unregisterActivityLifecycleCallbacks(lifecycleCallbacks)
         channel.setMethodCallHandler(null)
+        if (activeOwner === this) activeOwner = null
         playback.release()
     }
 
