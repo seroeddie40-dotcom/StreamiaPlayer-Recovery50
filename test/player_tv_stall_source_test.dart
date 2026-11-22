@@ -113,7 +113,7 @@ void main() {
 
   test('late native errors cannot retry revoked or disposed playback', () {
     final source = File('lib/screens/player_screen.dart').readAsStringSync();
-    final start = source.indexOf('void _handlePlaybackFailure()');
+    final start = source.indexOf('void _handlePlaybackFailure(');
     final end = source.indexOf('void _onFamilySessionChanged()', start);
     expect(start, greaterThanOrEqualTo(0));
     expect(end, greaterThan(start));
