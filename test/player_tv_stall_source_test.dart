@@ -5,7 +5,7 @@ void main() {
   test('buffering timeout remains active even if playing becomes false', () {
     final source = File('lib/screens/player_screen.dart').readAsStringSync();
     final start = source.indexOf('void _checkPlaybackStall()');
-    final end = source.indexOf('void _handlePlaybackFailure()', start);
+    final end = source.indexOf('void _handlePlaybackFailure(', start);
     expect(start, greaterThanOrEqualTo(0));
     expect(end, greaterThan(start));
     final monitor = source.substring(start, end);
@@ -86,6 +86,13 @@ void main() {
         loader.indexOf('if (!permitted) {'), loader.indexOf('final url = _currentUrl;'));
     expect(unauthorized, contains('final previousOpen = _openQueue;'));
     expect(unauthorized, contains('_openQueue = stopping.future;'));
+    // Native Media3 is stopped immediately through its platform view, while
+    // media_kit operations are still serialized after any pending open.
+    expect(unauthorized, contains('if (_useTvMedia3 && mounted) {'));
+    expect(unauthorized, contains("_tvMedia3Url = ''; ++_tvMedia3Epoch;"));
+    expect(unauthorized.indexOf("_tvMedia3Url = ''; ++_tvMedia3Epoch;"),
+        lessThan(unauthorized.indexOf('await previousOpen.catchError')));
+    expect(unauthorized, contains('if (!_playerDisposalStarted && !_useTvMedia3) {'));
     expect(unauthorized.indexOf('await previousOpen.catchError'),
         lessThan(unauthorized.indexOf('await _player.stop()')));
     expect(unauthorized, contains('stopping.complete();'));
