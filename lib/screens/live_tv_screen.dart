@@ -67,7 +67,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
       });
     }
     if (_previewSuspended || !DeviceLayout.isTelevision) return;
-    _previewDebounce = Timer(const Duration(milliseconds: 450), () {
+    _previewDebounce = Timer(const Duration(milliseconds: 90), () {
       if (!mounted || sequence != _previewSequence || _previewSuspended ||
           ModalRoute.of(context)?.isCurrent != true ||
           !identical(_tvSelectedChannel, channel)) return;
