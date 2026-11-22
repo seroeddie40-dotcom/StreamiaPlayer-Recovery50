@@ -36,19 +36,34 @@ private class TvMedia3PlatformView(
     private val hostActivity: Activity? = findActivity(context)
     private val application = context.applicationContext as Application
     private var disposed = false
+    // Reject queued Flutter opens after Android has paused the hosting Activity.
+    private var hostPaused = false
+    // Identifies the current stream across queued platform-channel messages.
+    private var streamGeneration = 0L
 
     // Flutter's PlatformView.dispose() is not guaranteed to run when Android Home
     // sends the hosting Activity into the background. Stop native playback there.
+    // Android normally calls onPause followed by onStop. Invalidate the
+    // generation and stop the decoder only once per background transition.
+    private fun suspendPlaybackForBackground() {
+        if (disposed || hostPaused) return
+        hostPaused = true
+        streamGeneration++
+        playback.stop()
+    }
+
     private val lifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityPaused(activity: Activity) {
-            if (activity === hostActivity && !disposed) playback.stop()
+            if (activity === hostActivity) suspendPlaybackForBackground()
         }
         override fun onActivityStopped(activity: Activity) {
-            if (activity === hostActivity && !disposed) playback.stop()
+            if (activity === hostActivity) suspendPlaybackForBackground()
         }
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
         override fun onActivityStarted(activity: Activity) = Unit
-        override fun onActivityResumed(activity: Activity) = Unit
+        override fun onActivityResumed(activity: Activity) {
+            if (activity === hostActivity && !disposed) hostPaused = false
+        }
         override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) = Unit
         override fun onActivityDestroyed(activity: Activity) {
             if (activity === hostActivity && !disposed) dispose()
@@ -60,11 +75,11 @@ private class TvMedia3PlatformView(
         channel.setMethodCallHandler(this)
         playback.onPlaybackState = { state, playing ->
             if (!disposed) {
-                channel.invokeMethod("state", mapOf("state" to state, "playing" to playing))
+                channel.invokeMethod("state", mapOf("state" to state, "playing" to playing, "generation" to streamGeneration))
             }
         }
         playback.onPlaybackError = { code ->
-            if (!disposed) channel.invokeMethod("error", mapOf("code" to code))
+            if (!disposed) channel.invokeMethod("error", mapOf("code" to code, "generation" to streamGeneration))
         }
     }
 
@@ -83,18 +98,30 @@ private class TvMedia3PlatformView(
                     result.error("INVALID_URL", "Expected an HTTP(S) stream URL", null)
                     return
                 }
-                if (hostActivity != null && !hostActivityHasFocus()) {
+                if (hostPaused || (hostActivity != null && !hostActivityIsAlive())) {
                     result.error("APP_BACKGROUND", "Cannot start TV playback while app is paused", null)
                     return
                 }
                 try {
+                    streamGeneration++
                     playback.open(url)
-                    result.success(null)
+                    result.success(streamGeneration)
                 } catch (_: Exception) {
                     result.error("OPEN_FAILED", "Native player could not open stream", null)
                 }
             }
+            "snapshot" -> {
+                // Flutter may miss synchronous state changes during open().
+                // A generation-tagged snapshot reconciles the first state.
+                val (state, playing) = playback.playbackSnapshot()
+                result.success(mapOf(
+                    "state" to state,
+                    "playing" to playing,
+                    "generation" to streamGeneration
+                ))
+            }
             "stop" -> {
+                streamGeneration++
                 playback.stop()
                 result.success(null)
             }
@@ -104,7 +131,7 @@ private class TvMedia3PlatformView(
 
     // Window focus is not a reliable indication of lifecycle (dialogs may take
     // focus), so only check whether the Activity is finishing/destroyed here.
-    private fun hostActivityHasFocus(): Boolean =
+    private fun hostActivityIsAlive(): Boolean =
         hostActivity?.let { !it.isFinishing && !it.isDestroyed } ?: true
 
     override fun dispose() {
