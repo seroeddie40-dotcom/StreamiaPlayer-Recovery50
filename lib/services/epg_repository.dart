@@ -104,34 +104,42 @@ class EpgRepository {
     // Even rejected responses own a network stream. Cancel it before returning
     // so an invalid/oversized guide cannot occupy a connection in the shared
     // HTTP client while the user is watching TV.
-    final iterator = StreamIterator<List<int>>(response.stream);
     final bytes = BytesBuilder(copy: false);
+    // Listen to the body directly rather than suspending and resuming a
+    // StreamIterator between chunks. This also makes stream completion and
+    // cancellation explicit for test clients and real network responses.
+    final finished = Completer<void>();
+    var tooLarge = false;
+    final subscription = response.stream.listen(
+      (chunk) {
+        if (finished.isCompleted) return;
+        if (bytes.length + chunk.length > maxGuideBytes) {
+          tooLarge = true;
+          finished.complete();
+          return;
+        }
+        bytes.add(chunk);
+      },
+      onError: (Object error, StackTrace stack) {
+        if (!finished.isCompleted) finished.completeError(error, stack);
+      },
+      onDone: () {
+        if (!finished.isCompleted) finished.complete();
+      },
+      cancelOnError: true,
+    );
     try {
       if (response.statusCode != 200 ||
           (response.contentLength != null &&
               response.contentLength! > maxGuideBytes)) {
         return const <EpgProgramme>[];
       }
-
-      // A provider sending tiny chunks indefinitely must not hold a connection.
-      // Bound the entire response body, not just idle time between chunks.
-      final deadline = DateTime.now().add(const Duration(seconds: 30));
-      while (true) {
-        final remaining = deadline.difference(DateTime.now());
-        if (remaining <= Duration.zero) {
-          throw TimeoutException('XMLTV response exceeded total download time');
-        }
-        final hasChunk = await iterator.moveNext().timeout(remaining);
-        if (!hasChunk) break;
-        final chunk = iterator.current;
-        if (bytes.length + chunk.length > maxGuideBytes) {
-          // Cancel the HTTP stream immediately; never buffer an oversized guide.
-          return const <EpgProgramme>[];
-        }
-        bytes.add(chunk);
-      }
+      // Timeout applies to the whole response body, not to each chunk.
+      await finished.future.timeout(const Duration(seconds: 30));
+      if (tooLarge) return const <EpgProgramme>[];
     } finally {
-      await iterator.cancel();
+      // Cancel even on a rejected response, oversize response or timeout.
+      await subscription.cancel();
     }
 
     final xml = utf8.decode(bytes.takeBytes(), allowMalformed: true);
