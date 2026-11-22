@@ -88,16 +88,26 @@ class _TvPinKeypadState extends State<TvPinKeypad> {
   Widget build(BuildContext context) {
     const labels = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', '✓'];
     final colors = Theme.of(context).colorScheme;
+    // A fixed-height, screen-relative keypad avoids a GridView requesting its
+    // full intrinsic height inside short TV dialogs (landscape PIN screens).
+    // The surrounding dialog can still scroll if its other content is tall.
+    final viewport = MediaQuery.sizeOf(context);
+    final keypadWidth = (viewport.width * 0.72).clamp(180.0, 340.0).toDouble();
+    final keypadHeight = (viewport.height * 0.32).clamp(112.0, 236.0).toDouble();
+    final cellWidth = (keypadWidth - 16) / 3;
+    final cellHeight = (keypadHeight - 24) / 4;
     return FocusTraversalGroup(
       policy: OrderedTraversalPolicy(),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 340),
+      child: SizedBox(
+        width: keypadWidth,
+        height: keypadHeight,
         child: GridView.builder(
-          shrinkWrap: true,
+          primary: false,
+          shrinkWrap: false,
           physics: const NeverScrollableScrollPhysics(),
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 3,
-            childAspectRatio: 1.85,
+            childAspectRatio: cellWidth / cellHeight,
             mainAxisSpacing: 8,
             crossAxisSpacing: 8,
           ),
@@ -153,6 +163,7 @@ class _TvPinKeypadState extends State<TvPinKeypad> {
                         child: Text(
                           index == 11 ? widget.submitLabel : labels[index],
                           style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontSize: cellHeight < 37 ? 17 : 22,
                             color: focused ? Colors.white : null,
                             fontWeight: FontWeight.w600,
                           ),
