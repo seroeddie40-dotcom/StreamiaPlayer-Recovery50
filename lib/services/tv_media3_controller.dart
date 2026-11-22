@@ -110,7 +110,9 @@ class _TvMedia3ViewState extends State<TvMedia3View> {
         // owning screen reopens the current stream on lifecycle resume.
         // Reporting it as a playback failure would consume retry attempts
         // and could leave the player stuck in its manual-retry state.
-        if (e.code != 'APP_BACKGROUND') {
+        if (e.code != 'APP_BACKGROUND' &&
+            e.code != 'STALE_OWNER' &&
+            e.code != 'DISPOSED') {
           widget.onError?.call(e.code);
         }
       }
