@@ -1350,7 +1350,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       if (!mounted || !_showControls || _showDrawer || _showHistory ||
           navigationEpoch != _navigationScrollEpoch) return;
       if (widget.isLive) {
-        _navigationButtonFocus.requestFocus();
+        _recordButtonFocus.requestFocus();
       } else {
         _subtitleButtonFocus.requestFocus();
       }
@@ -1592,7 +1592,19 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                    ),
                    const ProfileClock(onVideo: true),
                    if (widget.isLive)
-                     ValueListenableBuilder<RecordingStatus>(
+                     Focus(
+                       onKeyEvent: (node, event) {
+                         if (DeviceLayout.isTelevision &&
+                             event is KeyDownEvent &&
+                             (event.logicalKey == LogicalKeyboardKey.arrowDown ||
+                              event.logicalKey == LogicalKeyboardKey.arrowUp) &&
+                             _tvEpgFocus.canRequestFocus) {
+                           _tvEpgFocus.requestFocus();
+                           return KeyEventResult.handled;
+                         }
+                         return KeyEventResult.ignored;
+                       },
+                       child: ValueListenableBuilder<RecordingStatus>(
                        valueListenable: RecordingService.status,
                        builder: (context, recording, _) {
                          final busy = recording.isBusy;
@@ -1639,7 +1651,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                            ),
                          );
                        },
-                     ),
+                     )),
                 ],
               ),
             ),
@@ -1689,7 +1701,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                         focusNode: _tvEpgFocus,
                         onExitDown: () {
                           if (mounted && _showControls && !_showDrawer) {
-                            _navigationButtonFocus.requestFocus();
+                            _recordButtonFocus.requestFocus();
                           }
                         },
                       );
@@ -1725,6 +1737,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                   ],
                 ),
               ),
+            if (!widget.isLive || !DeviceLayout.isTelevision)
             Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
@@ -1748,16 +1761,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                         focusNode: _navigationButtonFocus,
                         onTap: _openNavigationDrawer,
                         child: _pill(widget.isLive ? AppLocalizations.of(context).t('player_channels_folders') : AppLocalizations.of(context).t('player_episodes'), Icons.list),
-                      ),
-                    ),
-                  if (widget.isLive && DeviceLayout.isTelevision)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 12),
-                      child: InkWell(
-                        focusColor: AppTheme.electricBlue.withOpacity(0.38),
-                        borderRadius: BorderRadius.circular(12),
-                        onTap: _showTvPlaybackDiagnostics,
-                        child: _pill('Diagnose', Icons.monitor_heart_outlined),
                       ),
                     ),
                   if (widget.isLive) ...[
