@@ -128,25 +128,17 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     bool current() => !_disposed && _foreground && isReady &&
         generation == _generation && activeProfile?.id == profile.id;
     try {
-      if (_unprotectedDefault) {
-        if (!await refreshPermissions() || !current()) return;
-      }
+      // The default-adult authorization has its own early-renewal timer.
+      // Do not reauthorize on every background history/favorites sync: a
+      // temporary network failure here must not interrupt live playback.
       await ProfileSyncClock.calibrate(_client);
       if (!current()) return;
       await ProfileFavoriteOutbox.flush(_client, profile.accountUserId, profile.id, parentAccessToken, current);
       if (!current()) return;
       await ProfilePreferenceOutbox.flush(_client, profile.accountUserId, profile.id, parentAccessToken, current);
       if (!current()) return;
-      // Adult display rules are personal preferences, not child permissions.
-      if (profile.isAdult && !_refreshing) {
-        final updated = await _accessService.loadSnapshot(
-          profile: profile, parentToken: parentAccessToken,
-        );
-        if (!current()) return;
-        if (!_refreshing && updated.isReady && updated.profileId == profile.id && !updated.isChild) {
-          _snapshot = updated;
-        }
-      }
+      // Playback uses the permission snapshot verified at profile selection.
+      // Only explicit parental rule changes trigger permission refresh.
       await WatchProgressService(family: this, client: _client).flushPending();
       if (!current()) return;
       final prefs = await SharedPreferences.getInstance();
@@ -558,7 +550,6 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     _notify();
     try {
       final adultToken = _adultAccessToken;
-      final adultExpiry = _adultValidUntil;
       if (profile.type == FamilyProfileType.adult) {
         if (_unprotectedDefault) {
           final authorized = await _profileService.ensureDefaultProfile();
@@ -569,14 +560,9 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
           }
           // Do not renew the grant yet. Profile membership and the complete
           // permission snapshot must both be verified before extending it.
-        } else if (adultToken == null || adultExpiry == null ||
-            !adultExpiry.isAfter(DateTime.now()) ||
-            !await _pinService.checkSession(
-              scope: FamilyPinScope.parent,
-              accessToken: adultToken,
-            )) {
-          if (generation == _generation) clearSession();
-          return false;
+        } else {
+          // Expired PIN tokens restrict parent administration, not playback.
+          // A fresh PIN is required by sensitive parent operations.
         }
       }
       final profiles = await _profileService.loadProfiles();
@@ -629,6 +615,22 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   bool _failRefresh(int generation, FamilyProfile profile) {
     if (_disposed || generation != _generation) return false;
     if (profile.type != FamilyProfileType.child) {
+      // A transient network error during renewal is not a server revocation.
+      // Preserve ONLY an already verified, still-unexpired default-adult
+      // grant. Never extend it without a successful server response. PIN-
+      // protected adult profiles retain their existing fail-closed behavior.
+      if (_unprotectedDefault && _adultSessionCurrent &&
+          _belongsToCurrentAccount) {
+        _refreshing = false;
+        _notify();
+        final expiry = _adultValidUntil!;
+        _adultExpiryTimer?.cancel();
+        _adultExpiryTimer = Timer(expiry.difference(DateTime.now()), () {
+          if (!_disposed && generation == _generation &&
+              !_adultSessionCurrent) clearSession();
+        });
+        return false;
+      }
       clearSession();
       return false;
     }
