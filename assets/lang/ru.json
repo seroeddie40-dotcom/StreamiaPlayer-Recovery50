@@ -267,6 +267,8 @@
   "clock_format": "Формат времени",
   "clock_24": "24 часа",
   "clock_12": "12 часов (AM/PM)",
+  "epg_no_data": "Данные EPG недоступны",
+  "epg_no_description": "Описание отсутствует",
   "family_selection_load_failed": "Не удалось загрузить семейные профили.",
   "family_selection_manage_failed": "Не удалось открыть управление семьёй.",
   "family_selection_child_failed": "Не удалось активировать детский профиль. Повторите попытку.",

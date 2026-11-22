@@ -267,6 +267,8 @@
   "clock_format": "Format horaire",
   "clock_24": "24 heures",
   "clock_12": "12 heures (AM/PM)",
+  "epg_no_data": "Aucune donnée EPG disponible",
+  "epg_no_description": "Aucune description disponible",
   "family_selection_load_failed": "Impossible de charger les profils familiaux.",
   "family_selection_manage_failed": "Impossible d’ouvrir la gestion familiale.",
   "family_selection_child_failed": "Impossible d’activer le profil enfant. Réessayez.",

@@ -267,6 +267,8 @@
   "clock_format": "Saat biçimi",
   "clock_24": "24 saat",
   "clock_12": "12 saat (AM/PM)",
+  "epg_no_data": "EPG verisi mevcut değil",
+  "epg_no_description": "Açıklama mevcut değil",
   "family_selection_load_failed": "Aile profilleri yüklenemedi.",
   "family_selection_manage_failed": "Aile yönetimi açılamadı.",
   "family_selection_child_failed": "Çocuk profili etkinleştirilemedi. Lütfen tekrar deneyin.",

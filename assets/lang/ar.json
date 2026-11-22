@@ -267,6 +267,8 @@
   "clock_format": "تنسيق الوقت",
   "clock_24": "24 ساعة",
   "clock_12": "12 ساعة (AM/PM)",
+  "epg_no_data": "لا تتوفر بيانات دليل البرامج",
+  "epg_no_description": "لا يتوفر وصف",
   "family_selection_load_failed": "تعذر تحميل الملفات الشخصية العائلية.",
   "family_selection_manage_failed": "تعذر فتح إدارة العائلة.",
   "family_selection_child_failed": "تعذر تفعيل ملف الطفل. يُرجى المحاولة مرة أخرى.",
