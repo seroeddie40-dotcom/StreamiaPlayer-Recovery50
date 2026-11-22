@@ -1,3 +1,4 @@
+
 package com.streamia.streamia_player
 
 import android.app.Activity
@@ -114,7 +115,7 @@ private class TvMedia3PlatformView(
                 val validUrl = parsed != null &&
                     (parsed.scheme.equals("http", true) || parsed.scheme.equals("https", true)) &&
                     !parsed.host.isNullOrBlank()
-                if (!validUrl) {
+                if (!validUrl || url == null) {
                     if (activeOwner === this) relinquishDecoder()
                     result.error("INVALID_URL", "Expected an HTTP(S) stream URL with a host", null)
                     return
