@@ -1,6 +1,9 @@
+import 'dart:async';
 import '../widgets/profile_clock.dart';
 import '../services/epg_repository.dart';
+import '../services/tv_media3_controller.dart';
 import '../services/playlist_source_store.dart';
+import '../services/epg_source_resolver.dart';
 import '../models/epg_programme.dart';
 import '../widgets/tv_epg_timeline.dart';
 import '../widgets/category_sort_control.dart';
@@ -9,6 +12,7 @@ import '../services/category_sort_service.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/supabase_config.dart';
@@ -42,11 +46,91 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
   static const _other = '__streamia_other__';
   final _searchController = TextEditingController();
   final _searchFocus = FocusNode();
+  final ScrollController _tvChannelScroll = ScrollController();
+  bool _tvMovingFocus = false;
+  Timer? _previewDebounce;
+  Channel? _previewChannel;
+  bool _previewSuspended = false;
+  bool _tvOpeningFullscreen = false;
+  bool _previewPlaying = false;
+  String? _previewError;
+  int _previewSequence = 0;
+
+  void _schedulePreview(Channel channel, String sourceKey) {
+    _previewDebounce?.cancel();
+    final sequence = ++_previewSequence;
+    if (_previewChannel != null) {
+      setState(() {
+        _previewChannel = null;
+        _previewPlaying = false;
+        _previewError = null;
+      });
+    }
+    if (_previewSuspended || !DeviceLayout.isTelevision) return;
+    _previewDebounce = Timer(const Duration(milliseconds: 450), () {
+      if (!mounted || sequence != _previewSequence || _previewSuspended ||
+          ModalRoute.of(context)?.isCurrent != true ||
+          !identical(_tvSelectedChannel, channel)) return;
+      final family = context.read<FamilySessionProvider>();
+      final source = context.read<ContentProvider>();
+      if (!family.isReady || source.sourceKey != sourceKey ||
+          !source.channels.contains(channel) ||
+          !family.canAccessCategory(
+            sourceKey: source.sourceKey,
+            contentType: 'live',
+            categoryKey: channel.categoryKey ?? '',
+          )) return;
+      setState(() {
+        _previewChannel = channel;
+        _previewPlaying = false;
+        _previewError = null;
+      });
+    });
+  }
+
+  void _suspendPreview() {
+    _previewDebounce?.cancel();
+    ++_previewSequence;
+    setState(() {
+      _previewSuspended = true;
+      _previewChannel = null;
+      _previewPlaying = false;
+    });
+  }
+
   String _selectedCategory = _all;
   bool _folderFocusExpanded = false;
   Channel? _tvSelectedChannel;
-  final EpgRepository _tvEpgRepository = EpgRepository();
+  final EpgRepository _tvEpgRepository = EpgRepository.shared;
   Future<List<EpgProgramme>>? _tvEpgFuture;
+  // Reading the encrypted Xtream source for every D-pad focus change can
+  // queue many secure-storage operations. Share one lookup per active source.
+  String? _tvEpgSourceKey;
+  Future<String?>? _tvEpgUrlFuture;
+
+  Future<String?> _tvEpgUrlFor(String sourceKey) {
+    if (_tvEpgSourceKey != sourceKey || _tvEpgUrlFuture == null) {
+      _tvEpgSourceKey = sourceKey;
+      // A transient secure-storage failure must not poison this shared future
+      // for the entire TV session. Keep the current request safe and permit a
+      // later channel selection to retry without exposing provider credentials.
+      late final Future<String?> lookup;
+      lookup = () async {
+        try {
+          final source = await PlaylistSourceStore().read(sourceKey);
+          return EpgSourceResolver.resolve(source);
+        } catch (_) {
+          if (_tvEpgSourceKey == sourceKey &&
+              identical(_tvEpgUrlFuture, lookup)) {
+            _tvEpgUrlFuture = null;
+          }
+          return null;
+        }
+      }();
+      _tvEpgUrlFuture = lookup;
+    }
+    return _tvEpgUrlFuture!;
+  }
   String? _tvEpgKey;
   String _search = '';
   bool _tvFavoriteBusy = false;
@@ -145,8 +229,10 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
   void dispose() {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
+    _previewDebounce?.cancel();
     _tvEpgRepository.dispose();
     _searchFocus.dispose();
+    _tvChannelScroll.dispose();
     for (final node in _tvChannelFocusNodes.values) { node.dispose(); }
     _tvChannelFocusNodes.clear();
     super.dispose();
@@ -339,17 +425,17 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
 
   void _tvSelectChannel(Channel channel, String sourceKey) {
     if (!mounted) return;
-    final key = '$sourceKey::${channel.epgChannelId ?? channel.id}';
+    final key = '$sourceKey::${(channel.epgChannelId?.trim().isNotEmpty ?? false) ? channel.epgChannelId!.trim() : channel.id}';
     if (_tvSelectedChannel == channel && _tvEpgKey == key) return;
+    _schedulePreview(channel, sourceKey);
     setState(() {
       _tvSelectedChannel = channel;
       if (_tvEpgKey != key) {
         _tvEpgKey = key;
         _tvEpgFuture = () async {
-          final source = await PlaylistSourceStore().read(sourceKey);
-          final url = source?.epgUrl;
+          final url = await _tvEpgUrlFor(sourceKey);
           if (url == null || url.trim().isEmpty) return <EpgProgramme>[];
-          return _tvEpgRepository.programmes(url, channel.epgChannelId ?? channel.id);
+          return _tvEpgRepository.programmes(url, (channel.epgChannelId?.trim().isNotEmpty ?? false) ? channel.epgChannelId!.trim() : channel.id);
         }();
       }
     });
@@ -408,39 +494,129 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
     }
   }
 
+  // Move focus by catalogue index rather than relying on geometric focus
+  // traversal. Off-screen ListView.builder rows do not yet have a BuildContext.
+  Future<void> _moveTvChannelFocus(List<Channel> channels, int index) async {
+    if (_tvMovingFocus || index < 0 || index >= channels.length) return;
+    _tvMovingFocus = true;
+    try {
+      final target = channels[index];
+      if (_tvChannelScroll.hasClients) {
+        // Every TV row has a fixed extent, so an off-screen destination can
+        // be materialized without scanning or laying out the entire playlist.
+        final position = _tvChannelScroll.position;
+        final desired = (index * 66.0 - position.viewportDimension / 2 + 33)
+            .clamp(0.0, position.maxScrollExtent);
+        await _tvChannelScroll.animateTo(desired,
+            duration: const Duration(milliseconds: 100),
+            curve: Curves.easeOut);
+      }
+      if (!mounted) return;
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+      final node = _tvChannelFocusNodes[target];
+      if (node != null && node.context != null && node.canRequestFocus) {
+        node.requestFocus();
+      }
+    } finally {
+      _tvMovingFocus = false;
+    }
+  }
+
   Widget _tvChannelList(List<Channel> filtered, String sourceKey) {
     return ListView.builder(
       key: const PageStorageKey('streamia_tv_channel_list'),
+      controller: _tvChannelScroll,
+      itemExtent: 66,
       itemCount: filtered.length,
       itemBuilder: (context, index) {
         final channel = filtered[index];
         final selected = identical(channel, _tvSelectedChannel);
+        final focusNode = _focusFor(channel);
+        focusNode.onKeyEvent = (node, event) {
+          if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+            return KeyEventResult.ignored;
+          }
+          final key = event.logicalKey;
+          if (key == LogicalKeyboardKey.arrowDown) {
+            _moveTvChannelFocus(filtered, index + 1);
+            return KeyEventResult.handled;
+          }
+          if (key == LogicalKeyboardKey.arrowUp) {
+            if (index == 0) return KeyEventResult.ignored;
+            _moveTvChannelFocus(filtered, index - 1);
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        };
         return Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
           child: _TvVisibleFocus(child: InkWell(
-            focusNode: _focusFor(channel),
+            focusNode: focusNode,
             autofocus: index == 0,
             focusColor: AppTheme.electricBlue.withValues(alpha: 0.28),
             onFocusChange: (focused) {
-              if (focused) _tvSelectChannel(channel, sourceKey);
+              if (!focused) return;
+              _tvSelectChannel(channel, sourceKey);
+              // A lazily built row can receive D-pad focus while partly outside
+              // the viewport. Bring that actual focused row into view, rather
+              // than leaving the selection painted on the first visible row.
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (!mounted) return;
+                final node = _tvChannelFocusNodes[channel];
+                if (node == null || !node.hasFocus) return;
+                final rowContext = node.context;
+                if (rowContext == null || !rowContext.mounted) return;
+                Scrollable.ensureVisible(
+                  rowContext,
+                  duration: const Duration(milliseconds: 110),
+                  alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+                );
+              });
             },
             onLongPress: () => _toggleTvFavorite(channel, sourceKey),
-            onTap: () {
+            onTap: () async {
+              // OK can be delivered more than once while a PlatformView is
+              // being removed. Never open overlapping fullscreen routes.
+              if (_tvOpeningFullscreen) return;
               final family = context.read<FamilySessionProvider>();
               if (!family.isReady || !family.canAccessCategory(
                 sourceKey: sourceKey,
                 contentType: 'live',
                 categoryKey: channel.categoryKey ?? '',
               )) return;
+              _tvOpeningFullscreen = true;
               _tvSelectChannel(channel, sourceKey);
               _tvReturnChannel = channel;
-              pushWithFocusRestore(context,
-                MaterialPageRoute(builder: (_) => PlayerScreen(channel: channel, isLive: true)))
-                  .then((_) {
-                if (!mounted || _tvReturnChannel != channel) return;
-                _tvReturnChannel = null;
-                _restoreTvChannelFocus(channel, sourceKey);
-              });
+              _suspendPreview();
+              try {
+                // Remove the catalogue PlatformView before constructing the
+                // fullscreen player. Native Media3 ownership is also exclusive.
+                await WidgetsBinding.instance.endOfFrame;
+                if (!mounted) return;
+                // Permission and playlist state may have changed during the
+                // asynchronous route handoff. Never use a stale authorization.
+                final currentFamily = context.read<FamilySessionProvider>();
+                final currentContent = context.read<ContentProvider>();
+                if (!currentFamily.isReady ||
+                    currentContent.sourceKey != sourceKey ||
+                    !currentContent.channels.contains(channel) ||
+                    !currentFamily.canAccessCategory(
+                      sourceKey: sourceKey,
+                      contentType: 'live',
+                      categoryKey: channel.categoryKey ?? '',
+                    )) return;
+                await pushWithFocusRestore(context,
+                  MaterialPageRoute(builder: (_) => PlayerScreen(channel: channel, isLive: true)));
+              } finally {
+                if (mounted) {
+                  _tvOpeningFullscreen = false;
+                  _tvReturnChannel = null;
+                  setState(() => _previewSuspended = false);
+                  _schedulePreview(channel, sourceKey);
+                  _restoreTvChannelFocus(channel, sourceKey);
+                }
+              }
             },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -467,14 +643,51 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
     if (channel == null) return const Center(child: Text('Keine Sender verfügbar'));
     final logo = channel.logoUrl?.trim();
     final sourceKey = context.read<ContentProvider>().sourceKey;
-    final key = '$sourceKey::${channel.epgChannelId ?? channel.id}';
-    // Preview is deliberately metadata-only: no second decoder or stream.
+    final key = '$sourceKey::${(channel.epgChannelId?.trim().isNotEmpty ?? false) ? channel.epgChannelId!.trim() : channel.id}';
+    final preview = _previewChannel;
+    final previewSequence = _previewSequence;
+    final previewAllowed = preview != null &&
+        filtered.contains(preview) &&
+        context.read<FamilySessionProvider>().isReady &&
+        context.read<FamilySessionProvider>().canAccessCategory(
+          sourceKey: sourceKey,
+          contentType: 'live',
+          categoryKey: preview.categoryKey ?? '',
+        );
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SizedBox(height: 125, child: Center(child: logo != null && logo.isNotEmpty
-          ? CachedNetworkImage(imageUrl: logo, fit: BoxFit.contain,
-              memCacheWidth: 320, memCacheHeight: 200,
-              errorWidget: (_, __, ___) => const Icon(Icons.live_tv_rounded, size: 48))
-          : const Icon(Icons.live_tv_rounded, size: 48))),
+      SizedBox(height: 160, child: Stack(fit: StackFit.expand, children: [
+        // Keep one native PlatformView for the entire catalogue lifetime.
+        // An empty URL stops playback while the preview is suspended or
+        // forbidden; changing channels reuses the same decoder owner.
+        if (!_previewSuspended) TvMedia3View(
+            key: const ValueKey('streamia-tv-catalogue-preview'),
+            url: previewAllowed && !_previewSuspended ? preview.streamUrl : '', 
+            onState: (state, playing) {
+              if (mounted && !_previewSuspended && preview != null &&
+                  previewSequence == _previewSequence &&
+                  identical(_previewChannel, preview) &&
+                  _previewPlaying != playing) {
+                setState(() => _previewPlaying = playing);
+              }
+            },
+            onError: (code) {
+              if (mounted && !_previewSuspended && preview != null &&
+                  previewSequence == _previewSequence &&
+                  identical(_previewChannel, preview)) {
+                setState(() => _previewError = code);
+              }
+            },
+          ),
+        if (!previewAllowed || !_previewPlaying || _previewError != null)
+          Center(child: previewAllowed && _previewError != null
+              ? const Icon(Icons.error_outline_rounded, size: 40)
+              : logo != null && logo.isNotEmpty
+                  ? CachedNetworkImage(imageUrl: logo, fit: BoxFit.contain,
+                      memCacheWidth: 320, memCacheHeight: 200,
+                      errorWidget: (_, __, ___) =>
+                          const Icon(Icons.live_tv_rounded, size: 48))
+                  : const Icon(Icons.live_tv_rounded, size: 48)),
+      ])),
       Padding(padding: const EdgeInsets.all(12), child: Text(channel.name,
           maxLines: 2, overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.titleMedium)),
@@ -489,7 +702,11 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
               builder: (context, snapshot) {
                 if (snapshot.hasError) return Text(_text('EPG nicht verfügbar', 'EPG kullanılamıyor', 'EPG unavailable'));
                 if (!snapshot.hasData) return const LinearProgressIndicator();
-                return TvEpgTimeline(key: ValueKey(key), programmes: snapshot.data!);
+                // Catalogue EPG is a passive preview. Only the fullscreen
+                // player's timeline should own D-pad focus/navigation.
+                return ExcludeFocus(
+                  child: TvEpgTimeline(key: ValueKey(key), programmes: snapshot.data!),
+                );
               },
             ),
       )),
@@ -500,6 +717,13 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
   Widget build(BuildContext context) {
     final family = context.watch<FamilySessionProvider>();
     final content = context.watch<ContentProvider>();
+    // Do not retain a credential-bearing EPG URL across playlist switches.
+    if (_tvEpgSourceKey != null && _tvEpgSourceKey != content.sourceKey) {
+      _tvEpgSourceKey = null;
+      _tvEpgUrlFuture = null;
+      _tvEpgKey = null;
+      _tvEpgFuture = null;
+    }
     final allChannels = content.channels;
     final channels = _permittedChannels(allChannels, family, content.sourceKey);
     final category = _cachedCategories.contains(_selectedCategory)
@@ -508,6 +732,10 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
     // A previously focused channel may disappear after a family permission,
     // source, category or favorites-filter change. Never preview it again.
     if (_tvSelectedChannel != null && !filtered.contains(_tvSelectedChannel)) {
+      _previewDebounce?.cancel();
+      ++_previewSequence;
+      _previewChannel = null;
+      _previewPlaying = false;
       _tvSelectedChannel = null;
       _tvEpgKey = null;
       _tvEpgFuture = null;

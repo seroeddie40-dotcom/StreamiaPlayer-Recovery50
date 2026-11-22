@@ -27,7 +27,9 @@ import '../widgets/favorites_quick_filter.dart';
 import '../models/epg_programme.dart';
 import '../services/epg_repository.dart';
 import '../services/playlist_source_store.dart';
+import '../services/epg_source_resolver.dart';
 import '../widgets/channel_epg_panel.dart';
+import '../widgets/tv_epg_timeline.dart';
 
 class PlayerScreen extends StatefulWidget {
   final Channel? channel;
@@ -57,21 +59,30 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   String get sortArea => 'live';
   // A single media player survives Live TV channel changes.
   Channel? _activeChannel;
-  final EpgRepository _epgRepository = EpgRepository();
+  final EpgRepository _epgRepository = EpgRepository.shared;
   Future<List<EpgProgramme>>? _epgFuture;
   String? _epgChannelKey;
 
   void _prepareEpg() {
     if (!widget.isLive || !mounted) return;
     final channel = _activeChannel;
-    final channelId = channel?.epgChannelId;
-    if (channelId == null || channelId.isEmpty) return;
+    // Some providers omit epg_channel_id even when their XMLTV guide uses
+    // the stream ID. Keep the lookup conservative: use that ID only when
+    // no explicit guide identifier is supplied.
+    final channelId = (channel?.epgChannelId?.trim().isNotEmpty ?? false)
+        ? channel!.epgChannelId!.trim()
+        : channel?.id.trim();
+    if (channelId == null || channelId.isEmpty) {
+      _epgChannelKey = null;
+      _epgFuture = null;
+      return;
+    }
     final key = '${_contentProvider.sourceKey}::$channelId';
     if (_epgChannelKey == key) return;
     _epgChannelKey = key;
     _epgFuture = () async {
       final config = await PlaylistSourceStore().read(_contentProvider.sourceKey);
-      final url = config?.epgUrl;
+      final url = EpgSourceResolver.resolve(config);
       if (url == null || url.trim().isEmpty) return <EpgProgramme>[];
       return _epgRepository.programmes(url, channelId);
     }();
@@ -117,6 +128,17 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   late final Player _player;
   late final VideoController _videoController;
   late final FamilySessionProvider _familySession;
+  // A player route belongs to the profile that opened it. Switching to a
+  // different profile ends this route's playback even when both profiles may
+  // access the same content. Never silently carry a decoder across profiles.
+  late final String? _openingProfileId;
+  late final String? _openingAccountId;
+  bool get _belongsToOpeningProfile {
+    final current = _familySession.activeProfile;
+    return current != null &&
+        current.id == _openingProfileId &&
+        current.accountUserId == _openingAccountId;
+  }
   late final ProfileHistoryService _historyService;
   List<Map<String,dynamic>> _profileHistory = [];
   Future<void> _updateHistory(Future<List<Map<String,dynamic>>> request) async {
@@ -135,9 +157,17 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
   List<RecentPlaybackEntry> _historyEntries(RecentPlaybackType type, ContentProvider library) {
     if (!_historyService.isCurrent || _historyService.source != library.sourceKey) return [];
-    final channelById = {for (final item in library.channels) item.id: item};
-    final vodById = {for (final item in library.vodItems) item.id: item};
-    final seriesById = {for (final item in library.series) item.id: item};
+    // The history sidebar requests all three tabs. Index only the catalogue
+    // needed by this tab; large IPTV lists must not be reindexed three times.
+    final channelById = type == RecentPlaybackType.live
+        ? {for (final item in library.channels) item.id: item}
+        : <String, Channel>{};
+    final vodById = type == RecentPlaybackType.vod
+        ? {for (final item in library.vodItems) item.id: item}
+        : <String, VodItem>{};
+    final seriesById = type == RecentPlaybackType.series
+        ? {for (final item in library.series) item.id: item}
+        : <String, Series>{};
     final result = <RecentPlaybackEntry>[];
     for (final row in _profileHistory) {
       if (row['content_type'] != type.name) continue;
@@ -193,6 +223,93 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   final ScrollController _channelListScroll = ScrollController();
   final ScrollController _categoryListScroll = ScrollController();
   final FocusNode _drawerCloseFocus = FocusNode(debugLabel: 'Navigation schließen');
+  final Map<String, FocusNode> _tvDrawerChannelNodes = {};
+  int? _tvDrawerPendingIndex;
+  String? _tvDrawerPendingChannelId;
+  int _tvDrawerFocusRequest = 0;
+
+  FocusNode _tvDrawerNode(Channel channel) => _tvDrawerChannelNodes.putIfAbsent(
+    channel.id, () => FocusNode(debugLabel: 'TV-Sender ${channel.id}'));
+
+  KeyEventResult _handleTvDrawerChannelKey(KeyEvent event, List<Channel> channels, int index) {
+    if (!DeviceLayout.isTelevision || event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    // Handle OK at the same focus boundary as D-pad movement. A lazy row
+    // may still hold focus while the latest requested destination is pending.
+    // Letting ListTile handle OK independently could open the previous row.
+    if (event.logicalKey == LogicalKeyboardKey.select ||
+        event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter) {
+      _activateTvDrawerChannel(channels, index);
+      return KeyEventResult.handled;
+    }
+    final direction = event.logicalKey == LogicalKeyboardKey.arrowDown ? 1
+        : event.logicalKey == LogicalKeyboardKey.arrowUp ? -1 : 0;
+    if (direction == 0) return KeyEventResult.ignored;
+    // Repeated remote keys can arrive before Flutter builds the next lazy row.
+    // Advance from the pending target, not the still-focused old row.
+    // A favourites or permission refresh can change the channel list between
+    // two remote key presses. Never advance from a stale numeric position.
+    final pending = _tvDrawerPendingIndex;
+    final pendingStillMatches = pending != null &&
+        pending >= 0 && pending < channels.length &&
+        channels[pending].id == _tvDrawerPendingChannelId;
+    if (pending != null && !pendingStillMatches) {
+      _tvDrawerPendingIndex = null;
+      _tvDrawerPendingChannelId = null;
+      ++_tvDrawerFocusRequest;
+    }
+    final current = pendingStillMatches ? pending : index;
+    final next = (current + direction).clamp(0, channels.length - 1);
+    if (next == current) return KeyEventResult.handled;
+    _tvDrawerPendingIndex = next;
+    _tvDrawerPendingChannelId = channels[next].id;
+    final epoch = _navigationScrollEpoch;
+    final request = ++_tvDrawerFocusRequest;
+    _jumpToNavigationIndex(_channelListScroll, next);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_showDrawer || epoch != _navigationScrollEpoch ||
+          request != _tvDrawerFocusRequest || next >= channels.length) return;
+      // The lazy row can be rebuilt after a favourites/profile refresh while
+      // this callback waits for a frame. Never focus a stale or forbidden row.
+      final currentVisible = _visibleLiveChannels(_allowedLiveChannels());
+      if (next >= currentVisible.length ||
+          currentVisible[next].id != channels[next].id) {
+        _tvDrawerPendingIndex = null;
+        _tvDrawerPendingChannelId = null;
+        ++_tvDrawerFocusRequest;
+        return;
+      }
+      final node = _tvDrawerNode(currentVisible[next]);
+      if (node.context != null) {
+        node.requestFocus();
+        _tvDrawerPendingIndex = null;
+        _tvDrawerPendingChannelId = null;
+      } else {
+        // If the lazy row is not mounted yet, try after its next layout.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted || !_showDrawer || epoch != _navigationScrollEpoch ||
+              request != _tvDrawerFocusRequest) return;
+          final latestVisible = _visibleLiveChannels(_allowedLiveChannels());
+          if (next >= latestVisible.length ||
+              latestVisible[next].id != channels[next].id) {
+            _tvDrawerPendingIndex = null;
+            _tvDrawerPendingChannelId = null;
+            ++_tvDrawerFocusRequest;
+            return;
+          }
+          final target = _tvDrawerNode(latestVisible[next]);
+          if (target.context != null) {
+            target.requestFocus();
+            _tvDrawerPendingIndex = null;
+            _tvDrawerPendingChannelId = null;
+          }
+        });
+      }
+    });
+    return KeyEventResult.handled;
+  }
   final FocusNode _categoryAllFocus = FocusNode(debugLabel: 'Alle Sender');
   final FocusNode _historyCloseFocus = FocusNode(debugLabel: 'Verlauf schließen');
   final ScrollController _episodeListScroll = ScrollController();
@@ -202,17 +319,47 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   int _focusedRowRequest = 0;
 
   void _scrollToCurrentNavigationItem() {
+    final epoch = _navigationScrollEpoch;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_showDrawer) return;
+      if (!mounted || !_showDrawer || epoch != _navigationScrollEpoch) return;
       if (widget.episodes != null && _episodeListScroll.hasClients) {
         _jumpToNavigationIndex(_episodeListScroll, _currentEpisode);
-      } else if (_activeChannel != null && _channelListScroll.hasClients) {
-        final channels = context.read<ContentProvider>().channels
-            .where(_canPlayChannel).toList(growable: false);
-        final visible = _visibleLiveChannels(channels);
-        final index = visible.indexWhere((c) => c.id == _activeChannel!.id);
-        if (index >= 0) _jumpToNavigationIndex(_channelListScroll, index);
+        return;
       }
+      if (!widget.isLive || !_channelListScroll.hasClients) return;
+      final channels = _allowedLiveChannels();
+      final visible = _visibleLiveChannels(channels);
+      if (!DeviceLayout.isTelevision) {
+        final index = visible.indexWhere((c) => c.id == _activeChannel?.id);
+        if (index >= 0) _jumpToNavigationIndex(_channelListScroll, index);
+        return;
+      }
+      // A favourite filter or permission update can remove the playing
+      // channel. Always give the TV remote a real focus target in that case.
+      final current = visible.indexWhere((c) => c.id == _activeChannel?.id);
+      final index = current >= 0 ? current : (visible.isEmpty ? -1 : 0);
+      if (index < 0) {
+        _drawerCloseFocus.requestFocus();
+        return;
+      }
+      final targetId = visible[index].id;
+      _jumpToNavigationIndex(_channelListScroll, index);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_showDrawer || epoch != _navigationScrollEpoch) return;
+        // Do not focus a stale row after an asynchronous permissions refresh.
+        final latest = _visibleLiveChannels(_allowedLiveChannels());
+        if (index >= latest.length || latest[index].id != targetId) {
+          _drawerCloseFocus.requestFocus();
+          return;
+        }
+        final targetNode = _tvDrawerNode(latest[index]);
+        if (targetNode.context != null) {
+          targetNode.requestFocus();
+        } else {
+          // Never leave the remote on an unfocusable video surface.
+          _drawerCloseFocus.requestFocus();
+        }
+      });
     });
   }
 
@@ -283,6 +430,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   final FocusNode _audioButtonFocus = FocusNode(debugLabel: 'Audiosprache');
   final FocusNode _recordButtonFocus = FocusNode(debugLabel: 'Aufnahme');
   final FocusNode _navigationButtonFocus = FocusNode(debugLabel: 'Sender und Ordner');
+  final FocusNode _tvEpgFocus = FocusNode(debugLabel: 'TV EPG Timeline');
   final FocusNode _historyButtonFocus = FocusNode(debugLabel: 'Verlauf');
   bool _restoreAttempted = false;
   bool _saveInFlight = false;
@@ -298,11 +446,36 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _channelById = index;
   }
 
+  // A rapid D-pad sequence may leave the old row focused while the lazy
+  // target row is still being built. OK must select the pending destination.
+  void _activateTvDrawerChannel(List<Channel> visible, int tappedIndex) {
+    if (visible.isEmpty || tappedIndex < 0 || tappedIndex >= visible.length) return;
+    final pending = DeviceLayout.isTelevision ? _tvDrawerPendingIndex : null;
+    // A favorites/profile refresh can rebuild the visible list while a
+    // remote focus request is pending. Never use a stale numeric index to
+    // launch a different channel after that rebuild.
+    final targetIndex = pending != null && pending >= 0 &&
+            pending < visible.length &&
+            visible[pending].id == _tvDrawerPendingChannelId
+        ? pending : tappedIndex;
+    _tvDrawerPendingIndex = null;
+    _tvDrawerPendingChannelId = null;
+    ++_tvDrawerFocusRequest;
+    _switchLiveChannel(visible[targetIndex]);
+  }
+
   void _switchLiveChannel(Channel channel) {
+    _tvDrawerPendingIndex = null;
+    _tvDrawerPendingChannelId = null;
+    ++_tvDrawerFocusRequest;
     if (!mounted || !widget.isLive || _playbackRevoked ||
         !_canPlayChannel(channel)) return;
+    // A provider can reuse the same ID and URL in separate categories or
+    // playlist sources. Treat these as distinct authorization contexts.
     if (_activeChannel?.id == channel.id &&
-        _activeChannel?.streamUrl == channel.streamUrl) {
+        _activeChannel?.streamUrl == channel.streamUrl &&
+        _activeChannel?.categoryKey == channel.categoryKey &&
+        _activeChannel?.sourceKey == channel.sourceKey) {
       _closeNavigationDrawerIfOpen();
       _closeHistoryIfOpen();
       return;
@@ -377,6 +550,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _player = MediaEngine.createPlayer();
     _videoController = VideoController(_player);
     _familySession = context.read<FamilySessionProvider>();
+    _openingProfileId = _familySession.activeProfile?.id;
+    _openingAccountId = _familySession.activeProfile?.accountUserId;
     _progressService = WatchProgressService(family: _familySession);
     _familySession.addListener(_onFamilySessionChanged);
     if (widget.offlineDownloadId != null) {
@@ -599,7 +774,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   void _onFamilySessionChanged() {
     _invalidateAllowedLiveChannels();
     if (!mounted || _playbackRevoked) return;
-    if (_isCurrentStreamAuthorized()) return;
+    if (_belongsToOpeningProfile && _isCurrentStreamAuthorized()) return;
     _tvMedia3AwaitingFirstStateAt = null;
     _tvMedia3IdleSince = null;
 
@@ -672,26 +847,57 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     final current = library.vodItems.where((candidate) =>
         candidate.id == item.id && candidate.streamUrl == item.streamUrl &&
         candidate.categoryKey == item.categoryKey);
-    if (current.isEmpty) return false;
-    return family.canAccessCategory(
-      sourceKey: library.sourceKey, contentType: 'vod',
-      categoryKey: item.categoryKey ?? '',
-    );
+    // Duplicate catalogue IDs/URLs may be listed in folders with different
+    // parental rules. History and direct playback must use the same
+    // fail-closed rule rather than trusting the first matching entry.
+    return current.isNotEmpty && current.every((candidate) =>
+        family.canAccessCategory(
+          sourceKey: library.sourceKey,
+          contentType: 'vod',
+          categoryKey: candidate.categoryKey ?? '',
+        ));
   }
 
-  bool _canPlaySeries(Series item, {String? episodeUrl}) {
+  bool _canPlaySeries(Series item) {
     final family = context.read<FamilySessionProvider>();
     final library = context.read<ContentProvider>();
     if (!family.isReady) return false;
-    final current = library.series.where((candidate) =>
-        candidate.id == item.id && candidate.categoryKey == item.categoryKey &&
-        (episodeUrl == null || candidate.seasons.any((season) =>
-            season.episodes.any((episode) => episode.streamUrl == episodeUrl))));
-    if (current.isEmpty) return false;
-    return family.canAccessCategory(
-      sourceKey: library.sourceKey, contentType: 'series',
-      categoryKey: item.categoryKey ?? '',
-    );
+    // Parental rules apply to an entire series or folder, never individual
+    // seasons or episodes. A duplicate provider series ID in a blocked folder
+    // must not create an alternate route to the same series.
+    final matches = library.series.where((candidate) => candidate.id == item.id);
+    return matches.isNotEmpty && matches.every((candidate) =>
+        family.canAccessCategory(
+          sourceKey: library.sourceKey,
+          contentType: 'series',
+          categoryKey: candidate.categoryKey ?? '',
+        ));
+  }
+
+  void _switchEpisode(int nextIndex, {bool closeDrawer = false}) {
+    final episodes = widget.episodes;
+    if (!mounted || _playbackRevoked || episodes == null ||
+        nextIndex < 0 || nextIndex >= episodes.length ||
+        nextIndex == _currentEpisode) return;
+    // Capture the previous episode's progress synchronously. Never delay
+    // playback for a database write, profile refresh or episode permission
+    // request. Actual profile revocation is handled by the session listener,
+    // and _loadStream checks the locally active series permission.
+    unawaited(_saveProgress());
+    if (closeDrawer) {
+      _navigationScrollEpoch++;
+      _focusedRowRequest++;
+    }
+    setState(() {
+      _currentEpisode = nextIndex;
+      if (closeDrawer) _showDrawer = false;
+      _restoreAttempted = false;
+      _position = Duration.zero;
+      _duration = Duration.zero;
+    });
+    if (closeDrawer) _restorePlayerFocus();
+    _recordCurrentEpisodeHistory();
+    unawaited(_loadStream());
   }
 
   bool _canOpenRecent(RecentPlaybackEntry entry) {
@@ -707,7 +913,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     final family = context.read<FamilySessionProvider>();
     final content = context.read<ContentProvider>();
     final channel = _activeChannel;
-    bool permitted = family.isReady;
+    bool permitted = family.isReady && _belongsToOpeningProfile;
+    if (!permitted) return false;
     final offlineId = widget.offlineDownloadId;
     if (offlineId != null) {
       final profile = family.activeProfile;
@@ -720,36 +927,32 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (permitted && channel != null) {
       permitted = _canPlayChannel(channel);
     } else if (permitted && widget.episodes != null && widget.series != null) {
-      permitted = _canPlaySeries(widget.series!, episodeUrl: _currentUrl);
+      // Only the selected episode URL may play; category access is decided
+      // once per series, not re-requested for each episode.
+      final episodes = widget.episodes!;
+      permitted = _currentEpisode >= 0 && _currentEpisode < episodes.length &&
+          episodes[_currentEpisode].streamUrl == _currentUrl &&
+          _canPlaySeries(widget.series!);
     } else if (permitted && (family.isChild || widget.contentId != null)) {
       // A child may only play an item that is still present in the
       // current source catalog with an explicitly permitted category.
       // Bare URLs, downloaded files and stale history entries fail closed.
-      if (widget.episodes != null && widget.series != null) {
-        final series = widget.series!;
-        final currentSeries = content.series.where(
-          (item) => item.id == series.id &&
-              item.seasons.any((season) => season.episodes.any(
-                (episode) => episode.streamUrl == _currentUrl,
-              )),
-        );
-        permitted = currentSeries.isNotEmpty &&
-            family.canAccessCategory(
-              sourceKey: content.sourceKey,
-              contentType: 'series',
-              categoryKey: currentSeries.first.categoryKey ?? '',
-            );
-      } else if (widget.contentId != null && widget.streamUrl != null) {
+      if (widget.contentId != null && widget.streamUrl != null) {
         final matching = content.vodItems.where(
           (item) => item.id == widget.contentId &&
               item.streamUrl == widget.streamUrl,
         );
-        permitted = matching.isNotEmpty &&
-            family.canAccessCategory(
+        // Duplicate catalog IDs/URLs may belong to different folders.
+        // Never authorize a stream using only the first matching folder:
+        // every matching catalog entry must remain permitted, and the
+        // currently playing URL must still be the requested catalog URL.
+        permitted = _currentUrl == widget.streamUrl &&
+            matching.isNotEmpty &&
+            matching.every((item) => family.canAccessCategory(
               sourceKey: content.sourceKey,
               contentType: 'vod',
-              categoryKey: matching.first.categoryKey ?? '',
-            );
+              categoryKey: item.categoryKey ?? '',
+            ));
       } else {
         permitted = false;
       }
@@ -1074,6 +1277,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     final key = event.logicalKey;
     // Left/Right on the Live TV surface must not unexpectedly open history.
     // Navigation overlays are opened only through their explicit controls.
+    if (widget.isLive && DeviceLayout.isTelevision &&
+        key == LogicalKeyboardKey.arrowLeft &&
+        _playerSurfaceFocus.hasPrimaryFocus) {
+      _openNavigationDrawer();
+      return KeyEventResult.handled;
+    }
     if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.arrowLeft) {
       // Focused controls retain their normal D-pad traversal. Only seek when
       // the controls are hidden and the content has a seekable timeline.
@@ -1118,8 +1327,12 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   }
 
   void _focusFirstPlayerAction() {
+    // A queued controls-focus callback must not steal focus after the user
+    // opens/closes the TV channel drawer during the same frame.
+    final navigationEpoch = _navigationScrollEpoch;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_showControls || _showDrawer || _showHistory) return;
+      if (!mounted || !_showControls || _showDrawer || _showHistory ||
+          navigationEpoch != _navigationScrollEpoch) return;
       if (widget.isLive) {
         _navigationButtonFocus.requestFocus();
       } else {
@@ -1187,6 +1400,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _channelListScroll.dispose();
     _categoryListScroll.dispose();
     _drawerCloseFocus.dispose();
+    for (final node in _tvDrawerChannelNodes.values) { node.dispose(); }
+    _tvDrawerChannelNodes.clear();
     _categoryAllFocus.dispose();
     _historyCloseFocus.dispose();
     _episodeListScroll.dispose();
@@ -1195,6 +1410,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     _audioButtonFocus.dispose();
     _recordButtonFocus.dispose();
     _navigationButtonFocus.dispose();
+    _tvEpgFocus.dispose();
     _historyButtonFocus.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _saveProgress();
@@ -1212,6 +1428,11 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         if (_showHistory) { _closeHistorySidebar(); return; }
         if (_showControls) {
           _hideTimer?.cancel();
+          // Invalidate focus callbacks queued by the controls/EPG before
+          // returning to the video surface. Back must never reopen an overlay
+          // or focus a control that has just been removed from the tree.
+          ++_navigationScrollEpoch;
+          ++_focusedRowRequest;
           setState(() => _showControls = false);
           _restorePlayerFocus();
           return;
@@ -1407,17 +1628,6 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
               ),
             ),
             const Spacer(),
-            if (widget.isLive && _epgFuture != null)
-              Flexible(child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: FutureBuilder<List<EpgProgramme>>(
-                  future: _epgFuture,
-                  builder: (context, snapshot) => snapshot.hasData
-                    ? ChannelEpgPanel(programmes: snapshot.data!)
-                    : const Text('EPG wird geladen …',
-                        style: TextStyle(color: Colors.white70)),
-                ),
-              )),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -1425,7 +1635,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                   InkWell(
                     focusColor: AppTheme.electricBlue.withOpacity(0.38),
                     borderRadius: BorderRadius.circular(12),
-                    onTap: () async { if (_currentEpisode > 0) { await _saveProgress(); setState(() { _currentEpisode--; _restoreAttempted = false; _position = Duration.zero; _duration = Duration.zero; }); _recordCurrentEpisodeHistory(); _loadStream(); } },
+                    onTap: () => _switchEpisode(_currentEpisode - 1),
                     child: const Icon(Icons.skip_previous, color: Colors.white, size: 40),
                   ),
                 if (widget.episodes != null) const SizedBox(width: 32),
@@ -1442,18 +1652,44 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                   InkWell(
                     focusColor: AppTheme.electricBlue.withOpacity(0.38),
                     borderRadius: BorderRadius.circular(12),
-                    onTap: () async {
-                      if (widget.episodes != null && _currentEpisode < widget.episodes!.length - 1) {
-                        await _saveProgress();
-                        setState(() { _currentEpisode++; _restoreAttempted = false; _position = Duration.zero; _duration = Duration.zero; });
-                        _recordCurrentEpisodeHistory();
-                        _loadStream();
-                      }
-                    },
+                    onTap: () => _switchEpisode(_currentEpisode + 1),
                     child: const Icon(Icons.skip_next, color: Colors.white, size: 40),
                   ),
               ],
             ),
+            // On TV the EPG focus target must exist even while XMLTV is
+            // loading, unavailable or failed. Otherwise Up from the player
+            // controls can request focus on an unattached FocusNode.
+            if (widget.isLive && (DeviceLayout.isTelevision || _epgFuture != null))
+              Flexible(child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: FutureBuilder<List<EpgProgramme>>(
+                  future: _epgFuture,
+                  builder: (context, snapshot) {
+                    final programmes = snapshot.data ?? const <EpgProgramme>[];
+                    if (DeviceLayout.isTelevision) {
+                      return TvEpgTimeline(
+                        programmes: programmes,
+                        focusNode: _tvEpgFocus,
+                        onExitDown: () {
+                          if (mounted && _showControls && !_showDrawer) {
+                            _navigationButtonFocus.requestFocus();
+                          }
+                        },
+                      );
+                    }
+                    if (snapshot.hasError) {
+                      return const Text('EPG konnte nicht geladen werden',
+                          style: TextStyle(color: Colors.white70));
+                    }
+                    if (!snapshot.hasData) {
+                      return const Text('EPG wird geladen …',
+                          style: TextStyle(color: Colors.white70));
+                    }
+                    return ChannelEpgPanel(programmes: programmes);
+                  },
+                ),
+              )),
             if (!widget.isLive) _buildProgressBar(),
             // Live TV uses a minimal channel-navigation overlay. Subtitle,
             // audio-track, aspect-ratio and seek actions are VOD-only.
@@ -1479,12 +1715,24 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   if (widget.episodes != null || widget.isLive)
-                    InkWell(
-                      focusColor: AppTheme.electricBlue.withOpacity(0.38),
-                      borderRadius: BorderRadius.circular(12),
-                      focusNode: _navigationButtonFocus,
-                      onTap: _openNavigationDrawer,
-                      child: _pill(widget.isLive ? AppLocalizations.of(context).t('player_channels_folders') : AppLocalizations.of(context).t('player_episodes'), Icons.list),
+                    Focus(
+                      onKeyEvent: (node, event) {
+                        if (DeviceLayout.isTelevision && widget.isLive &&
+                            event is KeyDownEvent &&
+                            event.logicalKey == LogicalKeyboardKey.arrowUp &&
+                            _tvEpgFocus.canRequestFocus) {
+                          _tvEpgFocus.requestFocus();
+                          return KeyEventResult.handled;
+                        }
+                        return KeyEventResult.ignored;
+                      },
+                      child: InkWell(
+                        focusColor: AppTheme.electricBlue.withOpacity(0.38),
+                        borderRadius: BorderRadius.circular(12),
+                        focusNode: _navigationButtonFocus,
+                        onTap: _openNavigationDrawer,
+                        child: _pill(widget.isLive ? AppLocalizations.of(context).t('player_channels_folders') : AppLocalizations.of(context).t('player_episodes'), Icons.list),
+                      ),
                     ),
                   if (widget.isLive && DeviceLayout.isTelevision)
                     Padding(
@@ -1788,11 +2036,13 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   Widget _buildHistorySidebar() {
     final library = context.watch<ContentProvider>();
-    final lists = <List<RecentPlaybackEntry>>[
-      _historyEntries(RecentPlaybackType.live, library),
-      _historyEntries(RecentPlaybackType.vod, library),
-      _historyEntries(RecentPlaybackType.series, library),
-    ];
+    // Build only the visible tab. Even a per-type index is expensive when
+    // thousands of channels and VOD items exist; hidden tabs need no work.
+    final selectedType = <RecentPlaybackType>[
+      RecentPlaybackType.live,
+      RecentPlaybackType.vod,
+      RecentPlaybackType.series,
+    ][_selectedHistoryTab];
     final names = <String>[AppLocalizations.of(context).t('nav_live'), AppLocalizations.of(context).t('nav_vod'), AppLocalizations.of(context).t('nav_series')];
     final types = <RecentPlaybackType>[
       RecentPlaybackType.live,
@@ -1804,7 +2054,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       Icons.movie_rounded,
       Icons.video_library_rounded,
     ];
-    final entries = lists[_selectedHistoryTab]
+    final entries = _historyEntries(selectedType, library)
         .where(_canOpenRecent).take(10).toList(growable: false);
     return Positioned(
       right: 0,
@@ -2050,16 +2300,33 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     if (_activeChannel == null) return;
     final allowed = _allowedLiveChannels();
     if (allowed.isEmpty) return;
-    final current = allowed.indexWhere((c) => c.id == _activeChannel!.id);
-    if (current < 0) return;
+    // Providers may reuse numeric stream IDs across folders or sources.
+    // Locate the exact currently authorized stream before D-pad zapping;
+    // matching the ID alone could jump from a revoked/stale channel.
+    final playing = _activeChannel!;
+    final current = allowed.indexWhere((c) =>
+        c.id == playing.id &&
+        c.streamUrl == playing.streamUrl &&
+        c.categoryKey == playing.categoryKey &&
+        c.sourceKey == playing.sourceKey);
+    if (current < 0 || !_isCurrentStreamAuthorized()) return;
     final next = (current + offset + allowed.length) % allowed.length;
     final channel = allowed[next];
     _switchLiveChannel(channel);
   }
 
   void _restorePlayerFocus() {
+    // Ignore a focus restoration queued before a newer drawer transition.
+    // Otherwise Back -> OK within one frame can move focus behind the EPG.
+    final navigationEpoch = _navigationScrollEpoch;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_showDrawer && !_showHistory) _playerSurfaceFocus.requestFocus();
+      if (!mounted || _showDrawer || _showHistory ||
+          navigationEpoch != _navigationScrollEpoch) return;
+      if (_showControls) {
+        _focusFirstPlayerAction();
+      } else {
+        _playerSurfaceFocus.requestFocus();
+      }
     });
   }
 
@@ -2070,22 +2337,35 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
     }
     _updateHistory(_historyService.refresh());
     _hideTimer?.cancel();
+    // Invalidate focus callbacks from a previously opened channel drawer.
+    ++_navigationScrollEpoch;
+    ++_focusedRowRequest;
+    final focusEpoch = _navigationScrollEpoch;
     setState(() {
       _showDrawer = false;
       _selectedHistoryTab = widget.isLive ? 0 : (widget.episodes != null ? 2 : 1);
       _showHistory = true;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _showHistory) _historyCloseFocus.requestFocus();
+      if (mounted && _showHistory &&
+          focusEpoch == _navigationScrollEpoch) {
+        _historyCloseFocus.requestFocus();
+      }
     });
   }
 
   void _closeHistorySidebar() {
+    // A queued sidebar-open callback must not steal focus after Back/close.
+    ++_navigationScrollEpoch;
+    ++_focusedRowRequest;
     setState(() => _showHistory = false);
     _restorePlayerFocus();
   }
 
   void _closeNavigationDrawer() {
+    _tvDrawerPendingIndex = null;
+    _tvDrawerPendingChannelId = null;
+    _tvDrawerFocusRequest++;
     _navigationScrollEpoch++;
     _focusedRowRequest++;
     setState(() => _showDrawer = false);
@@ -2094,22 +2374,39 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
 
   void _openNavigationDrawer() {
     if (_showDrawer) return;
+    _tvDrawerPendingIndex = null;
+    _tvDrawerPendingChannelId = null;
+    _tvDrawerFocusRequest++;
     _navigationScrollEpoch++;
     _focusedRowRequest++;
-    setState(() { _showDrawer = true; _showHistory = false; });
+    // On Android TV the channel drawer owns the remote until it closes.
+    // Remove the controls/EPG from the widget tree rather than merely
+    // excluding their focus: otherwise the 12-hour timeline remains visible
+    // beneath the channel drawer and can intercept focus on rebuild.
     _hideTimer?.cancel();
+    setState(() {
+      _showDrawer = true;
+      _showHistory = false;
+      if (DeviceLayout.isTelevision && widget.isLive) _showControls = false;
+    });
     _scrollToCurrentNavigationItem();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _showDrawer && widget.isLive) _categoryAllFocus.requestFocus();
+      if (mounted && _showDrawer && widget.isLive && !DeviceLayout.isTelevision) {
+        _categoryAllFocus.requestFocus();
+      }
     });
   }
 
   void _zapPrevious() => _zapBy(-1);
   void _zapNext() => _zapBy(1);
 
+  // Android TV has a single channel-only drawer. Never carry the mobile
+  // category filter into that drawer: the category column is not available
+  // there, so doing so can silently hide channels with no way to recover.
   List<Channel> _visibleLiveChannels(List<Channel> channels) => channels
       .where((c) => matchesFavorite(c.id) &&
-          (favoritesOnly || _selectedLiveCategory == null ||
+          (DeviceLayout.isTelevision || favoritesOnly ||
+              _selectedLiveCategory == null ||
               (c.category ?? '') == _selectedLiveCategory))
       .toList(growable: false);
 
@@ -2134,7 +2431,10 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
               border: Border(right: BorderSide(color: Colors.white.withOpacity(0.16)))),
             child: Column(children: [
               Padding(padding: const EdgeInsets.fromLTRB(16, 18, 12, 10), child: Row(children: [
-                Expanded(child: Text(AppLocalizations.of(context).t('player_channels_folders'), style: TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold))),
+                Expanded(child: Text(DeviceLayout.isTelevision
+                    ? 'Live TV'
+                    : AppLocalizations.of(context).t('player_channels_folders'),
+                    style: const TextStyle(color: Colors.white, fontSize: 19, fontWeight: FontWeight.bold))),
                 favoritesButton(),
                 IconButton(focusNode: _drawerCloseFocus, tooltip: AppLocalizations.of(context).t('player_close'), focusColor: AppTheme.electricBlue.withOpacity(0.38), onPressed: _closeNavigationDrawer, icon: const Icon(Icons.close, color: Colors.white70)),
               ])),
@@ -2144,7 +2444,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      if (!favoritesOnly) SizedBox(
+                      if (!favoritesOnly && !DeviceLayout.isTelevision) SizedBox(
                         width: DeviceLayout.isTelevision
                             ? MediaQuery.sizeOf(context).width * 0.22
                             : (MediaQuery.sizeOf(context).width >= 900 ? 230 : 180),
@@ -2157,7 +2457,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                           ],
                         ),
                       ),
-                      if (!favoritesOnly) const VerticalDivider(color: Colors.white24, width: 1),
+                      if (!favoritesOnly && !DeviceLayout.isTelevision)
+                        const VerticalDivider(color: Colors.white24, width: 1),
                       Expanded(
                         child: ListView.builder(
                           controller: _channelListScroll,
@@ -2168,12 +2469,16 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                             final channel = visible[index];
                             final selected = channel.id == _activeChannel?.id;
                             return Builder(builder: (rowContext) => Focus(
+                              onKeyEvent: (node, event) =>
+                                  _handleTvDrawerChannelKey(event, visible, index),
                               onFocusChange: (focused) =>
                                   _keepFocusedNavigationRowVisible(rowContext, focused),
                               child: ListTile(
                               // Category navigation owns initial focus; channel rows
                               // gain focus only when the user moves into the list.
                               autofocus: false,
+                              focusNode: DeviceLayout.isTelevision
+                                  ? _tvDrawerNode(channel) : null,
                               dense: true,
                               selected: selected,
                               selectedTileColor: AppTheme.electricBlue.withOpacity(0.22),
@@ -2183,7 +2488,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
                                     errorBuilder: (_, __, ___) => const Icon(Icons.live_tv, color: Colors.white70))),
                               title: Text(channel.name, maxLines: DeviceLayout.isTelevision ? 3 : 2, overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(color: Colors.white, fontSize: 12)),
-                              onTap: () => _switchLiveChannel(channel),
+                              onTap: () => _activateTvDrawerChannel(visible, index),
                             )));
                           },
                         ),
@@ -2257,18 +2562,7 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
               child: InkWell(
               autofocus: i == _currentEpisode,
               focusColor: AppTheme.electricBlue.withOpacity(0.38),
-              onTap: () async {
-                if (widget.series == null ||
-                    !_canPlaySeries(widget.series!, episodeUrl: ep.streamUrl)) return;
-                await _saveProgress();
-                _navigationScrollEpoch++;
-                _focusedRowRequest++;
-                if (!mounted) return;
-                setState(() { _currentEpisode = i; _showDrawer = false; _restoreAttempted = false; _position = Duration.zero; _duration = Duration.zero; });
-                _restorePlayerFocus();
-                _recordCurrentEpisodeHistory();
-                _loadStream();
-              },
+              onTap: () => _switchEpisode(i, closeDrawer: true),
               child: ListTile(
                 focusColor: AppTheme.electricBlue.withOpacity(0.38),
                 selected: i == _currentEpisode,
