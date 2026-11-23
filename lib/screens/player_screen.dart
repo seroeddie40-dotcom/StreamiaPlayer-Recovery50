@@ -1088,6 +1088,14 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
       for (var index = 0; index < candidates.length; index++) {
         try {
           await _player.open(Media(candidates[index]));
+          // Every VOD/episode starts at normal speed. A reused media_kit
+          // player must not inherit a non-1.0 playback rate from earlier media.
+          // Live TV on Android TV uses Media3 and never reaches this branch.
+          if (!widget.isLive && mounted && !_playerDisposalStarted &&
+              generation == _streamLoadGeneration &&
+              _isCurrentStreamAuthorized()) {
+            await _player.setRate(1.0);
+          }
           break;
         } catch (_) {
           // Only a synchronous/awaited open failure triggers this fallback.
