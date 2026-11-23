@@ -292,7 +292,10 @@ class _LandscapeDashboardState extends State<_LandscapeDashboard> {
     // activation once per entry, not after an explicit profile switch.
     final family = context.watch<FamilySessionProvider>();
     if (_checkingDefault) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      // Keep the branded startup screen visible while the server verifies
+      // whether the default adult profile may be entered automatically.
+      // Never show the dashboard before family authorization succeeds.
+      return const SplashScreen();
     }
     if (!family.isReady) {
       return const FamilyProfileSelectionScreen();
