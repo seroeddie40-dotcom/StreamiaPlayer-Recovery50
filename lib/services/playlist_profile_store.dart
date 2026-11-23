@@ -132,9 +132,13 @@ class PlaylistProfileStore {
     return profiles.isEmpty;
   }
 
-  Future<void> setActive(String sourceKey) {
+  Future<void> setActive(String sourceKey, {bool Function()? stillCurrent}) {
     return _serialized(() async {
+      if (stillCurrent != null && !stillCurrent()) return;
       final profiles = await load();
+      // A newer library activation can begin while preferences are loading.
+      // Check again inside the serialized write, not only at the caller.
+      if (stillCurrent != null && !stillCurrent()) return;
 
       if (!profiles.any(
         (profile) => profile.sourceKey == sourceKey,
@@ -149,6 +153,7 @@ class PlaylistProfileStore {
           ),
       ];
 
+      if (stillCurrent != null && !stillCurrent()) return;
       await _saveAllUnlocked(updated);
     });
   }

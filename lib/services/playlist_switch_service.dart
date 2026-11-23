@@ -74,8 +74,12 @@ class PlaylistSwitchService {
       if (restored && content.isLoaded &&
           content.sourceKey == profile.sourceKey) {
         if (mayPublish != null && !mayPublish()) return false;
-        await _profiles.setActive(profile.sourceKey);
-        return content.isLoaded && content.sourceKey == profile.sourceKey;
+        await _profiles.setActive(profile.sourceKey,
+            stillCurrent: () => content.isLoaded &&
+                content.sourceKey == profile.sourceKey &&
+                (mayPublish == null || mayPublish()));
+        return content.isLoaded && content.sourceKey == profile.sourceKey &&
+            (mayPublish == null || mayPublish());
       }
       if (mayPublish != null && !mayPublish()) return false;
     }
@@ -148,7 +152,9 @@ class PlaylistSwitchService {
     // Scheduled refreshes must not rewrite active-profile metadata.
     // Manual activation (including manual refresh) retains its existing behavior.
     if (mayPublish == null) {
-      await _profiles.setActive(profile.sourceKey);
+      await _profiles.setActive(profile.sourceKey,
+          stillCurrent: () => content.isLibraryActivationCurrent(generation) &&
+              content.isLoaded && content.sourceKey == profile.sourceKey);
     }
     if (forceRefresh && content.isLibraryActivationCurrent(generation)) {
       await PlaylistRefreshSchedule.markSuccess(profile.sourceKey);

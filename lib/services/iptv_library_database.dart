@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -19,6 +20,7 @@ class IptvLibraryDatabase {
   IptvLibraryDatabase._();
   static final IptvLibraryDatabase instance = IptvLibraryDatabase._();
   Database? _database;
+  Future<Database>? _openingDatabase;
   static const _secureStorage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
@@ -55,7 +57,7 @@ class IptvLibraryDatabase {
     return base64Encode(<int>[...box.nonce, ...box.cipherText, ...box.mac.bytes]);
   }
 
-  Future<Map<String, dynamic>> _decrypt(String encoded) async {
+  Future<Map<String, dynamic>> _decrypt(String encoded, {SecretKey? preparedKey}) async {
     final bytes = base64Decode(encoded);
     if (bytes.length < 28) throw const FormatException('Invalid encrypted catalog row');
     final box = SecretBox(
@@ -63,14 +65,19 @@ class IptvLibraryDatabase {
       nonce: bytes.sublist(0, 12),
       mac: Mac(bytes.sublist(bytes.length - 16)),
     );
-    final plaintext = await _cipher.decrypt(box, secretKey: await _getKey());
+    final plaintext = await _cipher.decrypt(box, secretKey: preparedKey ?? await _getKey());
     return jsonDecode(utf8.decode(plaintext)) as Map<String, dynamic>;
   }
 
   Future<Database> get _db async {
     if (_database != null) return _database!;
-    final path = '${await getDatabasesPath()}/streamia_library_secure_v2.db';
-    return _database = await openDatabase(path, version: 1, onCreate: (db, _) async {
+    return _openingDatabase ??= _openDatabaseOnce();
+  }
+
+  Future<Database> _openDatabaseOnce() async {
+    try {
+      final path = '${await getDatabasesPath()}/streamia_library_secure_v2.db';
+      final db = await openDatabase(path, version: 1, onCreate: (db, _) async {
       await db.execute('CREATE TABLE libraries (source_key TEXT PRIMARY KEY, updated_at TEXT NOT NULL)');
       for (final table in ['channels', 'vod', 'series']) {
         await db.execute('CREATE TABLE $table (source_key TEXT NOT NULL, item_id TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(source_key, item_id))');
@@ -78,7 +85,11 @@ class IptvLibraryDatabase {
       await db.execute('CREATE INDEX idx_channels_source ON channels(source_key)');
       await db.execute('CREATE INDEX idx_vod_source ON vod(source_key)');
       await db.execute('CREATE INDEX idx_series_source ON series(source_key)');
-    });
+      });
+      return _database = db;
+    } finally {
+      _openingDatabase = null;
+    }
   }
 
   Future<bool> contains(String sourceKey) async {
@@ -151,13 +162,32 @@ class IptvLibraryDatabase {
 
   Future<StoredIptvLibrary?> load(String sourceKey) async {
     final db = await _db;
-    if (!await contains(sourceKey)) return null;
-    Future<List<dynamic>> read(String table) async {
-      final rows = await db.query(table, columns: ['payload'], where: 'source_key = ?', whereArgs: [sourceKey]);
+    final matchingLibraries = await db.query(
+      'libraries', columns: ['source_key'], where: 'source_key = ?',
+      whereArgs: [sourceKey], limit: 1,
+    );
+    if (matchingLibraries.isEmpty) return null;
+    // Resolve the Android keystore-backed key once before processing rows.
+    // Decrypt in bounded batches: concurrent crypto work avoids one awaited
+    // platform/crypto future per row while limiting peak memory on TV boxes.
+    final preparedKey = await _getKey();
+    Future<List<Map<String, dynamic>>> read(String table) async {
+      final stopwatch = Stopwatch()..start();
+      final rows = await db.query(
+        table, columns: ['payload'], where: 'source_key = ?',
+        whereArgs: [sourceKey],
+      );
+      const batchSize = 32;
       final result = <Map<String, dynamic>>[];
-      for (final row in rows) {
-        result.add(await _decrypt(row['payload'] as String));
+      for (var offset = 0; offset < rows.length; offset += batchSize) {
+        final end = offset + batchSize < rows.length
+            ? offset + batchSize : rows.length;
+        final batch = rows.sublist(offset, end);
+        result.addAll(await Future.wait(batch.map(
+          (row) => _decrypt(row['payload'] as String, preparedKey: preparedKey),
+        )));
       }
+      debugPrint('[Streamia/Cache] $table rows=${rows.length} elapsedMs=${stopwatch.elapsedMilliseconds}');
       return result;
     }
     return StoredIptvLibrary(
