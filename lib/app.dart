@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'core/theme/app_theme.dart';
 import 'core/platform/device_layout.dart';
@@ -239,21 +240,68 @@ class _LandscapeDashboardState extends State<_LandscapeDashboard> {
 
   Future<void> _tryDefaultProfile() async {
     if (!mounted) return;
+    final profileStartWatch = Stopwatch()..start();
     final family = context.read<FamilySessionProvider>();
     final accountId = context.read<AuthProvider>().user?.id;
     try {
       if (accountId == null || family.isReady || family.isLoading) return;
+
+      // Reopen the last profile only after the server has rechecked its
+      // membership and permissions. A PIN-protected adult profile is NEVER
+      // silently unlocked: it must be selected and authorized with its PIN.
+      final prefs = await SharedPreferences.getInstance();
+      final lastId = prefs.getString('streamia_last_family_profile:$accountId');
+      if (!mounted || context.read<AuthProvider>().user?.id != accountId) return;
+      if (lastId != null && lastId.isNotEmpty) {
+        final profiles = await FamilyProfileService().loadProfiles()
+            .timeout(const Duration(seconds: 12));
+        debugPrint('[Streamia/Startup] Profile list fetched in ${profileStartWatch.elapsedMilliseconds} ms');
+        if (!mounted || context.read<AuthProvider>().user?.id != accountId) return;
+        for (final profile in profiles) {
+          if (profile.id != lastId || profile.accountUserId != accountId) continue;
+          // Child profiles require no PIN, but activateProfile still validates
+          // the current server-side restrictions before showing the dashboard.
+          if (profile.isChild) {
+            final activated = await family.activateProfile(
+              profile, verifiedProfiles: profiles,
+            );
+            if (activated) return;
+            // Do not silently fall back to an adult profile when a previously
+            // selected child profile fails its current permission check.
+            // Require explicit profile selection instead (fail closed).
+            return;
+          }
+          // An adult profile may resume without a PIN only if the server
+          // confirms it is the unprotected default. activateProfile enforces
+          // that requirement through ensureDefaultProfile() and rejects
+          // protected or different adult profiles. Never silently substitute
+          // another adult profile if authorization fails.
+          await family.activateProfile(
+            profile, verifiedProfiles: profiles,
+          );
+          return;
+        }
+        // A stored profile ID that is no longer available also requires
+        // explicit selection; never escalate to a different adult profile.
+        return;
+      }
+      if (!mounted || family.isReady || family.isLoading) return;
+      // Only an explicitly unprotected default adult can be auto-activated.
       final profile = await FamilyProfileService().ensureDefaultProfile()
           .timeout(const Duration(seconds: 15));
       if (!mounted || context.read<AuthProvider>().user?.id != accountId ||
           family.isReady || family.isLoading) return;
       await family.activateProfile(profile);
-    } catch (_) {
-      // Protected accounts and unsuccessful checks must use profile selection.
+    } catch (error) {
+      debugPrint('[Streamia/Startup] Profile restore: $error');
+      // Fail closed: protected or unavailable profiles require selection.
     } finally {
+      profileStartWatch.stop();
+      debugPrint('[Streamia/Startup] Profile authorization phase: ${profileStartWatch.elapsedMilliseconds} ms; ready=${family.isReady}');
       if (mounted) setState(() => _checkingDefault = false);
     }
   }
+
   @override
   void initState() {
     super.initState();
@@ -324,6 +372,7 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
   Future<List<PlaylistProfile>>? _pendingProfiles;
   Future<bool>? _pendingRestore;
   Future<bool>? _pendingActivation;
+  String? _pendingActivationSourceKey;
   String? _pendingSourceKey;
 
   // A timed-out secure-storage read continues in the background. Reuse it
@@ -347,6 +396,7 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
       _pendingSourceKey = sourceKey;
       _pendingRestore = null;
       _pendingActivation = null;
+      _pendingActivationSourceKey = null;
     }
     final existing = _pendingRestore;
     if (existing != null) return existing;
@@ -354,8 +404,24 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
       sourceKey, sourceLabel: sourceLabel,
     );
     _pendingRestore = task;
-    unawaited(task.then((_) {
-      if (identical(_pendingRestore, task)) _pendingRestore = null;
+    unawaited(task.then((restored) {
+      if (identical(_pendingRestore, task)) {
+        _pendingRestore = null;
+        // Future.timeout only stops waiting. If the local database finishes
+        // after the deadline, publish the already restored catalog without
+        // forcing a retry or starting a second import.
+        if (mounted && _pendingSourceKey == sourceKey &&
+            restored && content.isLoaded &&
+            content.sourceKey == sourceKey && !_startupReady) {
+          setState(() {
+            _startupReady = true;
+            _loading = false;
+            _loadFailed = false;
+            _progressPercent = 100;
+            _completedPhases = 3;
+          });
+        }
+      }
     }, onError: (Object _, StackTrace __) {
       if (identical(_pendingRestore, task)) _pendingRestore = null;
     }));
@@ -365,9 +431,20 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
   Future<bool> _activateOnce(ContentProvider content, PlaylistProfile profile,
       int attempt) {
     final existing = _pendingActivation;
-    if (existing != null) return existing;
+    if (existing != null && _pendingActivationSourceKey == profile.sourceKey) {
+      return existing;
+    }
+    // A different source must never join the previous source's activation.
+    // Its publication is separately guarded by the provider generation.
     final task = PlaylistSwitchService().activate(
       profile, content,
+      // Startup recovery must never take ownership away from a playlist
+      // successfully imported through QR/manual setup while it was waiting.
+      // Manual playlist switching uses its own activation path without this
+      // restriction.
+      mayPublish: () => mounted &&
+          _pendingSourceKey == profile.sourceKey &&
+          (!content.isLoaded || content.sourceKey == profile.sourceKey),
       onM3uProgress: (live, movies, series) {
         if (mounted && attempt == _loadAttempt) {
           setState(() => _m3uCounts = (live, movies, series));
@@ -385,10 +462,31 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
       },
     );
     _pendingActivation = task;
-    unawaited(task.then((_) {
-      if (identical(_pendingActivation, task)) _pendingActivation = null;
+    _pendingActivationSourceKey = profile.sourceKey;
+    unawaited(task.then((activated) {
+      if (!identical(_pendingActivation, task)) return;
+      _pendingActivation = null;
+      _pendingActivationSourceKey = null;
+      // A network recovery can finish after a UI wait has expired. Only
+      // advance when its original source is still the requested source and
+      // the provider actually published that same catalog.
+      if (mounted && activated && _pendingSourceKey == profile.sourceKey &&
+          content.isLoaded && content.sourceKey == profile.sourceKey &&
+          !_startupReady) {
+        setState(() {
+          _hasProfiles = true;
+          _startupReady = true;
+          _loading = false;
+          _loadFailed = false;
+          _progressPercent = 100;
+          _completedPhases = 3;
+        });
+      }
     }, onError: (Object _, StackTrace __) {
-      if (identical(_pendingActivation, task)) _pendingActivation = null;
+      if (identical(_pendingActivation, task)) {
+        _pendingActivation = null;
+        _pendingActivationSourceKey = null;
+      }
     }));
     return task;
   }
@@ -412,9 +510,23 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
     setState(() { _loading = true; _loadFailed = false; _loadStage = 'profiles'; _xtreamCompleted = null; _m3uCounts = null; _progressPercent = 0; _completedPhases = 0; });
     final content = context.read<ContentProvider>();
     try {
-      final profiles = await _loadProfilesOnce();
+      final profiles = await _loadProfilesOnce()
+          .timeout(const Duration(seconds: 12));
       debugPrint('[Streamia/Library] profiles ready after ${watch.elapsedMilliseconds}ms; count=${profiles.length}');
       if (!mounted || attempt != _loadAttempt) return;
+      // A previous timed-out restore may have completed while secure storage
+      // was being read again. Publish that library instead of decrypting it
+      // twice or starting an unnecessary network activation.
+      if (content.isLoaded) {
+        setState(() {
+          _hasProfiles = profiles.isNotEmpty;
+          _progressPercent = 100;
+          _completedPhases = 3;
+          _startupReady = true;
+          _loading = false;
+        });
+        return;
+      }
       if (profiles.isEmpty) {
         setState(() { _hasProfiles = false; _loading = false; });
         return;
@@ -424,9 +536,11 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
       final active = profiles.where((p) => p.isActive).firstOrNull ?? profiles.first;
       // A timed-out activation may still be running. Rejoin it instead of
       // beginning a new restore, which would invalidate its generation.
-      if (_pendingSourceKey == active.sourceKey && _pendingActivation != null) {
+      if (_pendingActivationSourceKey == active.sourceKey &&
+          _pendingActivation != null) {
         setState(() { _loadStage = 'network'; _progressPercent = 20; });
-        final activated = await _pendingActivation!;
+        final activated = await _pendingActivation!
+            .timeout(const Duration(seconds: 30));
         if (!activated && !content.isLoaded) {
           throw StateError('Playlist activation did not complete');
         }
@@ -442,7 +556,7 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
       // depend on the playlist server being reachable.
       final restored = await _restoreOnce(
         content, active.sourceKey, active.displayName,
-      );
+      ).timeout(const Duration(seconds: 20));
       debugPrint('[Streamia/Library] local restore finished after ${watch.elapsedMilliseconds}ms; restored=$restored');
       if (!restored && !content.isLoaded) {
         // No cached catalog: use the already saved secure source credentials.
@@ -450,7 +564,7 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
         setState(() { _loadStage = 'network'; _progressPercent = 20; });
         final activated = await _activateOnce(
           content, active, attempt,
-        );
+        ).timeout(const Duration(seconds: 30));
         debugPrint('[Streamia/Library] network activation finished after ${watch.elapsedMilliseconds}ms; activated=$activated');
         if (!activated && !content.isLoaded) {
           throw StateError('Playlist activation did not complete');
@@ -498,7 +612,11 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
   @override
   Widget build(BuildContext context) {
     final libraryLoaded = context.watch<ContentProvider>().isLoaded;
-    if (_startupReady && libraryLoaded) {
+    // SetupScreen publishes successful QR/manual imports directly to the
+    // shared provider while this gate stays mounted. Observe that completion
+    // instead of requiring a second startup attempt or a manual TV click.
+    // Family-profile authorization remains enforced by _LandscapeDashboard.
+    if (libraryLoaded) {
       return const _LandscapeDashboard();
     }
     if (!_loading && !_hasProfiles && !_loadFailed) {
@@ -518,46 +636,7 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (_loading) ...[
-                  Text('Streamia Player', style: Theme.of(context).textTheme.headlineSmall),
-                  const SizedBox(height: 22),
-                  LinearProgressIndicator(
-                    value: _progressPercent / 100,
-                    minHeight: 9,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  const SizedBox(height: 12),
-                  Text('$_progressPercent %'),
-                  if (_m3uCounts case final counts?) ...[
-                    const SizedBox(height: 10),
-                    Text(_copy(context,
-                      'Erfasst: ${counts.$1} Sender · ${counts.$2} Filme · ${counts.$3} Serien',
-                      'İşlenen: ${counts.$1} kanal · ${counts.$2} film · ${counts.$3} dizi',
-                      'Parsed: ${counts.$1} channels · ${counts.$2} movies · ${counts.$3} series',
-                    ), textAlign: TextAlign.center),
-                  ],
-                  const SizedBox(height: 18),
-                  Wrap(spacing: 18, runSpacing: 8, alignment: WrapAlignment.center, children: [
-                    for (final phase in [
-                      (0, _copy(context, 'Live-TV', 'Canlı TV', 'Live TV')),
-                      (1, _copy(context, 'Filme', 'Filmler', 'Movies')),
-                      (2, _copy(context, 'Serien', 'Diziler', 'Series')),
-                    ])
-                      Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(_completedPhases > phase.$1
-                            ? Icons.check_circle : Icons.circle_outlined,
-                            color: const Color(0xFF20D9EC), size: 18),
-                        const SizedBox(width: 6),
-                        Text(phase.$2),
-                      ]),
-                  ]),
-                  const SizedBox(height: 20),
-                  Text(switch (_loadStage) {
-                    'profiles' => _copy(context, 'Playlist-Profile werden geladen…', 'Oynatma listesi profilleri yükleniyor…', 'Loading playlist profiles…'),
-                    'local' => _copy(context, 'Gespeicherte Mediathek wird geöffnet…', 'Kayıtlı medya kitaplığı açılıyor…', 'Opening saved library…'),
-                    _ => _copy(context, 'Playlist-Daten werden geladen…', 'Oynatma listesi verileri yükleniyor…', 'Loading playlist data…'),
-                  }, textAlign: TextAlign.center),
-                ] else ...[
+
                   const Icon(Icons.cloud_off_outlined, size: 48),
                   const SizedBox(height: 16),
                   Text(_copy(context,
@@ -571,7 +650,6 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
                     icon: const Icon(Icons.refresh),
                     label: Text(_copy(context, 'Erneut versuchen', 'Tekrar dene', 'Retry')),
                   ),
-                ],
                 if (_hasProfiles) ...[
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
