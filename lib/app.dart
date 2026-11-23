@@ -187,45 +187,38 @@ class _StartupLoadingState extends State<_StartupLoading> {
     };
     final labels = messages[widget.language] ?? messages['en']!;
     final auth = context.watch<AuthProvider>();
+    if (!_timedOut) {
+      // One consistent branded screen while account/device checks run.
+      return const SplashScreen();
+    }
     return Scaffold(
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          if (!_timedOut) const SplashScreen(),
-          if (!_timedOut) const ColoredBox(color: Color(0x55000000)),
-          Align(
-            alignment: _timedOut ? Alignment.center : Alignment.bottomCenter,
-            child: SingleChildScrollView(
+      body: Center(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(32),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
-            if (_timedOut) const Icon(Icons.error_outline, size: 44)
-            else const CircularProgressIndicator(),
+            const Icon(Icons.error_outline, size: 44),
             const SizedBox(height: 20),
-            Text(labels[_timedOut ? 1 : 0], textAlign: TextAlign.center,
-                style: _timedOut ? null : const TextStyle(color: Colors.white)),
-            if (_timedOut) ...[
-              const SizedBox(height: 20),
-              FilledButton(
-                autofocus: true,
-                onPressed: _retrying ? null : () async {
-                  setState(() { _timedOut = false; _retrying = true; });
-                  _startTimer();
-                  try {
-                    await auth.refreshDeviceAndAccess();
-                  } catch (_) {
-                    if (mounted) setState(() => _timedOut = true);
-                  } finally {
-                    if (mounted) setState(() => _retrying = false);
-                  }
-                },
-                child: Text(labels[2]),
-              ),
-              TextButton(onPressed: auth.isBusy ? null : auth.logout, child: Text(labels[3])),
-            ],
-          ]),
+            Text(labels[1], textAlign: TextAlign.center),
+            const SizedBox(height: 20),
+            FilledButton(
+              autofocus: true,
+              onPressed: _retrying ? null : () async {
+                setState(() { _timedOut = false; _retrying = true; });
+                _startTimer();
+                try {
+                  await auth.refreshDeviceAndAccess();
+                } catch (_) {
+                  if (mounted) setState(() => _timedOut = true);
+                } finally {
+                  if (mounted) setState(() => _retrying = false);
+                }
+              },
+              child: Text(labels[2]),
             ),
-          ),
-        ],
+            TextButton(onPressed: auth.isBusy ? null : auth.logout,
+                child: Text(labels[3])),
+          ]),
+        ),
       ),
     );
   }
@@ -291,7 +284,7 @@ class _LandscapeDashboardState extends State<_LandscapeDashboard> {
     // Only a verified session may expose the dashboard. Try automatic
     // activation once per entry, not after an explicit profile switch.
     final family = context.watch<FamilySessionProvider>();
-    if (_checkingDefault) {
+    if (_checkingDefault && !family.isReady) {
       // Keep the branded startup screen visible while the server verifies
       // whether the default adult profile may be entered automatically.
       // Never show the dashboard before family authorization succeeds.
@@ -511,6 +504,10 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
     if (!_loading && !_hasProfiles && !_loadFailed) {
       return const SetupScreen();
     }
+    // Returning users see the same splash throughout local restore and
+    // first-time network recovery. Do not show an additional progress screen.
+    // Preserve the actionable retry/edit UI if recovery actually fails.
+    if (_loading) return const SplashScreen();
     return Scaffold(
       appBar: AppBar(title: const Text('Streamia Player')),
       body: Center(
