@@ -460,7 +460,32 @@ class _SeriesDetailScreenState
       if (index < 0) return;
       // Avoid replacing data that may have arrived from another request.
       if (updated[index].seasons.isNotEmpty) return;
-      updated[index] = details;
+      // Preserve catalogue/enrichment fields when Xtream returns only episodes.
+      // A second asynchronous metadata request may already have updated this row.
+      final existing = updated[index];
+      String? prefer(String? incoming, String? previous) =>
+          incoming != null && incoming.trim().isNotEmpty ? incoming : previous;
+      updated[index] = Series(
+        id: existing.id,
+        categoryKey: existing.categoryKey,
+        title: existing.title,
+        seasons: details.seasons,
+        plot: prefer(details.plot, existing.plot),
+        posterUrl: prefer(details.posterUrl, existing.posterUrl),
+        backdropUrl: prefer(details.backdropUrl, existing.backdropUrl),
+        genre: prefer(details.genre, existing.genre),
+        releaseDate: prefer(details.releaseDate, existing.releaseDate),
+        ageRating: prefer(details.ageRating, existing.ageRating),
+        cast: prefer(details.cast, existing.cast),
+        director: prefer(details.director, existing.director),
+        rating: details.rating ?? existing.rating,
+        externalMetadataId: prefer(existing.externalMetadataId, details.externalMetadataId),
+        metadataSource: prefer(existing.metadataSource, details.metadataSource),
+        metadataProviderId: prefer(existing.metadataProviderId, details.metadataProviderId),
+        metadataAttribution: prefer(existing.metadataAttribution, details.metadataAttribution),
+        metadataLicense: prefer(existing.metadataLicense, details.metadataLicense),
+        metadataSourceUrl: prefer(existing.metadataSourceUrl, details.metadataSourceUrl),
+      );
       content.replaceLibrary(
         channels: content.channels,
         vod: content.vodItems,
@@ -500,8 +525,9 @@ class _SeriesDetailScreenState
         // Do not delay episode loading for an optional metadata lookup.
         if (!_detailsRequested) {
           _detailsRequested = true;
-          _loadEpisodes();
+          await _loadEpisodes();
         }
+        if (!mounted || content.sourceKey != _openedSourceKey) return;
         await content.enrichSeriesMetadata(
           widget.series.id,
           language: language,
