@@ -62,14 +62,24 @@ class PlaylistSwitchService {
 
   Future<bool> activate(PlaylistProfile profile, ContentProvider content, {bool forceRefresh = false, bool Function()? mayPublish, void Function(int completed, String stage)? onXtreamProgress, void Function(int live, int movies, int series)? onM3uProgress}) async {
     if (mayPublish != null && !mayPublish()) return false;
-    final generation = content.beginLibraryActivation();
-    // A previously loaded source can be switched to immediately, even offline.
-    if (!forceRefresh && content.activateCachedLibrary(profile.sourceKey, activationGeneration: generation)) {
-      if (content.isLibraryActivationCurrent(generation)) {
+    // Normal activation first restores the persisted catalog (or an already
+    // active in-memory catalog). This avoids downloading the same playlist
+    // again when switching profiles or reopening the application. Explicit
+    // refresh operations deliberately bypass the stored snapshot.
+    if (!forceRefresh) {
+      final restored = await content.restoreStoredLibrary(
+        profile.sourceKey,
+        sourceLabel: profile.displayName,
+      );
+      if (restored && content.isLoaded &&
+          content.sourceKey == profile.sourceKey) {
+        if (mayPublish != null && !mayPublish()) return false;
         await _profiles.setActive(profile.sourceKey);
+        return content.isLoaded && content.sourceKey == profile.sourceKey;
       }
-      return content.isLibraryActivationCurrent(generation);
+      if (mayPublish != null && !mayPublish()) return false;
     }
+    final generation = content.beginLibraryActivation();
     final config = await _sources.read(profile.sourceKey);
     if (!content.isLibraryActivationCurrent(generation)) return false;
     if (config == null) {
