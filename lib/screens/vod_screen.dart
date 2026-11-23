@@ -666,38 +666,20 @@ class _VodTileState extends State<_VodTile> {
 
   Future<void> _openDetails() async {
     if (_opening) return;
-
     setState(() => _opening = true);
-
-    VodItem? enriched;
-
     try {
-      final language =
-          context.read<LocaleProvider>().locale.languageCode;
-
-      enriched = await context
-          .read<ContentProvider>()
-          .enrichVodMetadata(
-            widget.item.id,
-            language: language,
-          );
-    } catch (_) {
-      // Metadata is optional. Playback data remains intact.
-    }
-
-    if (!mounted) return;
-
-    setState(() => _opening = false);
-
-    await pushWithFocusRestore(
-      context,
-      MaterialPageRoute(
-        builder: (_) => VodDetailScreen(
-          item: enriched ?? widget.item,
-          playbackItem: widget.item,
+      await pushWithFocusRestore(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VodDetailScreen(
+            item: widget.item,
+            playbackItem: widget.item,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      if (mounted) setState(() => _opening = false);
+    }
   }
 
   Future<void> _download() async {
@@ -898,7 +880,7 @@ class _VodTileState extends State<_VodTile> {
   }
 }
 
-class VodDetailScreen extends StatelessWidget {
+class VodDetailScreen extends StatefulWidget {
   final VodItem item;
 
   /// Original playlist item, preserved independently from
@@ -910,6 +892,30 @@ class VodDetailScreen extends StatelessWidget {
     required this.item,
     this.playbackItem,
   });
+
+  @override
+  State<VodDetailScreen> createState() => _VodDetailScreenState();
+}
+
+class _VodDetailScreenState extends State<VodDetailScreen> {
+  String? _sourceAtOpen;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final provider = context.read<ContentProvider>();
+      final source = provider.sourceKey;
+      _sourceAtOpen = source;
+      final language = context.read<LocaleProvider>().locale.languageCode;
+      try {
+        await provider.enrichVodMetadata(widget.item.id, language: language);
+      } catch (_) {
+        // External metadata is optional; original playback remains available.
+      }
+    });
+  }
 
   String _durationLabel(
     BuildContext context,
@@ -925,7 +931,7 @@ class VodDetailScreen extends StatelessWidget {
   }
 
   void _play(BuildContext context) {
-    final source = playbackItem ?? item;
+    final source = widget.playbackItem ?? widget.item;
 
     if (!_validVodUrl(source.streamUrl)) {
       _showVodError(context);
@@ -946,14 +952,23 @@ class VodDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final source = playbackItem ?? item;
+    final source = widget.playbackItem ?? widget.item;
     final family = context.watch<FamilySessionProvider>();
     final content = context.watch<ContentProvider>();
+    final item = content.sourceKey == _sourceAtOpen
+        ? content.vodItems.firstWhere(
+            (candidate) => candidate.id == source.id &&
+                candidate.streamUrl == source.streamUrl &&
+                candidate.categoryKey == source.categoryKey,
+            orElse: () => widget.item,
+          )
+        : widget.item;
     final current = content.vodItems.where((candidate) =>
         candidate.id == source.id &&
         candidate.streamUrl == source.streamUrl &&
         candidate.categoryKey == source.categoryKey);
-    final permitted = family.isReady && current.isNotEmpty &&
+    final permitted = (_sourceAtOpen == null || content.sourceKey == _sourceAtOpen) &&
+        family.isReady && current.isNotEmpty &&
         family.canAccessCategory(
           sourceKey: content.sourceKey,
           contentType: 'vod',
@@ -1003,16 +1018,19 @@ class VodDetailScreen extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                if (item.backdropUrl != null &&
-                    item.backdropUrl!
-                        .trim()
-                        .isNotEmpty)
+                if ((item.backdropUrl?.trim().isNotEmpty ?? false) ||
+                    (item.posterUrl?.trim().isNotEmpty ?? false))
                   CachedNetworkImage(
-                    imageUrl: item.backdropUrl!,
+                    imageUrl: (item.backdropUrl?.trim().isNotEmpty ?? false)
+                        ? item.backdropUrl!
+                        : item.posterUrl!,
                     fit: BoxFit.cover,
-                    errorWidget: (_, __, ___) =>
-                        const SizedBox.shrink(),
-                  ),
+                    errorWidget: (_, __, ___) => const Center(
+                      child: Icon(Icons.movie_outlined, size: 64),
+                    ),
+                  )
+                else
+                  const Center(child: Icon(Icons.movie_outlined, size: 64)),
                 DecoratedBox(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -1107,11 +1125,6 @@ class VodDetailScreen extends StatelessWidget {
                     ),
                 ],
                 const SizedBox(height: 24),
-                FilledButton.icon(
-                  onPressed: () => _play(context),
-                  icon: const Icon(Icons.play_arrow),
-                  label: Text(_vodText(context, 'play')),
-                ),
               ],
             ),
           ),
