@@ -12,7 +12,16 @@ import '../services/family_profile_service.dart';
 import 'family_profile_management_screen.dart';
 
 class FamilyProfileSelectionScreen extends StatefulWidget {
-  const FamilyProfileSelectionScreen({super.key});
+  const FamilyProfileSelectionScreen({
+    super.key,
+    this.initialPinProfile,
+    this.prefetchedProfiles,
+  });
+
+  final FamilyProfile? initialPinProfile;
+  // Reuse the account-scoped profile lookup already started by the startup gate.
+  // Subsequent refreshes after profile management always query the server.
+  final Future<List<FamilyProfile>>? prefetchedProfiles;
 
   @override
   State<FamilyProfileSelectionScreen> createState() =>
@@ -31,6 +40,8 @@ class _FamilyProfileSelectionScreenState
   bool _isLoading = true;
   bool _isSelecting = false;
   bool _isManaging = false;
+  bool _initialPinAttemptScheduled = false;
+  bool _firstProfileLoad = true;
 
   String? _errorMessage;
 
@@ -51,7 +62,19 @@ class _FamilyProfileSelectionScreenState
     });
 
     try {
-      final profiles = await _profileService.loadProfiles();
+      final firstLoad = _firstProfileLoad;
+      _firstProfileLoad = false;
+      List<FamilyProfile> profiles;
+      if (firstLoad && widget.prefetchedProfiles != null) {
+        try {
+          profiles = await widget.prefetchedProfiles!;
+        } catch (_) {
+          // Prefetch may have failed or become stale; a fresh request is safe.
+          profiles = await _profileService.loadProfiles();
+        }
+      } else {
+        profiles = await _profileService.loadProfiles();
+      }
 
       if (!mounted) return;
 
@@ -59,6 +82,24 @@ class _FamilyProfileSelectionScreenState
         _profiles = profiles;
         _isLoading = false;
       });
+      // A remembered protected adult goes directly to the PIN prompt once.
+      // Match against the fresh server list, never a stale stored object.
+      final requested = widget.initialPinProfile;
+      if (!_initialPinAttemptScheduled && requested != null) {
+        _initialPinAttemptScheduled = true;
+        for (final candidate in profiles) {
+          if (candidate.id == requested.id &&
+              candidate.accountUserId == requested.accountUserId &&
+              candidate.type == FamilyProfileType.adult) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted && !_isLoading && !_isSelecting) {
+                _selectProfile(candidate);
+              }
+            });
+            break;
+          }
+        }
+      }
     } catch (_) {
       if (!mounted) return;
 
@@ -148,9 +189,13 @@ class _FamilyProfileSelectionScreenState
 
       // The provider retains the adultPin parameter name
       // for compatibility. Its value is now the parent PIN.
+      // The list was already fetched for this selection screen. Reuse it
+      // instead of requesting the same account profiles a second time.
+      // activateProfile still validates the PIN and permission snapshot.
       final activated = await session.activateProfile(
         profile,
         adultPin: parentPin,
+        verifiedProfiles: _profiles,
       );
 
       if (!mounted) return;
