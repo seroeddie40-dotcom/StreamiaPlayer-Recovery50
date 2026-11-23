@@ -505,11 +505,21 @@ class _LiveTvScreenState extends State<LiveTvScreen> with CategorySortState<Live
         // Every TV row has a fixed extent, so an off-screen destination can
         // be materialized without scanning or laying out the entire playlist.
         final position = _tvChannelScroll.position;
-        final desired = (index * 66.0 - position.viewportDimension / 2 + 33)
-            .clamp(0.0, position.maxScrollExtent);
-        await _tvChannelScroll.animateTo(desired,
-            duration: const Duration(milliseconds: 100),
-            curve: Curves.easeOut);
+        // Standard TV behaviour: focus travels through the visible rows;
+        // only scroll when the next row reaches the top/bottom edge.
+        const rowExtent = 66.0;
+        final top = index * rowExtent;
+        final bottom = top + rowExtent;
+        final offset = position.pixels;
+        final desired = (top < offset
+                ? top
+                : (bottom > offset + position.viewportDimension
+                    ? bottom - position.viewportDimension
+                    : offset))
+            .clamp(position.minScrollExtent, position.maxScrollExtent).toDouble();
+        if ((desired - offset).abs() > 0.5) {
+          _tvChannelScroll.jumpTo(desired);
+        }
       }
       if (!mounted) return;
       await WidgetsBinding.instance.endOfFrame;

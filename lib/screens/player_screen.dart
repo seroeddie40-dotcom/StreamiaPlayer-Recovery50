@@ -368,9 +368,17 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
   void _jumpToNavigationIndex(ScrollController controller, int index) {
     if (!controller.hasClients || index < 0) return;
     final position = controller.position;
-    final target = (index * _navigationRowExtent - position.viewportDimension / 3)
-        .clamp(position.minScrollExtent, position.maxScrollExtent).toDouble();
-    controller.jumpTo(target);
+    // Classic TV list navigation: keep the viewport fixed while focus moves
+    // through visible rows. Scroll by one row only at the viewport boundary.
+    final top = index * _navigationRowExtent;
+    final bottom = top + _navigationRowExtent;
+    final currentTop = position.pixels;
+    final currentBottom = currentTop + position.viewportDimension;
+    final target = top < currentTop
+        ? top
+        : (bottom > currentBottom ? bottom - position.viewportDimension : currentTop);
+    final clamped = target.clamp(position.minScrollExtent, position.maxScrollExtent).toDouble();
+    if ((clamped - currentTop).abs() > 0.5) controller.jumpTo(clamped);
   }
 
   // Keep the remote's focused row visible even when a lazy list scrolls.
@@ -389,8 +397,8 @@ class _PlayerScreenState extends State<PlayerScreen> with WidgetsBindingObserver
         rowContext,
         duration: const Duration(milliseconds: 90),
         curve: Curves.easeOutCubic,
-        alignment: 0.25,
-        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtEnd,
+        alignment: 0.0,
+        alignmentPolicy: ScrollPositionAlignmentPolicy.keepVisibleAtStart,
       );
     });
   }
