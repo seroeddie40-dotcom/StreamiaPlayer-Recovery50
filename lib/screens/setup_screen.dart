@@ -193,6 +193,25 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   String? _qrLink;
   Timer? _qrExpiry;
   bool _startingQr = false;
+  bool _qrImportPending = false;
+
+  void _runReceivedQrImport(bool isXtream) {
+    if (!mounted || _qrImportPending || _isLoading) return;
+    _qrImportPending = true;
+    // Defer navigation/import until the pairing HTTP request can complete.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) { _qrImportPending = false; return; }
+      try {
+        if (isXtream) {
+          await _connectXtream();
+        } else {
+          await _startM3uImport();
+        }
+      } finally {
+        _qrImportPending = false;
+      }
+    });
+  }
 
   @override
   void initState() {
@@ -222,7 +241,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
     final langCode = context.read<LocaleProvider>().locale.languageCode;
     try {
       serverIp = await TvServer.start((type, d1, d2, d3) {
-        if (!mounted || _isLoading) {
+        if (!mounted || _isLoading || _qrImportPending) {
           if (type == 'm3u_file') unawaited(_deleteReceivedFile(d1));
           return;
         }
@@ -246,17 +265,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
             }
           });
           _tabController.animateTo(1);
-          if (DeviceLayout.isTelevision) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted || _isLoading || _tabController.index != 1) return;
-              final target = _m3uConnectFocus;
-              final targetContext = target.context;
-              if (targetContext == null) return;
-              target.requestFocus();
-              unawaited(Scrollable.ensureVisible(targetContext,
-                alignment: 1, duration: Duration.zero));
-            });
-          }
+          _runReceivedQrImport(false);
         } else if (type == 'xtream') {
           setState(() {
             _xtreamServerController.text = d1;
@@ -264,17 +273,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
             _xtreamPassController.text = d3;
           });
           _tabController.animateTo(2);
-          if (DeviceLayout.isTelevision) {
-            WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (!mounted || _isLoading || _tabController.index != 2) return;
-              final target = _xtreamConnectFocus;
-              final targetContext = target.context;
-              if (targetContext == null) return;
-              target.requestFocus();
-              unawaited(Scrollable.ensureVisible(targetContext,
-                alignment: 1, duration: Duration.zero));
-            });
-          }
+          _runReceivedQrImport(true);
         }
       }, langCode);
     } catch (_) {
