@@ -21,6 +21,7 @@ import 'screens/family_profile_selection_screen.dart';
 import 'services/playlist_profile_store.dart';
 import 'models/playlist_profile.dart';
 import 'services/family_profile_service.dart';
+import 'models/family_profile.dart';
 import 'services/playlist_switch_service.dart';
 
 import 'screens/login_screen.dart';
@@ -229,7 +230,10 @@ class _StartupLoadingState extends State<_StartupLoading> {
 /// landscape experience as soon as the library/dashboard is displayed.
 /// Android TV always remains in landscape.
 class _LandscapeDashboard extends StatefulWidget {
-  const _LandscapeDashboard();
+  const _LandscapeDashboard({this.prefetchedProfiles, this.prefetchedLastProfileId});
+
+  final Future<List<FamilyProfile>>? prefetchedProfiles;
+  final Future<String?>? prefetchedLastProfileId;
 
   @override
   State<_LandscapeDashboard> createState() => _LandscapeDashboardState();
@@ -237,6 +241,11 @@ class _LandscapeDashboard extends StatefulWidget {
 
 class _LandscapeDashboardState extends State<_LandscapeDashboard> {
   bool _checkingDefault = true;
+  FamilyProfile? _pendingPinProfile;
+
+  // A provider notification can rebuild the dashboard many times during
+  // startup. Schedule the expensive deferred media restore only once.
+  bool _deferredMediaRestoreScheduled = false;
 
   Future<void> _tryDefaultProfile() async {
     if (!mounted) return;
@@ -249,11 +258,14 @@ class _LandscapeDashboardState extends State<_LandscapeDashboard> {
       // Reopen the last profile only after the server has rechecked its
       // membership and permissions. A PIN-protected adult profile is NEVER
       // silently unlocked: it must be selected and authorized with its PIN.
-      final prefs = await SharedPreferences.getInstance();
-      final lastId = prefs.getString('streamia_last_family_profile:$accountId');
+      final lastId = await (widget.prefetchedLastProfileId ??
+          SharedPreferences.getInstance().then((prefs) =>
+              prefs.getString('streamia_last_family_profile:$accountId')));
+      debugPrint('[Streamia/Startup] Last-profile preference read after ${profileStartWatch.elapsedMilliseconds} ms; stored=${lastId != null && lastId.isNotEmpty}');
       if (!mounted || context.read<AuthProvider>().user?.id != accountId) return;
       if (lastId != null && lastId.isNotEmpty) {
-        final profiles = await FamilyProfileService().loadProfiles()
+        final profiles = await (widget.prefetchedProfiles ??
+                FamilyProfileService().loadProfiles())
             .timeout(const Duration(seconds: 12));
         debugPrint('[Streamia/Startup] Profile list fetched in ${profileStartWatch.elapsedMilliseconds} ms');
         if (!mounted || context.read<AuthProvider>().user?.id != accountId) return;
@@ -265,6 +277,7 @@ class _LandscapeDashboardState extends State<_LandscapeDashboard> {
             final activated = await family.activateProfile(
               profile, verifiedProfiles: profiles,
             );
+            debugPrint('[Streamia/Startup] Child profile authorization completed after ${profileStartWatch.elapsedMilliseconds} ms; success=$activated');
             if (activated) return;
             // Do not silently fall back to an adult profile when a previously
             // selected child profile fails its current permission check.
@@ -276,9 +289,24 @@ class _LandscapeDashboardState extends State<_LandscapeDashboard> {
           // that requirement through ensureDefaultProfile() and rejects
           // protected or different adult profiles. Never silently substitute
           // another adult profile if authorization fails.
-          await family.activateProfile(
+          // With a child profile on the account, the adult is protected.
+          // Do not start an activation that the provider must reject; go
+          // directly to the remembered adult's parent-PIN dialog instead.
+          if (profiles.any((candidate) =>
+              candidate.accountUserId == accountId && candidate.isChild)) {
+            _pendingPinProfile = profile;
+            debugPrint('[Streamia/Startup] Protected adult profile requires PIN');
+            return;
+          }
+          final activated = await family.activateProfile(
             profile, verifiedProfiles: profiles,
           );
+          debugPrint('[Streamia/Startup] Adult profile authorization completed after ${profileStartWatch.elapsedMilliseconds} ms; success=$activated');
+          // A protected adult is not auto-unlocked. Route straight to that
+          // profile's parent-PIN dialog instead of a generic selection grid.
+          if (!activated && mounted) {
+            _pendingPinProfile = profile;
+          }
           return;
         }
         // A stored profile ID that is no longer available also requires
@@ -286,12 +314,32 @@ class _LandscapeDashboardState extends State<_LandscapeDashboard> {
         return;
       }
       if (!mounted || family.isReady || family.isLoading) return;
+      // A missing last-profile preference is not permission to bypass the
+      // parental PIN. If a child profile is already known to exist, skip the
+      // default-adult RPC entirely and show explicit profile selection.
+      // Reuse the profile lookup started alongside the local catalog restore.
+      final knownProfiles = await (widget.prefetchedProfiles ??
+              FamilyProfileService().loadProfiles())
+          .timeout(const Duration(seconds: 12));
+      if (!mounted || context.read<AuthProvider>().user?.id != accountId) return;
+      if (knownProfiles.any((candidate) =>
+          candidate.accountUserId == accountId && candidate.isChild)) {
+        debugPrint('[Streamia/Startup] Child profile exists; skipping default adult auto-unlock');
+        return;
+      }
       // Only an explicitly unprotected default adult can be auto-activated.
       final profile = await FamilyProfileService().ensureDefaultProfile()
           .timeout(const Duration(seconds: 15));
+      debugPrint('[Streamia/Startup] Default profile resolved after ${profileStartWatch.elapsedMilliseconds} ms');
       if (!mounted || context.read<AuthProvider>().user?.id != accountId ||
           family.isReady || family.isLoading) return;
-      await family.activateProfile(profile);
+      // ensureDefaultProfile() has just returned the account's server-backed
+      // default. Pass that result to avoid fetching the entire profile list
+      // again inside activateProfile(). The provider still independently
+      // confirms the unprotected default and loads its permission snapshot.
+      await family.activateProfile(
+        profile, verifiedProfiles: <FamilyProfile>[profile],
+      );
     } catch (error) {
       debugPrint('[Streamia/Startup] Profile restore: $error');
       // Fail closed: protected or unavailable profiles require selection.
@@ -339,7 +387,25 @@ class _LandscapeDashboardState extends State<_LandscapeDashboard> {
       return const SplashScreen();
     }
     if (!family.isReady) {
-      return const FamilyProfileSelectionScreen();
+      return FamilyProfileSelectionScreen(
+        initialPinProfile: _pendingPinProfile,
+        prefetchedProfiles: widget.prefetchedProfiles,
+      );
+    }
+    // Start the costly film/series cache decryption only after the authorized
+    // dashboard has painted. This avoids competing with PIN/profile checks.
+    if (!_deferredMediaRestoreScheduled) {
+      _deferredMediaRestoreScheduled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (!context.read<FamilySessionProvider>().isReady) {
+          // The profile can change between build and frame completion.
+          // Permit a new authorized dashboard frame to schedule the restore.
+          _deferredMediaRestoreScheduled = false;
+          return;
+        }
+        context.read<ContentProvider>().resumeDeferredMediaRestore();
+      });
     }
     return const DashboardScreen();
   }
@@ -359,6 +425,8 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
   bool _hasProfiles = false;
   bool _loadFailed = false;
   bool _startupReady = false;
+  Future<List<FamilyProfile>>? _prefetchedFamilyProfiles;
+  Future<String?>? _prefetchedLastProfileId;
   String _loadStage = 'profiles';
   int? _xtreamCompleted;
   int _progressPercent = 0;
@@ -494,6 +562,32 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
   @override
   void initState() {
     super.initState();
+    // Profile discovery is independent of local catalog decryption. Start it
+    // alongside the offline restore instead of waiting until after it.
+    // The result is scoped to the signed-in account and still requires
+    // activateProfile's server-side authorization before showing content.
+    final accountId = context.read<AuthProvider>().user?.id;
+    if (accountId != null) {
+      // Read the last-used profile ID while the local library is restoring,
+      // not after it. This read contains only an account-scoped ID, never a
+      // PIN or permission grant; activateProfile still authorizes access.
+      _prefetchedLastProfileId = SharedPreferences.getInstance().then(
+        (prefs) => prefs.getString('streamia_last_family_profile:$accountId'),
+      );
+      unawaited(_prefetchedLastProfileId!.then((_) {},
+          onError: (Object _, StackTrace __) {}));
+      final task = FamilyProfileService().loadProfiles();
+      // Attach an error handler immediately: failures are handled later by
+      // the profile selection flow, not as uncaught background exceptions.
+      _prefetchedFamilyProfiles = task.then((profiles) {
+        if (!mounted || context.read<AuthProvider>().user?.id != accountId) {
+          throw StateError('Account changed during profile prefetch');
+        }
+        return profiles;
+      });
+      unawaited(_prefetchedFamilyProfiles!.then((_) {},
+          onError: (Object _, StackTrace __) {}));
+    }
     if (context.read<ContentProvider>().isLoaded) {
       _startupReady = true;
     } else {
@@ -559,16 +653,11 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
       ).timeout(const Duration(seconds: 20));
       debugPrint('[Streamia/Library] local restore finished after ${watch.elapsedMilliseconds}ms; restored=$restored');
       if (!restored && !content.isLoaded) {
-        // No cached catalog: use the already saved secure source credentials.
-        if (!mounted || attempt != _loadAttempt) return;
-        setState(() { _loadStage = 'network'; _progressPercent = 20; });
-        final activated = await _activateOnce(
-          content, active, attempt,
-        ).timeout(const Duration(seconds: 30));
-        debugPrint('[Streamia/Library] network activation finished after ${watch.elapsedMilliseconds}ms; activated=$activated');
-        if (!activated && !content.isLoaded) {
-          throw StateError('Playlist activation did not complete');
-        }
+        // Returning users must NEVER silently re-import M3U/Xtream data.
+        // Missing or unreadable local data is an explicit recovery case:
+        // show Retry/Edit playlist instead of a 30-second network request.
+        // A delayed local restore can still publish through _restoreOnce.
+        throw StateError('No locally cached playlist catalog; explicit recovery required');
       }
       if (!mounted || attempt != _loadAttempt) return;
       if (content.isLoaded) {
@@ -617,7 +706,10 @@ class _LibraryStartupGateState extends State<_LibraryStartupGate> {
     // instead of requiring a second startup attempt or a manual TV click.
     // Family-profile authorization remains enforced by _LandscapeDashboard.
     if (libraryLoaded) {
-      return const _LandscapeDashboard();
+      return _LandscapeDashboard(
+        prefetchedProfiles: _prefetchedFamilyProfiles,
+        prefetchedLastProfileId: _prefetchedLastProfileId,
+      );
     }
     if (!_loading && !_hasProfiles && !_loadFailed) {
       return const SetupScreen();
