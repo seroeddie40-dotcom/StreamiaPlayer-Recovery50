@@ -475,7 +475,7 @@ class XtreamService {
         title: (j['name'] ??
                 'Unbekannter Film')
             .toString(),
-        plot: _nullable(j['plot']),
+        plot: _nullable(j['plot']) ?? _nullable(j['description']),
         posterUrl:
             _nullable(j['stream_icon']) ??
             _nullable(j['cover_big']) ??
@@ -564,7 +564,7 @@ class XtreamService {
         title: (j['name'] ??
                 'Unbekannte Serie')
             .toString(),
-        plot: _nullable(j['plot']),
+        plot: _nullable(j['plot']) ?? _nullable(j['description']),
         posterUrl:
             _nullable(j['cover_big']) ??
             _nullable(j['cover']),
@@ -615,92 +615,77 @@ class XtreamService {
         ? details['info'] as Map
         : const {};
 
+    // Xtream-compatible servers return seasons either as a map keyed by
+    // season number or as a flat list. Ignore malformed records rather than
+    // discarding the entire series.
     final episodesRaw = details['episodes'];
-    final seasons = <Season>[];
-
+    final grouped = <int, List<dynamic>>{};
     if (episodesRaw is Map) {
-      final keys = episodesRaw.keys.toList()
-        ..sort(
-          (a, b) =>
-              (int.tryParse('$a') ?? 0).compareTo(
-            int.tryParse('$b') ?? 0,
-          ),
-        );
-
-      for (final key in keys) {
-        final rawList = episodesRaw[key];
-
-        if (rawList is! List) continue;
-
-        final episodes = <Episode>[];
-
-        for (var i = 0;
-            i < rawList.length;
-            i++) {
-          final rawEpisode = rawList[i];
-
-          if (rawEpisode is! Map) continue;
-
-          final e = rawEpisode;
-          final epId = '${e['id']}';
-          final ext =
-              (e['container_extension'] ??
-                      'mp4')
-                  .toString();
-
-          final epInfo = e['info'] is Map
-              ? e['info'] as Map
-              : const {};
-
-          episodes.add(
-            Episode(
-              id: epId,
-              title: (e['title'] ??
-                      e['name'] ??
-                      'Folge ${i + 1}')
-                  .toString(),
-              number: int.tryParse(
-                    '${e['episode_num'] ?? i + 1}',
-                  ) ??
-                  i + 1,
-              streamUrl:
-                  '$baseUrl/series/'
-                  '${Uri.encodeComponent(username)}/'
-                  '${Uri.encodeComponent(password)}/'
-                  '$epId.$ext',
-              plot:
-                  _nullable(epInfo['plot']),
-              stillUrl: _nullable(
-                epInfo['movie_image'],
-              ),
-              releaseDate: _nullable(
-                epInfo['releasedate'],
-              ),
-              durationSeconds: int.tryParse(
-                    '${epInfo['duration_secs'] ?? ''}',
-                  ) ??
-                  _durationFromText(
-                    epInfo['duration'],
-                  ),
-            ),
-          );
-        }
-
-        seasons.add(
-          Season(
-            number:
-                int.tryParse('$key') ??
-                seasons.length + 1,
-            episodes: episodes,
-          ),
-        );
+      for (final entry in episodesRaw.entries) {
+        final number = int.tryParse('${entry.key}');
+        if (entry.value is! List) continue;
+        final seasonNumber = number ?? 1;
+        grouped.putIfAbsent(seasonNumber, () => <dynamic>[])
+            .addAll(entry.value as List);
+      }
+    } else if (episodesRaw is List) {
+      for (final raw in episodesRaw) {
+        if (raw is! Map) continue;
+        final number = int.tryParse('${raw['season'] ?? 1}') ?? 1;
+        grouped.putIfAbsent(number, () => <dynamic>[]).add(raw);
+      }
+    }
+    final seasons = <Season>[];
+    final seasonNumbers = grouped.keys.toList()..sort();
+    for (final seasonNumber in seasonNumbers) {
+      final episodes = <Episode>[];
+      final seen = <String>{};
+      final records = grouped[seasonNumber]!;
+      for (var i = 0; i < records.length; i++) {
+        final raw = records[i];
+        if (raw is! Map) continue;
+        final id = _nullable(raw['id'] ?? raw['stream_id']);
+        if (id == null || !seen.add(id)) continue;
+        final episodeInfo = raw['info'] is Map ? raw['info'] as Map : const {};
+        final extension = _nullable(raw['container_extension'] ??
+                episodeInfo['container_extension']) ?? 'mp4';
+        // Never interpolate untrusted extension characters into a URL path.
+        final safeExtension = RegExp(r'^[a-zA-Z0-9]{1,8}$')
+                .hasMatch(extension) ? extension : 'mp4';
+        final number = int.tryParse('${raw['episode_num'] ?? i + 1}') ?? i + 1;
+        episodes.add(Episode(
+          id: id,
+          title: _nullable(raw['title']) ?? _nullable(raw['name']) ??
+              'Folge $number',
+          number: number,
+          streamUrl: '$baseUrl/series/'
+              '${Uri.encodeComponent(username)}/'
+              '${Uri.encodeComponent(password)}/'
+              '${Uri.encodeComponent(id)}.$safeExtension',
+          plot: _nullable(episodeInfo['plot']) ??
+              _nullable(episodeInfo['description']) ??
+              _nullable(raw['plot']) ?? _nullable(raw['description']),
+          stillUrl: _nullable(episodeInfo['movie_image']) ??
+              _nullable(episodeInfo['cover']) ?? _nullable(raw['movie_image']),
+          releaseDate: _nullable(episodeInfo['releasedate']) ??
+              _nullable(episodeInfo['releaseDate']) ??
+              _nullable(raw['releasedate']),
+          durationSeconds: int.tryParse(
+                '${episodeInfo['duration_secs'] ?? raw['duration_secs'] ?? ''}',
+              ) ?? _durationFromText(episodeInfo['duration'] ?? raw['duration']),
+        ));
+      }
+      episodes.sort((a, b) => a.number.compareTo(b.number));
+      if (episodes.isNotEmpty) {
+        seasons.add(Season(number: seasonNumber, episodes: episodes));
       }
     }
 
     final enriched =
         catalogSeries.copyWith(
-      plot: _nullable(info['plot']),
-      posterUrl: _nullable(info['cover']),
+      plot: _nullable(info['plot']) ?? _nullable(info['description']) ??
+          _nullable(details['plot']),
+      posterUrl: _nullable(info['cover_big']) ?? _nullable(info['cover']),
       backdropUrl: _firstString(
         info['backdrop_path'],
       ),
