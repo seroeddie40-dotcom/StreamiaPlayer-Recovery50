@@ -133,7 +133,20 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   String? _receivedM3uPath;
 
   Future<void> _deleteReceivedFile(String path) async {
-    try { await File(path).parent.delete(recursive: true); } catch (_) {}
+    // Only delete the isolated upload directory created by TvServer.
+    // Never recursively remove a directory belonging to a user-picked file.
+    try {
+      final file = File(path);
+      final parent = file.parent;
+      final tempRoot = Directory.systemTemp.absolute.path;
+      final parentPath = parent.absolute.path;
+      final separator = Platform.pathSeparator;
+      if (file.uri.pathSegments.last != 'playlist.m3u' ||
+          !parentPath.startsWith('$tempRoot$separator') ||
+          !parent.uri.pathSegments.where((part) => part.isNotEmpty)
+              .last.startsWith('streamia_upload_')) return;
+      await parent.delete(recursive: true);
+    } catch (_) {}
   }
 
   static const _setupTranslations = <String, Map<String, String>>{
@@ -194,6 +207,17 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
   Timer? _qrExpiry;
   bool _startingQr = false;
   bool _qrImportPending = false;
+
+  // Pairing is only needed until a playlist has been committed. Close the
+  // local HTTP listener and invalidate its token after a successful import;
+  // do not leave the phone-to-TV setup endpoint running behind the dashboard.
+  void _finishSuccessfulImport() {
+    _qrExpiry?.cancel();
+    _qrExpiry = null;
+    _qrLink = null;
+    _ipAddress = null;
+    TvServer.stop();
+  }
 
   void _runReceivedQrImport(bool isXtream) {
     if (!mounted || _qrImportPending || _isLoading) return;
@@ -489,6 +513,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         sourceKey: sourceKey,
         sourceLabel: _m3uNameController.text.trim(),
       );
+      _finishSuccessfulImport();
       if (widget.returnToPreviousOnSuccess) {
         Navigator.of(context).pop(true);
       }
@@ -500,12 +525,21 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
       if (!committed && newlyCopiedPath != null) {
         try { await File(newlyCopiedPath).delete(); } catch (_) {}
       }
-      if (path == _receivedM3uPath && (committed || !mounted)) {
-        _receivedM3uPath = null;
-        await _deleteReceivedFile(path);
+      // Finish catalog writes before releasing the staged provider and QR
+      // upload, including when this screen was disposed during the import.
+      try {
+        await staged.waitForCatalogWrites();
+      } finally {
+        staged.dispose();
+        if (path == _receivedM3uPath) {
+          _receivedM3uPath = null;
+          if (_selectedM3uPath == path) {
+            _selectedM3uPath = null;
+            _selectedM3uName = null;
+          }
+          await _deleteReceivedFile(path);
+        }
       }
-      await staged.waitForCatalogWrites();
-      staged.dispose();
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -563,6 +597,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         sourceKey: sourceKey,
         sourceLabel: _m3uNameController.text.trim(),
       );
+      _finishSuccessfulImport();
       if (widget.returnToPreviousOnSuccess) {
         Navigator.of(context).pop(true);
       }
@@ -636,6 +671,7 @@ class _SetupScreenState extends State<SetupScreen> with SingleTickerProviderStat
         sourceLabel: Uri.tryParse(server)?.host ?? 'Xtream',
       );
       context.read<ContentProvider>().setLoaded(true);
+      _finishSuccessfulImport();
       if (widget.returnToPreviousOnSuccess) {
         Navigator.of(context).pop(true);
       }
