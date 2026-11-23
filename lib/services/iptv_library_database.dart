@@ -160,7 +160,7 @@ class IptvLibraryDatabase {
     onProgress?.call(total, total);
   }
 
-  Future<StoredIptvLibrary?> load(String sourceKey) async {
+  Future<StoredIptvLibrary?> load(String sourceKey, {bool liveOnly = false}) async {
     final db = await _db;
     final matchingLibraries = await db.query(
       'libraries', columns: ['source_key'], where: 'source_key = ?',
@@ -170,13 +170,16 @@ class IptvLibraryDatabase {
     // Resolve the Android keystore-backed key once before processing rows.
     // Decrypt in bounded batches: concurrent crypto work avoids one awaited
     // platform/crypto future per row while limiting peak memory on TV boxes.
-    final preparedKey = await _getKey();
+    // Fetch the three independent SQLite result sets while Android Keystore
+    // resolves the decryption key. Neither operation requires the other.
+    final keyFuture = _getKey();
     Future<List<Map<String, dynamic>>> read(String table) async {
       final stopwatch = Stopwatch()..start();
       final rows = await db.query(
         table, columns: ['payload'], where: 'source_key = ?',
         whereArgs: [sourceKey],
       );
+      final preparedKey = await keyFuture;
       const batchSize = 32;
       final result = <Map<String, dynamic>>[];
       for (var offset = 0; offset < rows.length; offset += batchSize) {
@@ -190,10 +193,45 @@ class IptvLibraryDatabase {
       debugPrint('[Streamia/Cache] $table rows=${rows.length} elapsedMs=${stopwatch.elapsedMilliseconds}');
       return result;
     }
+    // The three independent catalog tables can be read concurrently.
+    // Previously every film/series decrypt waited for all channel rows,
+    // making cold starts unnecessarily serial on slower Android TV boxes.
+    // Keep the public load contract atomic: publish only after all three
+    // complete, so no screen can observe a half-restored catalog.
+    final catalogs = await Future.wait<List<Map<String, dynamic>>>([
+      read('channels'),
+      if (!liveOnly) read('vod'),
+      if (!liveOnly) read('series'),
+    ]);
     return StoredIptvLibrary(
-      channels: (await read('channels')).map((v) => _channelFromJson(v as Map<String, dynamic>, sourceKey)).toList(growable: false),
-      vod: (await read('vod')).map((v) => _vodFromJson(v as Map<String, dynamic>)).toList(growable: false),
-      series: (await read('series')).map((v) => _seriesFromJson(v as Map<String, dynamic>)).toList(growable: false),
+      channels: catalogs[0].map((v) => _channelFromJson(v, sourceKey)).toList(growable: false),
+      vod: liveOnly ? <VodItem>[] : catalogs[1].map(_vodFromJson).toList(growable: false),
+      series: liveOnly ? <Series>[] : catalogs[2].map(_seriesFromJson).toList(growable: false),
+    );
+  }
+
+  /// Decrypt movie and series rows after Live TV has become usable.
+  /// Never fetches the remote playlist and never changes the stored catalog.
+  Future<({List<VodItem> vod, List<Series> series})> loadMedia(String sourceKey) async {
+    final db = await _db;
+    final keyFuture = _getKey();
+    Future<List<Map<String, dynamic>>> read(String table) async {
+      final rows = await db.query(table, columns: ['payload'],
+          where: 'source_key = ?', whereArgs: [sourceKey]);
+      final key = await keyFuture;
+      final result = <Map<String, dynamic>>[];
+      for (var i = 0; i < rows.length; i += 32) {
+        final end = i + 32 < rows.length ? i + 32 : rows.length;
+        result.addAll(await Future.wait(rows.sublist(i, end).map(
+          (row) => _decrypt(row['payload'] as String, preparedKey: key),
+        )));
+      }
+      return result;
+    }
+    final results = await Future.wait([read('vod'), read('series')]);
+    return (
+      vod: results[0].map(_vodFromJson).toList(growable: false),
+      series: results[1].map(_seriesFromJson).toList(growable: false),
     );
   }
 
