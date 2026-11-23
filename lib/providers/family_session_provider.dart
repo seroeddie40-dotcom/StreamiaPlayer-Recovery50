@@ -354,6 +354,9 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<bool> activateProfile(
     FamilyProfile profile, {
     String? adultPin,
+    // Optional profiles fetched in the same startup operation. The snapshot
+    // authorization below still checks server-side folder permissions.
+    List<FamilyProfile>? verifiedProfiles,
   }) async {
     final generation = ++_generation;
 
@@ -376,7 +379,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
         return false;
       }
 
-      final profiles =
+      final profiles = verifiedProfiles ??
           await _profileService.loadProfiles();
 
       if (generation != _generation ||
@@ -509,6 +512,19 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       _notify();
       if (_profileSyncTimer == null) _startProfileSync();
+      // Save only after successful authorization. Never persist a PIN/token.
+      // Account-scoped key prevents cross-account profile reuse.
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        if (isReady && _client.auth.currentUser?.id == accountId &&
+            _activeProfile?.id == verifiedProfile.id) {
+          await prefs.setString(
+            'streamia_last_family_profile:$accountId', verifiedProfile.id,
+          );
+        }
+      } catch (error) {
+        debugPrint('[Streamia/Family] Could not persist last profile: $error');
+      }
       return isReady;
     } catch (_) {
       _finishFailedActivation(generation);
