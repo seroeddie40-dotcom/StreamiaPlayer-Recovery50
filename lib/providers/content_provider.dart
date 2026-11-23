@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:crypto/crypto.dart';
 import 'dart:convert';
@@ -49,6 +50,8 @@ class ContentProvider extends ChangeNotifier {
         _maxInactiveCachedLibraries = maxInactiveCachedLibraries;
   final Map<String, _ContentLibrarySnapshot> _libraryCache = {};
   int _activationGeneration = 0;
+  String? _partialLibrarySourceKey;
+  String? _mediaRestoreInFlightSourceKey;
   Future<void> _catalogWriteQueue = Future<void>.value();
   Object? _lastCatalogSaveError;
   Object? get lastCatalogSaveError => _lastCatalogSaveError;
@@ -58,13 +61,59 @@ class ContentProvider extends ChangeNotifier {
   Future<bool> restoreStoredLibrary(String key, {String? sourceLabel}) async {
     final generation = beginLibraryActivation();
     if (activateCachedLibrary(key, activationGeneration: generation)) return true;
-    final stored = await IptvLibraryDatabase.instance.load(key);
+    // Restore only Live TV for the first dashboard frame. The encrypted
+    // movie/series catalog remains on disk and is decoded in the background.
+    final stored = await IptvLibraryDatabase.instance.load(key, liveOnly: true);
     if (stored == null || !isLibraryActivationCurrent(generation)) return false;
-    return replaceLibrary(
+    final published = replaceLibrary(
       channels: stored.channels, vod: stored.vod, series: stored.series,
       sourceKey: key, sourceLabel: sourceLabel,
       activationGeneration: generation, persist: false,
     );
+    if (published) {
+      _partialLibrarySourceKey = key;
+      // The dashboard explicitly starts the expensive media restore after
+      // profile authorization and its first rendered frame.
+    }
+    return published;
+  }
+
+  /// Called only after the authorized dashboard has rendered its first frame.
+  /// Never starts a remote playlist request.
+  void resumeDeferredMediaRestore() {
+    final key = _partialLibrarySourceKey;
+    if (key == null || !_isLoaded || _sourceKey != key ||
+        _mediaRestoreInFlightSourceKey == key) return;
+    _mediaRestoreInFlightSourceKey = key;
+    unawaited(_restoreMediaAfterStartup(key, _activationGeneration));
+  }
+
+  Future<void> _restoreMediaAfterStartup(String key, int generation) async {
+    try {
+      // Allow the first dashboard frame to render before starting thousands
+      // of movie/series decryptions. Otherwise background work immediately
+      // competes with profile authorization and TV UI initialization.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!isLibraryActivationCurrent(generation) || !_isLoaded ||
+          _sourceKey != key) return;
+      final media = await IptvLibraryDatabase.instance.loadMedia(key);
+      if (!isLibraryActivationCurrent(generation) || !_isLoaded ||
+          _sourceKey != key) return;
+      // Preserve the already usable Live TV list and current family session.
+      _vodItems = List<VodItem>.unmodifiable(media.vod);
+      _series = List<Series>.unmodifiable(media.series);
+      _partialLibrarySourceKey = null;
+      _resolveCurrentSourceHistory();
+      notifyListeners();
+      debugPrint('[Streamia/Startup] Background movie/series cache ready');
+    } catch (error) {
+      // Live TV remains usable; never trigger an implicit network import.
+      debugPrint('[Streamia/Startup] Background media cache failed: $error');
+    } finally {
+      if (_mediaRestoreInFlightSourceKey == key) {
+        _mediaRestoreInFlightSourceKey = null;
+      }
+    }
   }
 
   /// Wait for queued writes, useful before switching accounts or testing.
@@ -76,7 +125,7 @@ class ContentProvider extends ChangeNotifier {
   bool isLibraryActivationCurrent(int generation) => generation == _activationGeneration;
 
   void _rememberLibrary(String key) {
-    if (!_isLoaded) return;
+    if (!_isLoaded || key == _partialLibrarySourceKey) return;
     _libraryCache.remove(key);
     _libraryCache[key] = _ContentLibrarySnapshot(_channels, _vodItems, _series, _sourceLabel);
     while (_libraryCache.length > _maxInactiveCachedLibraries) {
@@ -339,6 +388,7 @@ class ContentProvider extends ChangeNotifier {
     for (final channel in channels) {
       channel.sourceKey = effectiveSourceKey;
     }
+    _partialLibrarySourceKey = null;
     _channels = List<Channel>.unmodifiable(channels);
     _vodItems = List.unmodifiable(vod);
     _series = List.unmodifiable(series);

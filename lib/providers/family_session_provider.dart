@@ -62,6 +62,7 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   bool _foreground = true;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   Timer? _networkRetryTimer;
+  Timer? _initialProfileSyncTimer;
   bool _syncRequested = false;
 
   void _onConnectivityChanged(List<ConnectivityResult> results) {
@@ -87,6 +88,8 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _stopProfileSync() {
+    _initialProfileSyncTimer?.cancel();
+    _initialProfileSyncTimer = null;
     _profileSyncTimer?.cancel();
     _profileSyncTimer = null;
     _networkRetryTimer?.cancel();
@@ -113,7 +116,18 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
     _profileSyncTimer = Timer.periodic(const Duration(seconds: 45), (_) {
       unawaited(_syncProfileCache());
     });
-    unawaited(_syncProfileCache());
+    // Keep optional history/favorite synchronization off the critical
+    // startup path. Authorization and child folder permissions are verified
+    // separately by activateProfile() before any dashboard content appears.
+    // The timer is cancelled on sign-out, profile switch and app background.
+    final expectedGeneration = _generation;
+    _initialProfileSyncTimer = Timer(const Duration(seconds: 3), () {
+      _initialProfileSyncTimer = null;
+      if (!_disposed && _foreground && isReady &&
+          expectedGeneration == _generation) {
+        unawaited(_syncProfileCache());
+      }
+    });
   }
 
   Future<void> _syncProfileCache() async {
@@ -410,6 +424,15 @@ class FamilySessionProvider extends ChangeNotifier with WidgetsBindingObserver {
       if (verifiedProfile.type ==
           FamilyProfileType.adult) {
         if (adultPin == null) {
+          // An account containing child profiles is protected by the
+          // existing server policy in ensureDefaultProfile(). Reject this
+          // auto-unlock locally using the freshly verified profile list,
+          // instead of making a redundant RPC and another list request.
+          // A protected adult can still be opened via the parent PIN.
+          if (profiles.any((candidate) => candidate.isChild)) {
+            _finishFailedActivation(generation);
+            return false;
+          }
           final authorized = await _profileService.ensureDefaultProfile();
           if (generation != _generation ||
               _client.auth.currentUser?.id != accountId ||
